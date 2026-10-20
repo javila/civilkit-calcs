@@ -24,6 +24,9 @@ pub mod hp_triangular_matrix;
 pub mod numerics;
 pub mod vectorized;
 
+#[cfg(test)]
+mod tests;
+
 /// `new HpMatrix(int rows, int cols, Unit units)`
 pub fn new(rows: usize, cols: usize, units: OptUnit) -> CResult<Matrix> {
     if rows > MAX_SIZE || cols > MAX_SIZE {
