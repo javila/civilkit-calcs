@@ -72,7 +72,7 @@ impl<'a> Solver<'a> {
     fn fd(&mut self, x: f64) -> CResult<f64> {
         self.variable.set_number(x);
         let result = self.function()?;
-        if self.is_complex && !result.is_real() {
+        if self.is_complex && !result.as_value(Items::Result)?.is_real() {
             return Err(exceptions::CannotEvaluateFunction(&double_to_string(x)));
         }
         let real = result.as_real_checked(Items::Result)?;
@@ -86,6 +86,12 @@ impl<'a> Solver<'a> {
     fn fc(&mut self, x: Complex) -> CResult<Complex> {
         self.variable.set_number_c(x);
         let result = self.function()?;
+        if !result.is_scalar() {
+            return Err(crate::parsers::math_parser::evaluator::invalid_cast(
+                &Some(result),
+                "Calcpad.Core.IScalarValue",
+            ));
+        }
         self.units = result.units().clone();
         if result.re().is_nan() && result.im().is_nan() {
             use crate::output::OutputWriter;
@@ -103,10 +109,15 @@ impl<'a> Solver<'a> {
     fn fi(&mut self, x: f64) -> CResult<Value> {
         self.variable.set_number(x);
         let result = self.function()?;
-        if result.re().is_nan() || result.re().is_infinite() {
+        let value = match &result {
+            Value::Vector(v) => Value::Real(v.try_get(0)?),
+            Value::Matrix(m) => Value::Real(m.try_get(0, 0)?),
+            other => other.clone(),
+        };
+        if value.re().is_nan() || value.re().is_infinite() {
             return Err(exceptions::FunctionNotDefined(&double_to_string(x)));
         }
-        self.units = result.units().clone();
+        self.units = value.units().clone();
         Ok(result)
     }
 
