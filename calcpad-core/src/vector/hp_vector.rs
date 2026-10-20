@@ -1288,20 +1288,18 @@ fn find_all_indexes(h: &HpData, value: &RealValue, start: usize, rel: Relation) 
     Ok(indexes)
 }
 
-/// `HpVector.Lookup(HpVector dest, RealValue value, Relation rel)` (x is this HpVector).
-/// C# calls it with any Vector as `dest`; a non-HP destination is converted first.
+/// `hpVec.Lookup(vecY, val, rel)` as VectorCalculator calls it. `vecY` is typed `Vector`
+/// there, so C# binds the call to the base `Vector.Lookup(Vector dest, ...)`, not to
+/// `HpVector.Lookup(HpVector dest, ...)`: the result is the base one (a dense vector).
 pub fn lookup(x: &Vector, dest: &Vector, value: &RealValue, rel: Relation) -> CResult<Vector> {
+    x.lookup(dest, value, rel)
+}
+
+/// `HpVector.Lookup(HpVector dest, RealValue value, Relation rel)` (only reachable with an
+/// HpVector typed destination).
+pub fn lookup_hp(x: &Vector, dest: &Vector, value: &RealValue, rel: Relation) -> CResult<Vector> {
     let xh = snap(x);
-    let dh = if dest.is_hp() {
-        snap(dest)
-    } else {
-        // `vecX.Lookup(vecY, ...)` with vecX an HpVector: C# casts vecY to HpVector,
-        // which fails for other vectors.
-        return Err(MathParserException::unexpected(format!(
-            "Unable to cast object of type '{}' to type 'Calcpad.Core.HpVector'.",
-            dest.type_name()
-        )));
-    };
+    let dh = snap(dest);
     let indexes = find_all_indexes(&xh, value, 1, rel)?;
     let n = indexes.len();
     let mut v = HpData::new(n, n, dh.units.clone());
