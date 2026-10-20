@@ -58,7 +58,6 @@ pub(super) fn transpose(m: &Matrix) -> CResult<Matrix> {
     Ok(l)
 }
 
-#[allow(dead_code)] // used by the numerical members
 /// `RawCopy()`: note that C# returns a LowerTriangularMatrix here.
 pub(crate) fn raw_copy(m: &Matrix) -> Matrix {
     let n = m.rows_len();

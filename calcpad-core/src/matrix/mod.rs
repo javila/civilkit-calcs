@@ -1987,7 +1987,6 @@ impl Matrix {
         Ok(mm)
     }
 
-    #[allow(dead_code)] // used by the numerical members
     /// `CheckCount(ref int count)`: returns true for reverse order.
     pub(crate) fn check_count(&self, count: &mut i64) -> bool {
         if *count < 0 {
@@ -2000,7 +1999,6 @@ impl Matrix {
         false
     }
 
-    #[allow(dead_code)] // used by the numerical members
     /// `Identity(int n)`
     pub(crate) fn identity(n: usize) -> CResult<Matrix> {
         let mm = Matrix::new(n, n)?;

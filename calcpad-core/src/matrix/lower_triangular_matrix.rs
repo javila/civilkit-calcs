@@ -54,7 +54,6 @@ pub(super) fn transpose(m: &Matrix) -> CResult<Matrix> {
     Ok(u)
 }
 
-#[allow(dead_code)] // used by the numerical members
 /// `RawCopy()`
 pub(crate) fn raw_copy(m: &Matrix) -> Matrix {
     let n = m.rows_len();
