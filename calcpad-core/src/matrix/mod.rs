@@ -1613,6 +1613,9 @@ impl Matrix {
 
     /// `And()` (virtual)
     pub fn and_all(&self) -> RealValue {
+        if self.is_hp() {
+            return hp_matrix::and_all(self);
+        }
         if !self.is_structurally_consistent_type() {
             return RealValue::ZERO;
         }
@@ -1626,6 +1629,9 @@ impl Matrix {
 
     /// `Or()` (virtual)
     pub fn or_all(&self) -> RealValue {
+        if self.is_hp() {
+            return hp_matrix::or_all(self);
+        }
         for r in self.rows() {
             if r.or_all().d.abs() >= LOGICAL_ZERO {
                 return RealValue::ONE;
@@ -1636,6 +1642,9 @@ impl Matrix {
 
     /// `Xor()` (virtual)
     pub fn xor_all(&self) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::xor_all(self);
+        }
         let rows = self.rows();
         if rows.is_empty() {
             return Err(vector::index_was_outside());
@@ -1649,6 +1658,9 @@ impl Matrix {
 
     /// `Gcd()` (virtual)
     pub fn gcd(&self) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::gcd(self);
+        }
         let rows = self.rows();
         if rows.is_empty() {
             return Err(vector::index_was_outside());
@@ -1666,6 +1678,9 @@ impl Matrix {
 
     /// `Lcm()` (virtual)
     pub fn lcm(&self) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::lcm(self);
+        }
         let rows = self.rows();
         if rows.is_empty() {
             return Err(vector::index_was_outside());
@@ -1697,6 +1712,9 @@ impl Matrix {
 
     /// `Take(in RealValue x, in RealValue y)` (virtual)
     pub fn take(&self, x: &RealValue, y: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::take(self, x, y);
+        }
         let dx = x.d.round();
         let dy = y.d.round();
         if self.out_of_limits(dx, dy) {
@@ -1707,6 +1725,9 @@ impl Matrix {
 
     /// `Line(in RealValue x, in RealValue y)` (virtual)
     pub fn line(&self, x: &RealValue, y: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::line(self, x, y);
+        }
         let (dx, dy) = (x.d, y.d);
         if self.out_of_limits(dx, dy) {
             return Ok(RealValue::NAN);
@@ -1739,6 +1760,9 @@ impl Matrix {
 
     /// `Spline(in RealValue x, in RealValue y)` (virtual)
     pub fn spline(&self, x: &RealValue, y: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return hp_matrix::spline(self, x, y);
+        }
         let (dx, dy) = (x.d, y.d);
         if self.out_of_limits(dx, dy) {
             return Ok(RealValue::NAN);

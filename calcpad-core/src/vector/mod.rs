@@ -1845,6 +1845,9 @@ impl Vector {
 
     /// `And()` (virtual)
     pub fn and_all(&self) -> RealValue {
+        if self.is_hp() {
+            return self.hp_and();
+        }
         let size = self.size();
         if size == 0 || self.len() > size {
             return RealValue::ZERO;
@@ -1859,6 +1862,9 @@ impl Vector {
 
     /// `Or()` (virtual)
     pub fn or_all(&self) -> RealValue {
+        if self.is_hp() {
+            return self.hp_or();
+        }
         let size = self.size();
         if size == 0 {
             return RealValue::ZERO;
@@ -1873,6 +1879,9 @@ impl Vector {
 
     /// `Xor()` (virtual)
     pub fn xor_all(&self) -> RealValue {
+        if self.is_hp() {
+            return self.hp_xor();
+        }
         let size = self.size();
         if size == 0 {
             return RealValue::ZERO;
@@ -1934,6 +1943,9 @@ impl Vector {
 
     /// `Take(in RealValue x)` (virtual)
     pub fn take(&self, x: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return self.hp_take(x);
+        }
         let d = x.d.round();
         let len = self.len() as f64;
         if !d.is_normal() || d < calculator::DELTA_MINUS || d >= len * calculator::DELTA_PLUS {
@@ -1944,6 +1956,9 @@ impl Vector {
 
     /// `Line(in RealValue x)` (virtual)
     pub fn line(&self, x: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return self.hp_line(x);
+        }
         let d = x.d;
         let len = self.len();
         if !d.is_normal() || d < calculator::DELTA_MINUS || d >= len as f64 * calculator::DELTA_PLUS {
@@ -1963,6 +1978,9 @@ impl Vector {
 
     /// `Spline(in RealValue x)` (virtual)
     pub fn spline(&self, x: &RealValue) -> CResult<RealValue> {
+        if self.is_hp() {
+            return self.hp_spline(x);
+        }
         let mut d = x.d;
         let len = self.len() as i64;
         if !d.is_normal() || d < calculator::DELTA_MINUS || d >= len as f64 * calculator::DELTA_PLUS {
