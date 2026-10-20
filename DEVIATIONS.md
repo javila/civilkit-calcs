@@ -77,3 +77,16 @@ These are not deliberate behaviour changes, but they can make output differ:
   `Examples/Engineering/Getting Started/Functions.cpd`, where `pow(1.4999999999999998, 2)`
   is one ulp off on macOS, the plot minimum becomes exactly 1.75 and one extra grid line is
   drawn (a structural difference, so it stays FAIL).
+* **Browser build follows Calcpad.Server, the stubs follow Calcpad.Cli:** the CLI reads a
+  worksheet through `CalcpadReader.Read`, whose `EnumerateLines` drops the final line break,
+  while the server (and so `calcpad-wasm`) gives the editor text to the macro parser as it
+  is. A worksheet ending in several blank lines therefore renders one more empty `<p>` in
+  the browser than in its stub (`Tests/HP/Matrices/Functions/eigen functions.cpd`,
+  `Tests/Matrices/Operators/scalar-operator-matrix/diagonal.cpd` in the browser sample).
+  Removing one trailing newline gives the stub's output.
+* **Browser build, report fonts:** Calcpad.Server embeds its bundled fonts in every page as
+  data URLs (`BundledFonts`). `calcpad-wasm` does not compile them in (they would add about
+  640 KB to the module); the page fetches them once from `report-fonts/` and passes the same
+  `<style>` and `window.__calcpadFonts` markup with each request, so the HTML matches.
+* **Browser build, code view:** the unwrapped/macro-error listing is not syntax highlighted,
+  which is Calcpad.Server's own fallback when the Calcpad.Highlighter tokenizer fails.

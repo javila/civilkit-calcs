@@ -113,3 +113,36 @@ SIMD reduction orders, .NET overload resolution and sort algorithms to match the
 * `char.IsLetter` is approximated with `char::is_alphabetic` minus combining marks.
 * The built-in unit table is thread local. CalcpadCE keeps it process wide and
   `DefineCustomUnits` mutates the shared dimensionless unit; per process (CLI) the two agree.
+
+## Phase 3: the browser build
+
+| Upstream | Lines | calcpad-rs | Lines |
+|---|---:|---|---:|
+| Calcpad.Web/backend Services/CalcpadService.cs (Convert, ConvertCodeToHtml, WrapHtmlResult, ProcessIncludedContent), Controllers/CalcpadController.cs (ConvertToHtml, ProcessDataTextLinks, CalcpadRequest), template.html | 558 + parts | calcpad-wasm/src/lib.rs, assets/template.html (copied) | 649 |
+| Services/BundledFonts.cs (font face table) | 209 | web/calcpad-web/src/wasm/report-fonts.ts | 56 |
+| Calcpad.Server over HTTP | n/a | web/calcpad-web/src/wasm/transport.ts, engine-worker.ts, server-only.ts | 262 |
+| Calcpad.Web/frontend (calcpad-frontend, calcpad-web) | copied | web/ (main.ts +3 lines, message-bridge.ts +8 lines, vite.config.ts version import) | |
+
+The vendored frontend is upstream's except for `tools/vendor_fixups.py` (ASCII dashes and six
+backtick-quoted theme token names, both for this repository's commit hooks); re-run it after
+copying a newer upstream.
+
+Core changes: `MacroParser` keeps its error list (`errors`, the server reports macro errors
+in `X-Calcpad-Errors`), and `clock.rs` replaces `std::time` (which panics on wasm32) for
+`timer()` and the random seed; the wasm crate installs `Date.now`.
+
+Findings while proving it in Chromium:
+
+* A superseded preview render must not cancel other requests. The transport runs one job at
+  a time: an aborted queued job is dropped, an aborted running job costs a fresh worker.
+* The report template's CSP allows fonts only from `data:` and `https:`, which is why the
+  server embeds them; URL fonts were blocked, so the page builds the data URLs.
+* Chromium blocks a tab's automatic downloads after about ten when they come after an async
+  render, so the e2e check reloads the page every 8 exports.
+* Upstream's default sample (`c = √(a² + b²)`) shows "Invalid symbol" with the real server
+  too: Calcpad.Core only writes `√`, its parser does not accept it.
+
+Result: the 30 worksheet sample (24 Examples, 6 Tests) renders through the UI in 60 ms to
+5 s each (`eigen functions.cpd` is the slow one); 28 match the stubs, 2 differ by one
+trailing empty paragraph (server versus CLI input, see DEVIATIONS.md). Network capture:
+only GETs of static files from the page's own origin, no `/api/` request.
