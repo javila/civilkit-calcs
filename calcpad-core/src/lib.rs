@@ -29,6 +29,7 @@
 pub mod base_types;
 pub mod calcpad_error;
 pub mod calculator;
+pub mod clock;
 pub mod exceptions;
 pub mod extension_methods;
 pub mod markdig;

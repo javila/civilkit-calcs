@@ -560,11 +560,12 @@ pub fn lcm(v: &[Value]) -> CResult<Value> {
 }
 
 thread_local! {
-    static START: std::time::Instant = std::time::Instant::now();
+    static START: f64 = crate::clock::now_ms();
 }
 
+/// Seconds since the first call (`Stopwatch` based `timer()` in C#).
 pub fn timer() -> f64 {
-    START.with(|s| s.elapsed().as_secs_f64())
+    START.with(|s| (crate::clock::now_ms() - s) / 1000.0)
 }
 
 pub fn complex_from_real(r: RealValue) -> ComplexValue {

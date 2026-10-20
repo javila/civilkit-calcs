@@ -238,6 +238,8 @@ pub struct MacroParser<'a> {
     include_stack: HashSet<String>,
     parsed_line_number: i32,
     line_numbers: Vec<i32>,
+    /// `Errors`
+    pub errors: Vec<crate::calcpad_error::CalcpadError>,
 }
 
 struct ParseState {
@@ -260,6 +262,7 @@ impl<'a> MacroParser<'a> {
             include_stack: HashSet::new(),
             parsed_line_number: 0,
             line_numbers: Vec::new(),
+            errors: Vec::new(),
         }
     }
 
@@ -269,6 +272,7 @@ impl<'a> MacroParser<'a> {
         self.line_numbers.clear();
         self.include_stack.clear();
         self.parsed_line_number = 0;
+        self.errors.clear();
         let mut sb = String::with_capacity(source_code.len());
         let has_errors = self.parse_inner(source_code, &mut sb, 0, add_line_numbers);
         (has_errors, sb)
@@ -615,6 +619,12 @@ impl<'a> MacroParser<'a> {
         st.sb.push('\n');
         self.parsed_line_number += 1;
         st.has_errors = true;
+        self.errors.push(crate::calcpad_error::CalcpadError {
+            source_line: st.line_number,
+            output_line: self.parsed_line_number,
+            message: error_message.to_string(),
+            source: crate::calcpad_error::CalcpadErrorSource::Macro,
+        });
     }
 
     fn add_macro(&mut self, st: &mut ParseState, line_content: &str, name: &str, m: Macro, add_line_numbers: bool) {

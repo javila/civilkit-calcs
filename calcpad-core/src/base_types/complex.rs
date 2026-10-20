@@ -25,10 +25,8 @@ pub enum Types {
 
 thread_local! {
     static RAND_STATE: Cell<u64> = Cell::new({
-        let t = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0x9E37_79B9_7F4A_7C15);
+        let t = (crate::clock::now_ms() * 1e6) as u64;
+        let t = if t == 0 { 0x9E37_79B9_7F4A_7C15 } else { t };
         t | 1
     });
 }
