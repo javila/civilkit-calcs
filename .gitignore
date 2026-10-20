@@ -4,3 +4,7 @@
 *.pyc
 __pycache__/
 /tools/scratch
+# web/: npm install and build output (tools/build_wasm.sh writes public/wasm)
+node_modules/
+/web/*/dist/
+/web/calcpad-web/public/wasm/
