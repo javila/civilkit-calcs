@@ -36,6 +36,7 @@ def main() -> int:
     ap.add_argument("--diff", action="store_true", help="print diffs of failing worksheets")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--out", default=str(HERE / "out"))
+    ap.add_argument("--save", action="store_true", help="keep the rendered HTML in <out>/rendered")
     args = ap.parse_args()
 
     ref = Path(args.ref).resolve()
@@ -70,6 +71,10 @@ def main() -> int:
                 detail = f"CLI exit {r.returncode}: {r.stderr.decode(errors='replace')[:300]}"
             else:
                 html = Path(out_path).read_text(encoding="utf-8")
+                if args.save:
+                    saved = out_dir / "rendered" / (rel.replace("/", "__") + ".html")
+                    saved.parent.mkdir(parents=True, exist_ok=True)
+                    saved.write_text(html, encoding="utf-8")
                 html = re.sub(r'(src|href)\s*=\s*"\.\./\.\./\s*', r'\1="', html)
                 html = html.replace("\r\n", "\n")
                 rendered = html.encode("utf-8")
