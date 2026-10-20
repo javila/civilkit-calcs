@@ -12,14 +12,8 @@ fn render(source: &str) -> String {
 #[test]
 fn d1_failed_if_condition_runs_neither_branch() {
     let html = render("v = 5\n#if v > v_typo\n'NOT OK\n#else\n'OK\n#end if\n'after");
-    assert!(
-        !html.contains(">NOT OK "),
-        "the #if branch must not run: {html}"
-    );
-    assert!(
-        !html.contains(">OK "),
-        "the #else branch must not run: {html}"
-    );
+    assert!(!html.contains(">NOT OK "), "the #if branch must not run: {html}");
+    assert!(!html.contains(">OK "), "the #else branch must not run: {html}");
     assert!(
         html.contains(UNRESOLVED_CONDITION),
         "the block must be reported unresolved: {html}"
@@ -28,16 +22,12 @@ fn d1_failed_if_condition_runs_neither_branch() {
         html.contains("v_typo"),
         "the error must name the failing expression: {html}"
     );
-    assert!(
-        html.contains(">after "),
-        "lines after the block still run: {html}"
-    );
+    assert!(html.contains(">after "), "lines after the block still run: {html}");
 }
 
 #[test]
 fn d1_failed_else_if_condition_skips_the_rest_of_the_chain() {
-    let html =
-        render("v = 5\n#if v < 0\n'NEGATIVE\n#else if v > v_typo\n'BIG\n#else\n'SMALL\n#end if");
+    let html = render("v = 5\n#if v < 0\n'NEGATIVE\n#else if v > v_typo\n'BIG\n#else\n'SMALL\n#end if");
     assert!(!html.contains(">NEGATIVE "), "{html}");
     assert!(!html.contains(">BIG "), "{html}");
     assert!(!html.contains(">SMALL "), "{html}");
