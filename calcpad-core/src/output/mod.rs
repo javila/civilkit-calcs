@@ -3,14 +3,17 @@ pub mod html_writer;
 pub mod text_writer;
 
 use crate::base_types::complex::{Complex, Types};
+use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::{get_product_or_division_operator, UnitRef};
 use crate::base_types::value::Value;
 use crate::calculator::NEG_CHAR;
 use crate::exceptions;
 use crate::extension_methods::is_white_space;
 use crate::math_parser_exception::CResult;
+use crate::matrix::Matrix;
 use crate::netfmt;
 use crate::settings::MathSettings;
+use crate::vector::Vector;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum OutputFormat {
@@ -89,6 +92,9 @@ pub trait OutputWriter {
     fn format_complex(&self, re: f64, im: f64, format: Option<&str>) -> String;
     fn format_block(&self, sa: &[String]) -> String;
     fn close_curly_brackets(&self, sa: &str, level: i32) -> String;
+    fn format_matrix(&self, matrix: &Matrix) -> String;
+    fn format_vector(&self, vector: &Vector) -> String;
+    fn format_matrix_value(&self, value: &RealValue, zero_threshold: f64) -> String;
 
     /// `FormatUnitsText`
     fn format_units_text(&self, text: &str) -> CResult<String> {
@@ -403,4 +409,58 @@ pub fn format_operator_helper(c: char) -> String {
         '|' => " | ".to_string(),
         _ => c.to_string(),
     }
+}
+
+/// `GetMaxVisibleMatrixValue(Matrix matrix, out int row, out int col)`
+pub fn get_max_visible_matrix_value(matrix: &Matrix, max_count: i32) -> (f64, usize, usize) {
+    let mut max_abs = 0.0;
+    let max_count = max_count.max(0) as usize;
+    let m = max_count.min(matrix.row_count());
+    let n = max_count.min(matrix.col_count());
+    let last_row = matrix.row_count() as i64 - 1;
+    let last_col = matrix.col_count() as i64 - 1;
+    let (mut ii, mut jj) = (0usize, 0usize);
+    let mut check = |i: usize, j: usize| {
+        let d = matrix.get(i, j).d.abs();
+        if d > max_abs {
+            max_abs = d;
+            ii = i;
+            jj = j;
+        }
+    };
+    let row = |i: usize, check: &mut dyn FnMut(usize, usize)| {
+        for j in 0..n {
+            check(i, j);
+        }
+        if (max_count as i64) < last_col {
+            check(i, last_col as usize);
+        }
+    };
+    for i in 0..m {
+        row(i, &mut check);
+    }
+    if (max_count as i64) < last_row {
+        row(last_row as usize, &mut check);
+    }
+    (max_abs, ii, jj)
+}
+
+/// `GetMaxVisibleVectorValue(Vector vector)`
+pub fn get_max_visible_vector_value(vector: &Vector, max_count: i32) -> f64 {
+    let mut max_abs = 0.0;
+    let len = (max_count.max(0) as usize).min(vector.size());
+    for i in 0..len {
+        let d = vector.get(i).d.abs();
+        if d > max_abs {
+            max_abs = d;
+        }
+    }
+    let last = vector.len() as i64 - 1;
+    if (max_count as i64) < last {
+        let d = vector.get(last as usize).d.abs();
+        if d > max_abs {
+            max_abs = d;
+        }
+    }
+    max_abs
 }

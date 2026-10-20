@@ -1051,7 +1051,7 @@ impl Matrix {
         let mm = Matrix::new(row_count, n)?;
         let t = self.mtype();
         for i in (0..row_count).rev() {
-            let row_index = vector.get(i).d as i64;
+            let row_index = vector::cs_int(vector.get(i).d);
             if row_index < 1 || row_index > self.row_count() as i64 {
                 return Err(exceptions::IndexOutOfRange(&row_index.to_string()));
             }
@@ -1077,7 +1077,7 @@ impl Matrix {
         let m = self.row_count();
         let mm = Matrix::new(m, col_count)?;
         for j in (0..col_count).rev() {
-            let col_index = vector.get(j).d as i64;
+            let col_index = vector::cs_int(vector.get(j).d);
             if col_index < 1 || col_index > self.col_count() as i64 {
                 return Err(exceptions::IndexOutOfRange(&col_index.to_string()));
             }

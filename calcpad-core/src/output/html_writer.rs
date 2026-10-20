@@ -369,6 +369,132 @@ impl OutputWriter for HtmlWriter {
         )
     }
 
+    fn format_matrix(&self, matrix: &Matrix) -> String {
+        let max_count = self.base.max_count;
+        let mc = max_count.max(0) as usize;
+        let mut sb = String::new();
+        let nc = matrix.col_count();
+        let zero_threshold = super::get_max_visible_matrix_value(matrix, max_count).0 * 1e-14;
+        let hp = matrix.is_hp();
+        let units = if hp {
+            crate::matrix::hp_matrix::units(matrix)
+        } else {
+            None
+        };
+        let fs = units.as_ref().and_then(|u| u.format_string());
+        sb.push_str("<span class=\"matrix\">\n");
+        let nr = matrix.row_count();
+        let mut i = 0usize;
+        while i < nr {
+            sb.push_str("<span class=\"tr\"><span class=\"td\"></span>");
+            if i == mc {
+                for _ in 0..mc.min(nc) {
+                    sb.push_str("<span class=\"td\">\u{22EE}</span>");
+                }
+                if nc > mc {
+                    sb.push_str("<span class=\"td\">\u{22F1}</span><span class=\"td\">\u{22EE}</span>");
+                }
+                sb.push_str("<span class=\"td\"></span></span><span class=\"tr\"><span class=\"td\"></span>");
+                i = nr - 1;
+            }
+            let mut j = 0usize;
+            while j < nc {
+                if j == mc {
+                    sb.push_str("<span class=\"td\">\u{22EF}</span>");
+                    j = nc - 1;
+                }
+                let s = if !hp {
+                    self.format_matrix_value(&matrix.get(i, j), zero_threshold)
+                } else {
+                    let d = matrix.get(i, j).d;
+                    self.format_real(
+                        d,
+                        fs.as_deref(),
+                        self.base.zero_small_elements && d.abs() < zero_threshold,
+                    )
+                };
+                sb.push_str("<span class=\"td\">");
+                sb.push_str(&s);
+                sb.push_str("</span>");
+                j += 1;
+            }
+            sb.push_str("<span class=\"td\"></span></span>\n");
+            i += 1;
+        }
+        sb.push_str("</span>\n");
+        if let Some(u) = &units {
+            sb.push(HAIR_SPACE);
+            sb.push_str(&u.html());
+        }
+        sb
+    }
+
+    fn format_vector(&self, vector: &Vector) -> String {
+        let div = VECTOR_SPACING;
+        let max_count = self.base.max_count;
+        let mc = max_count.max(0) as usize;
+        let mut sb = String::new();
+        const TOL: f64 = 1e-14;
+        let mut zero_threshold = super::get_max_visible_vector_value(vector, max_count) * TOL;
+        if zero_threshold > TOL {
+            zero_threshold = TOL;
+        }
+        let hp = vector.is_hp();
+        let units = if hp { vector.hp_units() } else { None };
+        let fs = units.as_ref().and_then(|u| u.format_string());
+        let append = |sb: &mut String, index: usize| {
+            if !hp {
+                sb.push_str(&self.format_matrix_value(&vector.get(index), zero_threshold));
+            } else {
+                let d = vector.get(index).d;
+                sb.push_str(&self.format_real(
+                    d,
+                    fs.as_deref(),
+                    self.base.zero_small_elements && d.abs() < zero_threshold,
+                ));
+            }
+        };
+        let len = vector.len();
+        sb.push_str("<b class=\"b0\">[</b>");
+        for i in 0..len {
+            if i > 0 {
+                sb.push_str(div);
+            }
+            if i == mc {
+                let n = len as i64 - mc as i64;
+                let skipped = n - (n - 1).signum();
+                sb.push_str(&format!("<span title=\"{} elements skipped.\">...</span>", skipped));
+                sb.push_str(div);
+                break;
+            }
+            append(&mut sb, i);
+        }
+        let last = len as i64 - 1;
+        if (max_count as i64) < last {
+            append(&mut sb, last as usize);
+        }
+        sb.push_str("<b class=\"b0\">]</b>");
+        if let Some(u) = &units {
+            sb.push(HAIR_SPACE);
+            sb.push_str(&u.html());
+        }
+        sb
+    }
+
+    fn format_matrix_value(&self, value: &RealValue, zero_threshold: f64) -> String {
+        let d = value.d;
+        let fs = value.units.as_ref().and_then(|u| u.format_string());
+        let s = self.format_real(
+            d,
+            fs.as_deref(),
+            self.base.zero_small_elements && d.abs() < zero_threshold,
+        );
+        match &value.units {
+            None => s,
+            Some(u) => format!("{}{}{}", s, THIN_SPACE, u.html()),
+        }
+    }
+
     fn format_block(&self, sa: &[String]) -> String {
         format!(
             "<small class=\"arr\">\u{1F780}</small><span class=\"block\">{}</span>",

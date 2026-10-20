@@ -2,7 +2,6 @@
 use std::rc::Rc;
 
 use super::custom_function::CustomFunctionRef;
-use super::input::out_of_scope;
 use super::is_assignment;
 use super::tokens::{Rpn, TokenKind, TokenRef, TokenTypes};
 use super::MathParser;
@@ -10,7 +9,7 @@ use crate::base_types::complex_value::ComplexValue;
 use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::{Field, OptUnit, Unit, UnitRef};
 use crate::base_types::value::Value;
-use crate::calculator::{index_out_of_range, NEG_STR};
+use crate::calculator::{index_out_of_range, matrix_calculator as mc, vector_calculator as vc, NEG_STR};
 use crate::exceptions;
 use crate::math_parser_exception::CResult;
 use crate::matrix::{hp_matrix, Matrix};
@@ -37,6 +36,41 @@ impl Stack {
     fn at_base(&self) -> bool {
         self.len() == self.base
     }
+    /// `StackPopAndExpandValues(count)`: scalars, vector elements and matrix elements.
+    fn pop_and_expand_values(&mut self, count: usize) -> CResult<Vec<Value>> {
+        let items = self.pop_values(count)?;
+        let mut list = Vec::with_capacity(count);
+        for ival in items {
+            match ival {
+                Value::Real(_) | Value::Complex(_) => list.push(ival),
+                Value::Vector(v) => {
+                    for j in 0..v.len() {
+                        list.push(Value::Real(v.get(j)));
+                    }
+                }
+                Value::Matrix(m) => {
+                    for i in 0..m.row_count() {
+                        for j in 0..m.col_count() {
+                            list.push(Value::Real(m.get(i, j)));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(list)
+    }
+
+    /// `StackPopAndExpandRealValues(count)`: the `(RealValue)` cast fails on complex values.
+    fn pop_and_expand_real_values(&mut self, count: usize) -> CResult<Vec<RealValue>> {
+        let list = self.pop_and_expand_values(count)?;
+        list.into_iter()
+            .map(|v| match v {
+                Value::Real(r) => Ok(r),
+                other => Err(invalid_cast(&Some(other), "Calcpad.Core.RealValue")),
+            })
+            .collect()
+    }
+
     fn pop_values(&mut self, count: usize) -> CResult<Vec<Value>> {
         let mut v = Vec::with_capacity(count);
         for _ in 0..count {
@@ -44,6 +78,18 @@ impl Stack {
         }
         v.reverse();
         Ok(v)
+    }
+}
+
+/// .NET InvalidCastException for an explicit cast of a boxed value.
+pub(crate) fn invalid_cast(v: &Option<Value>, target: &str) -> crate::math_parser_exception::MathParserException {
+    match v {
+        Some(v) => crate::math_parser_exception::MathParserException::unexpected(format!(
+            "Unable to cast object of type '{}' to type '{}'.",
+            v.to_cs_string_type(),
+            target
+        )),
+        None => crate::vector::null_reference(),
     }
 }
 
@@ -96,8 +142,25 @@ impl MathParser {
                     stack.push(Value::evaluate_function(self.calc(), index, &a)?);
                 }
                 TokenTypes::VectorFunction | TokenTypes::MatrixFunction | TokenTypes::MatrixOptionalFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
+                    if stack.at_base() {
+                        return Err(exceptions::MissingOperand());
+                    }
+                    let a = stack.pop()?;
+                    let index = t.borrow().index;
+                    let r = match tt {
+                        TokenTypes::VectorFunction => vc::evaluate_vector_function(index, &a)?,
+                        TokenTypes::MatrixOptionalFunction => {
+                            mc::evaluate_matrix_iterative_function(index, &a, &Value::zero(), self.tol()?)?
+                        }
+                        _ => {
+                            if index == mc::LU_INDEX {
+                                self.evaluate_lu_decomposition(&a)?
+                            } else {
+                                mc::evaluate_matrix_function(index, &a)?
+                            }
+                        }
+                    };
+                    stack.push(r);
                 }
                 TokenTypes::Operator if is_assignment(&content) => {
                     if stack.at_base() {
@@ -124,58 +187,84 @@ impl MathParser {
                     stack.push(r);
                 }
                 TokenTypes::VectorFunction2 | TokenTypes::MatrixFunction2 | TokenTypes::MatrixIterativeFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
+                    if stack.at_base() {
+                        return Err(exceptions::MissingOperand());
+                    }
+                    let b = stack.pop()?;
+                    if stack.at_base() {
+                        return Err(exceptions::MissingOperand());
+                    }
+                    let c = stack.pop()?;
+                    let index = t.borrow().index;
+                    let r = match tt {
+                        TokenTypes::VectorFunction2 => vc::evaluate_vector_function2(index, &c, &b)?,
+                        TokenTypes::MatrixIterativeFunction => {
+                            mc::evaluate_matrix_iterative_function(index, &c, &b, self.tol()?)?
+                        }
+                        _ => mc::evaluate_matrix_function2(index, &c, &b)?,
+                    };
+                    stack.push(r);
                 }
-                TokenTypes::Function3 => {
+                TokenTypes::Function3 | TokenTypes::VectorFunction3 | TokenTypes::MatrixFunction3 => {
                     let c = stack.pop()?;
                     let b = stack.pop()?;
                     let a = stack.pop()?;
                     let index = t.borrow().index;
-                    stack.push(self.evaluator_calc().evaluate_function3(index, &a, &b, &c)?);
+                    let r = match tt {
+                        TokenTypes::Function3 => self.evaluator_calc().evaluate_function3(index, &a, &b, &c)?,
+                        TokenTypes::VectorFunction3 => vc::evaluate_vector_function3(index, &a, &b, &c)?,
+                        _ => mc::evaluate_matrix_function3(index, &a, &b, &c)?,
+                    };
+                    stack.push(r);
                 }
-                TokenTypes::VectorFunction3
-                | TokenTypes::MatrixFunction3
-                | TokenTypes::MatrixFunction4
-                | TokenTypes::MatrixFunction5 => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
+                TokenTypes::MatrixFunction4 => {
+                    let d = stack.pop()?;
+                    let c = stack.pop()?;
+                    let b = stack.pop()?;
+                    let a = stack.pop()?;
+                    let index = t.borrow().index;
+                    stack.push(mc::evaluate_matrix_function4(index, &a, &b, &c, &d)?);
+                }
+                TokenTypes::MatrixFunction5 => {
+                    let e = stack.pop()?;
+                    let d = stack.pop()?;
+                    let c = stack.pop()?;
+                    let b = stack.pop()?;
+                    let a = stack.pop()?;
+                    let index = t.borrow().index;
+                    stack.push(mc::evaluate_matrix_function5(index, &a, &b, &c, &d, &e)?);
                 }
                 TokenTypes::Interpolation => {
                     let (index, pc) = {
                         let tb = t.borrow();
                         (tb.index, tb.parameter_count())
                     };
-                    let params = stack.pop_values(pc.max(0) as usize)?;
-                    stack.push(self.evaluator_calc().evaluate_interpolation(index, &params)?);
+                    let r = self.evaluate_interpolation_token(index, pc, &mut stack)?;
+                    stack.push(r);
                 }
-                TokenTypes::MultiFunction => {
+                TokenTypes::MultiFunction | TokenTypes::VectorMultiFunction | TokenTypes::MatrixMultiFunction => {
                     let (index, pc) = {
                         let tb = t.borrow();
                         (tb.index, tb.parameter_count())
                     };
-                    let params = stack.pop_values(pc.max(0) as usize)?;
-                    if index == crate::calculator::SWITCH_INDEX {
-                        stack.push(Value::evaluate_switch(&params));
-                    } else {
-                        stack.push(self.evaluator_calc().evaluate_multi_function(index, &params)?);
-                    }
-                }
-                TokenTypes::VectorMultiFunction | TokenTypes::MatrixMultiFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
+                    let r = self.evaluate_multi_function_token(tt, index, pc, &mut stack)?;
+                    stack.push(r);
                 }
                 TokenTypes::CustomFunction => {
                     let v = self.evaluate_function_token(t, &mut stack)?;
                     stack.push(v);
                 }
-                TokenTypes::Vector
-                | TokenTypes::RowDivisor
-                | TokenTypes::Matrix
-                | TokenTypes::VectorIndex
-                | TokenTypes::MatrixIndex => {
-                    self.note_out_of_scope("vectors and matrices");
-                    return Err(out_of_scope("Vectors and matrices"));
+                TokenTypes::Vector | TokenTypes::RowDivisor => {
+                    let r = self.evaluate_vector_token(t, &mut stack)?;
+                    stack.push(r);
+                }
+                TokenTypes::Matrix => {
+                    let r = self.evaluate_matrix_token(t, &mut stack)?;
+                    stack.push(r);
+                }
+                TokenTypes::VectorIndex | TokenTypes::MatrixIndex => {
+                    let r = self.evaluate_index_token(t, &mut stack)?;
+                    stack.push(r);
                 }
                 TokenTypes::Solver => {
                     let index = t.borrow().index;
@@ -197,6 +286,139 @@ impl MathParser {
         Ok(Value::zero())
     }
 
+    /// `EvaluateLuDecomposition(a, variables)`: stores the permutation in the variable `ind`.
+    fn evaluate_lu_decomposition(&self, a: &Value) -> CResult<Value> {
+        let existing = self.variables.borrow().get("ind").cloned();
+        let hp_vector = match existing.as_ref().and_then(|v| v.value()) {
+            Some(Value::Vector(v)) if v.is_hp() => v,
+            _ => {
+                let v = crate::vector::hp_vector::new_ls(0, 0, None);
+                self.variables.borrow_mut().insert(
+                    "ind".to_string(),
+                    crate::base_types::variable::Variable::with_value(Value::Vector(v.clone())),
+                );
+                v
+            }
+        };
+        mc::lu_decomposition(a, &hp_vector)
+    }
+
+    /// `EvaluateInterpolationToken(t)`
+    fn evaluate_interpolation_token(&self, index: i64, param_count: i32, stack: &mut Stack) -> CResult<Value> {
+        if param_count == 2 {
+            if let Some(Value::Vector(vec1)) = stack.values.last().cloned() {
+                stack.pop()?;
+                let ival = stack.pop()?;
+                if let Value::Real(x) = &ival {
+                    return vc::evaluate_interpolation(index, x, &vec1);
+                }
+                return Err(exceptions::CannotInterpolateWithNonScalarValue());
+            }
+        }
+        if param_count == 3 {
+            if let Some(Value::Matrix(matrix)) = stack.values.last().cloned() {
+                stack.pop()?;
+                let ival = stack.pop()?;
+                if let Value::Real(x) = &ival {
+                    let ival = stack.pop()?;
+                    if let Value::Real(y) = &ival {
+                        return mc::evaluate_interpolation(index, x, y, &matrix);
+                    }
+                }
+                return Err(exceptions::CannotInterpolateWithNonScalarValue());
+            }
+        }
+        let params = stack.pop_and_expand_values(param_count.max(0) as usize)?;
+        self.evaluator_calc().evaluate_interpolation(index, &params)
+    }
+
+    /// `EvaluateMultiFunctionToken(t)`
+    fn evaluate_multi_function_token(
+        &self,
+        tt: TokenTypes,
+        index: i64,
+        param_count: i32,
+        stack: &mut Stack,
+    ) -> CResult<Value> {
+        if tt == TokenTypes::MultiFunction {
+            if param_count == 1 {
+                match stack.values.last().cloned() {
+                    Some(Value::Vector(v)) if stack.len() > stack.base => {
+                        stack.pop()?;
+                        return vc::evaluate_multi_function(index, &v);
+                    }
+                    Some(Value::Matrix(m)) if stack.len() > stack.base => {
+                        stack.pop()?;
+                        return mc::evaluate_multi_function(index, &m);
+                    }
+                    _ => {}
+                }
+            }
+            if index == crate::calculator::SWITCH_INDEX {
+                let params = stack.pop_values(param_count.max(0) as usize)?;
+                return Value::evaluate_switch(&params);
+            }
+            let params = stack.pop_and_expand_values(param_count.max(0) as usize)?;
+            return self.evaluator_calc().evaluate_multi_function(index, &params);
+        }
+        let params = stack.pop_values(param_count.max(0) as usize)?;
+        if tt == TokenTypes::VectorMultiFunction {
+            return vc::evaluate_vector_multi_function(index, &params);
+        }
+        mc::evaluate_matrix_multi_function(index, &params)
+    }
+
+    /// `EvaluateVectorToken(t)`: a vector literal, or a variable that holds a vector.
+    fn evaluate_vector_token(&self, t: &TokenRef, stack: &mut Stack) -> CResult<Value> {
+        let is_literal = matches!(t.borrow().kind, TokenKind::Vector(_));
+        if is_literal {
+            let count = t.borrow().index.max(0) as usize;
+            let values = stack.pop_and_expand_real_values(count)?;
+            let v = Vector::from_values(values)?;
+            t.borrow_mut().kind = TokenKind::Vector(Some(v.clone()));
+            return Ok(Value::Vector(v));
+        }
+        self.evaluate_token0(t)
+    }
+
+    /// `EvaluateMatrixToken(t)`: a matrix literal, or a variable that holds a matrix.
+    fn evaluate_matrix_token(&self, t: &TokenRef, stack: &mut Stack) -> CResult<Value> {
+        let is_literal = matches!(t.borrow().kind, TokenKind::Matrix(_));
+        if is_literal {
+            let count = (t.borrow().index / crate::vector::MAX_LENGTH) as usize;
+            let values = stack.pop_values(count)?;
+            let m = mc::join_rows(&values)?;
+            t.borrow_mut().kind = TokenKind::Matrix(Some(m.clone()));
+            return Ok(Value::Matrix(m));
+        }
+        self.evaluate_token0(t)
+    }
+
+    /// `EvaluateIndexToken(t)`
+    fn evaluate_index_token(&self, t: &TokenRef, stack: &mut Stack) -> CResult<Value> {
+        let value = stack.pop()?;
+        let i = crate::vector::cs_int(value.as_value(exceptions::Items::Index)?.re());
+        let tt = t.borrow().ttype;
+        if tt == TokenTypes::VectorIndex {
+            let vector = stack.pop()?.as_vector(exceptions::Items::IndexTarget)?;
+            if i < 1 || i > vector.len() as i64 {
+                return Err(exceptions::IndexOutOfRange(&i.to_string()));
+            }
+            t.borrow_mut().index = i;
+            return Ok(Value::Real(vector.get(i as usize - 1)));
+        }
+        let value = stack.pop()?;
+        let ii = crate::vector::cs_int(value.as_value(exceptions::Items::Index)?.re());
+        let matrix = stack.pop()?.as_matrix(exceptions::Items::IndexTarget)?;
+        let j = i;
+        let i = ii;
+        if i < 1 || i > matrix.row_count() as i64 || j < 1 || j > matrix.col_count() as i64 {
+            return Err(exceptions::IndexOutOfRange(&format!("{}, {}", i, j)));
+        }
+        t.borrow_mut().index = i * crate::vector::MAX_LENGTH + j;
+        Ok(Value::Real(matrix.get(i as usize - 1, j as usize - 1)))
+    }
+
     /// `EvaluateToken(Token t)` for Unit, Variable and Input tokens.
     pub(crate) fn evaluate_token0(&self, t: &TokenRef) -> CResult<Value> {
         let tt = t.borrow().ttype;
@@ -210,6 +432,17 @@ impl MathParser {
                 }
             }
             TokenTypes::Variable => self.evaluate_variable_token(t),
+            TokenTypes::Vector | TokenTypes::Matrix => {
+                let lit = match &t.borrow().kind {
+                    TokenKind::Vector(Some(v)) => Some(Value::Vector(v.clone())),
+                    TokenKind::Matrix(Some(m)) => Some(Value::Matrix(m.clone())),
+                    _ => None,
+                };
+                match lit {
+                    Some(v) => Ok(v),
+                    None => self.evaluate_variable_token(t),
+                }
+            }
             TokenTypes::Input if t.borrow().content == "?" => Err(exceptions::UndefinedInputField()),
             _ => Ok(t.borrow().token_value().cloned().unwrap_or_else(Value::zero)),
         }
@@ -255,8 +488,57 @@ impl MathParser {
         };
         if is_var {
             if t0_type == TokenTypes::Vector || t0_type == TokenTypes::Matrix {
-                self.note_out_of_scope("vector/matrix element assignment");
-                return Err(out_of_scope("Vector and matrix element assignment"));
+                let (mut i, mut j) = (-1i64, -1i64);
+                for t in rpn.iter() {
+                    let t = t.borrow();
+                    if t.ttype == TokenTypes::VectorIndex && t.content == content {
+                        i = t.index;
+                        break;
+                    }
+                    if t.ttype == TokenTypes::MatrixIndex && t.content == content {
+                        i = t.index / crate::vector::MAX_LENGTH;
+                        j = t.index % crate::vector::MAX_LENGTH;
+                        break;
+                    }
+                }
+                let variable = t0.borrow().variable_ref().unwrap();
+                let value = variable.value();
+                if t0_type == TokenTypes::Vector {
+                    let vector = match value {
+                        Some(Value::Vector(v)) => v,
+                        other => return Err(invalid_cast(&other, "Calcpad.Core.Vector")),
+                    };
+                    if i < 1 || i > vector.len() as i64 {
+                        return Err(exceptions::IndexOutOfRange(&i.to_string()));
+                    }
+                    match &b {
+                        Value::Real(rb) => {
+                            let old = vector.get(i as usize - 1);
+                            *self.backup_variable.borrow_mut() =
+                                (Some(format!("{}.{}", content, i)), Some(Value::Real(old)));
+                            vector.set(i as usize - 1, rb.clone())?;
+                        }
+                        _ => return Err(exceptions::CannotAssignVectorToScalar()),
+                    }
+                } else {
+                    let matrix = match value {
+                        Some(Value::Matrix(m)) => m,
+                        other => return Err(invalid_cast(&other, "Calcpad.Core.Matrix")),
+                    };
+                    if i < 1 || i > matrix.row_count() as i64 || j < 1 || j > matrix.col_count() as i64 {
+                        return Err(exceptions::IndexOutOfRange(&format!("{},{}", i, j)));
+                    }
+                    match &b {
+                        Value::Real(rb) => {
+                            let old = matrix.get(i as usize - 1, j as usize - 1);
+                            *self.backup_variable.borrow_mut() =
+                                (Some(format!("{}.{}.{}", content, i, j)), Some(Value::Real(old)));
+                            matrix.set(i as usize - 1, j as usize - 1, rb.clone())?;
+                        }
+                        _ => return Err(exceptions::CannotAssignVectorToScalar()),
+                    }
+                }
+                variable.change();
             } else if t0_type == TokenTypes::Variable {
                 let var = t0.borrow().variable_ref().unwrap();
                 *self.backup_variable.borrow_mut() = (Some(content), var.value());

@@ -153,6 +153,138 @@ impl OutputWriter for TextWriter {
         self.format_complex_helper(re, im, format)
     }
 
+    fn format_matrix(&self, matrix: &Matrix) -> String {
+        let max_count = self.base.max_count;
+        let mc = max_count.max(0) as usize;
+        let mut sb = String::from("[");
+        let nc = matrix.col_count() as i64 - 1;
+        let (max, row, col) = super::get_max_visible_matrix_value(matrix, max_count);
+        let zero_threshold = max * 1e-14;
+        let len = self
+            .format_matrix_value(&matrix.get(row, col), zero_threshold)
+            .encode_utf16()
+            .count();
+        let pad = |s: &str| -> String {
+            let l = s.encode_utf16().count();
+            if l >= len {
+                s.to_string()
+            } else {
+                format!("{}{}", " ".repeat(len - l), s)
+            }
+        };
+        let cont = pad("...");
+        let hp = matrix.is_hp();
+        let units = if hp {
+            crate::matrix::hp_matrix::units(matrix)
+        } else {
+            None
+        };
+        let fs = units.as_ref().and_then(|u| u.format_string());
+        let nr = matrix.row_count() as i64 - 1;
+        let mut i = 0i64;
+        while i <= nr {
+            if i == mc as i64 {
+                for _ in 0..(mc as i64).min(nc).max(0) {
+                    sb.push_str(&cont);
+                }
+                i = nr;
+            }
+            let mut j = 0i64;
+            while j <= nc {
+                if j == mc as i64 {
+                    sb.push_str(&cont);
+                    j = nc;
+                }
+                let s = if !hp {
+                    self.format_matrix_value(&matrix.get(i as usize, j as usize), zero_threshold)
+                } else {
+                    let d = matrix.get(i as usize, j as usize).d;
+                    self.format_real(
+                        d,
+                        fs.as_deref(),
+                        self.base.zero_small_elements && d.abs() < zero_threshold,
+                    )
+                };
+                sb.push_str(&pad(&s));
+                if j < nc {
+                    sb.push_str("  ");
+                }
+                j += 1;
+            }
+            if i < nr {
+                sb.push_str(" |");
+            }
+            i += 1;
+        }
+        sb.push(']');
+        if let Some(u) = &units {
+            sb.push_str(&u.text());
+        }
+        sb
+    }
+
+    fn format_vector(&self, vector: &Vector) -> String {
+        let div = "  ";
+        let max_count = self.base.max_count;
+        let mc = max_count.max(0) as usize;
+        let mut sb = String::from("[");
+        const TOL: f64 = 1e-14;
+        let mut zero_threshold = super::get_max_visible_vector_value(vector, max_count) * TOL;
+        if zero_threshold > TOL {
+            zero_threshold = TOL;
+        }
+        let hp = vector.is_hp();
+        let units = if hp { vector.hp_units() } else { None };
+        let fs = units.as_ref().and_then(|u| u.format_string());
+        let append = |sb: &mut String, index: usize| {
+            if !hp {
+                sb.push_str(&self.format_matrix_value(&vector.get(index), zero_threshold));
+            } else {
+                let d = vector.get(index).d;
+                sb.push_str(&self.format_real(
+                    d,
+                    fs.as_deref(),
+                    self.base.zero_small_elements && d.abs() < zero_threshold,
+                ));
+            }
+        };
+        let len = vector.len();
+        for i in 0..len {
+            if i > 0 {
+                sb.push_str(div);
+            }
+            if i == mc {
+                sb.push_str("...");
+                sb.push_str(div);
+                break;
+            }
+            append(&mut sb, i);
+        }
+        let last = len as i64 - 1;
+        if (max_count as i64) < last {
+            append(&mut sb, last as usize);
+        }
+        sb.push(']');
+        if let Some(u) = &units {
+            sb.push_str(&u.text());
+        }
+        sb
+    }
+
+    fn format_matrix_value(&self, value: &RealValue, zero_threshold: f64) -> String {
+        let d = value.d;
+        let fs = value.units.as_ref().and_then(|u| u.format_string());
+        let s = self.format_real(
+            d,
+            fs.as_deref(),
+            self.base.zero_small_elements && d.abs() < zero_threshold,
+        );
+        match &value.units {
+            None => s,
+            Some(u) => format!("{}{}", s, u.text()),
+        }
+    }
+
     fn format_block(&self, sa: &[String]) -> String {
         format!(" \u{2502} {}", sa.join(" \u{2502} "))
     }

@@ -4,6 +4,8 @@ use std::rc::Rc;
 
 use crate::base_types::value::Value;
 use crate::base_types::variable::VarRef;
+use crate::matrix::Matrix;
+use crate::vector::Vector;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ValueTypes {
@@ -77,8 +79,10 @@ pub enum TokenKind {
     },
     Value(Value),
     Variable(Option<VarRef>),
-    Vector,
-    Matrix,
+    /// `VectorToken.Vector` (set when the literal is evaluated)
+    Vector(Option<Vector>),
+    /// `MatrixToken.Matrix` (set when the literal is evaluated)
+    Matrix(Option<Matrix>),
 }
 
 #[derive(Clone, Debug)]

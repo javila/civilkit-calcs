@@ -9,7 +9,7 @@ use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::Unit;
 use crate::base_types::value::Value;
 use crate::base_types::variable::Variable;
-use crate::calculator::{self, out_of_scope_names as oos, NEG_STR, OPERATOR_ORDER, UNIT_MULT_ORDER};
+use crate::calculator::{self, NEG_STR, OPERATOR_ORDER, UNIT_MULT_ORDER};
 use crate::exceptions;
 use crate::extension_methods::{is_letter as char_is_letter, trim};
 use crate::math_parser_exception::{CResult, MathParserException};
@@ -235,8 +235,26 @@ impl MathParser {
                         if is_complex {
                             return Err(exceptions::ComplexVectorsAndMatricesNotSupported());
                         }
-                        self.note_out_of_scope("vector/matrix element access");
-                        return Err(out_of_scope("Vector and matrix element access"));
+                        let s = token_literal.get(&ex);
+                        let tok = match self.make_vector_or_matrix_token(&s) {
+                            Some(t) => t,
+                            None => {
+                                let mut t = Token::variable(s.clone(), None);
+                                t.ttype = TokenTypes::Array;
+                                t
+                            }
+                        };
+                        let ttype = tok.ttype;
+                        let tok = tok.into_ref();
+                        tokens.push(tok.clone());
+                        t = Some(tok);
+                        token_literal.reset(i);
+                        tt = match ttype {
+                            TokenTypes::Vector => TokenTypes::VectorIndex,
+                            TokenTypes::Matrix => TokenTypes::MatrixIndex,
+                            _ => TokenTypes::ArrayIndex,
+                        };
+                        tokens.push(Token::new(s, tt).into_ref());
                     } else {
                         token_literal.expand();
                     }
@@ -297,6 +315,25 @@ impl MathParser {
                         if tt == TokenTypes::BracketLeft {
                             let must_exist = self.is_calculation.get() && !tokens.is_empty();
                             let tok = self.make_function_token(&s, must_exist)?;
+                            if is_complex {
+                                use TokenTypes::*;
+                                let ends_units = tok.content.to_lowercase().ends_with("units");
+                                let bad = match tok.ttype {
+                                    VectorFunction | VectorFunction2 | VectorFunction3 | VectorMultiFunction => true,
+                                    MatrixFunction | MatrixFunction2 => !ends_units,
+                                    MatrixFunction3
+                                    | MatrixFunction4
+                                    | MatrixFunction5
+                                    | MatrixOptionalFunction
+                                    | MatrixIterativeFunction
+                                    | MatrixMultiFunction
+                                    | Array => true,
+                                    _ => false,
+                                };
+                                if bad {
+                                    return Err(exceptions::ComplexVectorsAndMatricesNotSupported());
+                                }
+                            }
                             t = Some(tok.into_ref());
                         } else {
                             let prev_is_input_or_const = t.as_ref().is_some_and(|x| {
@@ -393,11 +430,8 @@ impl MathParser {
                                 }
                                 self.assignment_index.set(count);
                             }
-                        } else if tt == TokenTypes::SquareBracketLeft {
-                            if is_complex {
-                                return Err(exceptions::ComplexVectorsAndMatricesNotSupported());
-                            }
-                            self.note_out_of_scope("vector/matrix literal");
+                        } else if tt == TokenTypes::SquareBracketLeft && is_complex {
+                            return Err(exceptions::ComplexVectorsAndMatricesNotSupported());
                         }
                         new_tok = Token::new(c.to_string(), tt);
                     }
@@ -483,33 +517,29 @@ impl MathParser {
             t.ttype = TokenTypes::Interpolation;
             return Ok(t);
         }
-        let vm: [(&[&str], TokenTypes, bool); 11] = [
-            (&oos::VECTOR_FUNCTIONS, TokenTypes::VectorFunction, false),
-            (&oos::VECTOR_FUNCTIONS2, TokenTypes::VectorFunction2, false),
-            (&oos::VECTOR_FUNCTIONS3, TokenTypes::VectorFunction3, false),
-            (&oos::VECTOR_MULTI_FUNCTIONS, TokenTypes::VectorMultiFunction, true),
-            (&oos::MATRIX_FUNCTIONS, TokenTypes::MatrixFunction, false),
-            (&oos::MATRIX_FUNCTIONS2, TokenTypes::MatrixFunction2, false),
-            (&oos::MATRIX_FUNCTIONS3, TokenTypes::MatrixFunction3, false),
-            (&oos::MATRIX_FUNCTIONS4, TokenTypes::MatrixFunction4, false),
-            (&oos::MATRIX_FUNCTIONS5, TokenTypes::MatrixFunction5, false),
-            (
-                &oos::MATRIX_ITERATIVE_FUNCTIONS,
-                TokenTypes::MatrixIterativeFunction,
-                false,
-            ),
-            (&oos::MATRIX_MULTI_FUNCTIONS, TokenTypes::MatrixMultiFunction, true),
+        use crate::calculator::{matrix_calculator as mc, vector_calculator as vc};
+        let lookups: [(fn(&str) -> Option<i64>, TokenTypes, bool); 11] = [
+            (vc::function_index, TokenTypes::VectorFunction, false),
+            (vc::function2_index, TokenTypes::VectorFunction2, false),
+            (vc::function3_index, TokenTypes::VectorFunction3, false),
+            (vc::multi_function_index, TokenTypes::VectorMultiFunction, true),
+            (mc::function_index, TokenTypes::MatrixFunction, false),
+            (mc::function2_index, TokenTypes::MatrixFunction2, false),
+            (mc::function3_index, TokenTypes::MatrixFunction3, false),
+            (mc::function4_index, TokenTypes::MatrixFunction4, false),
+            (mc::function5_index, TokenTypes::MatrixFunction5, false),
+            (mc::iterative_function_index, TokenTypes::MatrixIterativeFunction, false),
+            (mc::multi_function_index, TokenTypes::MatrixMultiFunction, true),
         ];
-        for (names, tt, is_multi) in vm {
-            if let Some(i) = oos::find(names, s) {
-                self.note_out_of_scope(&format!("vector/matrix function {}", s));
+        for (lookup, tt, is_multi) in lookups {
+            if let Some(i) = lookup(s) {
                 let mut t = if is_multi {
                     Token::function(s)
                 } else {
                     Token::new(s, tt)
                 };
                 t.ttype = tt;
-                t.index = i as i64;
+                t.index = i;
                 return Ok(t);
             }
         }
@@ -517,7 +547,6 @@ impl MathParser {
         if index < 0 {
             if must_exist {
                 if let Some(stripped) = s.strip_suffix('.') {
-                    self.note_out_of_scope("vector/matrix element access");
                     let mut t = Token::variable(stripped, None);
                     t.ttype = TokenTypes::Array;
                     return Ok(t);
@@ -533,6 +562,35 @@ impl MathParser {
         let mut t = Token::new(s, TokenTypes::CustomFunction);
         t.index = index;
         Ok(t)
+    }
+
+    /// `MakeVectorOrMatrixToken(string s)`
+    fn make_vector_or_matrix_token(&self, s: &str) -> Option<Token> {
+        let stack: Vec<VarDict> = self.local_variables.borrow().iter().rev().cloned().collect();
+        for vars in stack {
+            let found = vars.borrow().get(s).cloned();
+            if let Some(v) = found {
+                return match v.value() {
+                    Some(Value::Vector(_)) => {
+                        let mut t = Token::variable(s, Some(v));
+                        t.ttype = TokenTypes::Vector;
+                        Some(t)
+                    }
+                    Some(Value::Matrix(_)) => {
+                        let mut t = Token::variable(s, Some(v));
+                        t.ttype = TokenTypes::Matrix;
+                        Some(t)
+                    }
+                    None if !self.is_enabled.get() || !Rc::ptr_eq(&vars, &self.variables) => {
+                        let mut t = Token::variable(s, None);
+                        t.ttype = TokenTypes::Array;
+                        Some(t)
+                    }
+                    _ => None,
+                };
+            }
+        }
+        None
     }
 
     fn create_variable(&self, vt: &TokenRef) {
@@ -859,7 +917,7 @@ pub fn get_rpn(input: &[TokenRef]) -> Vec<TokenRef> {
                     } else if nt == TokenTypes::SquareBracketLeft {
                         if tt == TokenTypes::SquareBracketRight || tt == TokenTypes::RowDivisor {
                             let mut vt = Token::new("", TokenTypes::Vector);
-                            vt.kind = TokenKind::Vector;
+                            vt.kind = TokenKind::Vector(None);
                             vt.index = vector_stack[tovs];
                             let vt = vt.into_ref();
                             output.push(vt.clone());
@@ -867,8 +925,8 @@ pub fn get_rpn(input: &[TokenRef]) -> Vec<TokenRef> {
                                 stack.pop();
                                 if matrix_stack[tovs] > 1 {
                                     let mut mt = Token::new("", TokenTypes::Matrix);
-                                    mt.kind = TokenKind::Matrix;
-                                    mt.index = matrix_stack[tovs] * 10000000;
+                                    mt.kind = TokenKind::Matrix(None);
+                                    mt.index = matrix_stack[tovs] * crate::vector::MAX_LENGTH;
                                     output.push(mt.into_ref());
                                     vt.borrow_mut().ttype = TokenTypes::RowDivisor;
                                 }

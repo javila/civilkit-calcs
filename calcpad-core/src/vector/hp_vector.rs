@@ -240,6 +240,16 @@ pub fn from_indexes(indexes: &[i32]) -> Vector {
     Vector::from_data(VecData::Hp(h))
 }
 
+/// `SetValues(int[] indexes)`: replaces the content with the given values.
+pub fn set_values(v: &Vector, indexes: &[i32]) {
+    v.with_hp_mut(|h| {
+        h.length = indexes.len();
+        h.size = h.length;
+        h.capacity = h.length;
+        h.values = Some(indexes.iter().map(|&i| i as f64).collect());
+    });
+}
+
 pub(crate) fn hp_not_ported() -> MathParserException {
     MathParserException::new("HP vectors are not supported by calcpad-rs yet.")
 }

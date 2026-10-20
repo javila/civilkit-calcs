@@ -88,6 +88,16 @@ impl std::fmt::Debug for Vector {
     }
 }
 
+/// The C# `(int)d` conversion on x64: truncation, with NaN and out of range values
+/// giving `int.MinValue`.
+pub fn cs_int(d: f64) -> i64 {
+    if d.is_nan() || d >= 2147483648.0 || d <= -2147483649.0 {
+        i32::MIN as i64
+    } else {
+        d.trunc() as i64
+    }
+}
+
 pub(crate) fn null_reference() -> MathParserException {
     MathParserException::unexpected("Object reference not set to an instance of an object.")
 }

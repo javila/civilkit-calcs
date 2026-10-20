@@ -92,7 +92,7 @@ impl MathParser {
         let mut index_num = 0i32;
         let mut is_function_in_index = false;
         let mut multi_function_stack: Vec<StackItem> = Vec::new();
-        let optional_function_stack: Vec<StackItem> = Vec::new();
+        let mut optional_function_stack: Vec<StackItem> = Vec::new();
         let mut vector_stack: Vec<StackItem> = Vec::new();
         let mut index_stack: Vec<StackItem> = Vec::new();
         let mut pt: TokenRef = Token::new("", TokenTypes::None).into_ref();
@@ -104,7 +104,14 @@ impl MathParser {
                     count_of_divisors -= 1
                 }
                 TokenTypes::MatrixIterativeFunction => {
-                    // IsLastParameterOptional is only relevant for matrix functions (out of scope).
+                    let index = tr.borrow().index;
+                    if crate::calculator::matrix_calculator::is_last_parameter_optional(index) {
+                        optional_function_stack.push(StackItem {
+                            token: tr.clone(),
+                            count_of_brackets,
+                            count_of_divisors,
+                        });
+                    }
                     count_of_divisors -= 1;
                 }
                 TokenTypes::Function3 | TokenTypes::VectorFunction3 | TokenTypes::MatrixFunction3 => {

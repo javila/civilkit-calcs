@@ -7,7 +7,7 @@ use crate::base_types::complex::Complex;
 use crate::base_types::complex_value::ComplexValue;
 use crate::base_types::real_value::{RealValue, LOGICAL_ZERO};
 use crate::base_types::unit::{OptUnit, Unit};
-use crate::calculator::Calculator;
+use crate::calculator::{matrix_calculator, vector_calculator, Calculator};
 use crate::exceptions::{self, Items};
 use crate::extension_methods::almost_equals;
 use crate::math_parser_exception::CResult;
@@ -176,6 +176,16 @@ impl Value {
             (Value::Vector(a), Value::Vector(b)) => a.equals(b),
             (Value::Matrix(a), Value::Matrix(b)) => a.equals(b),
             _ => false,
+        }
+    }
+
+    /// The C# type name of the boxed value (used in InvalidCastException messages).
+    pub fn to_cs_string_type(&self) -> String {
+        match self {
+            Value::Real(_) => "Calcpad.Core.RealValue".to_string(),
+            Value::Complex(_) => "Calcpad.Core.ComplexValue".to_string(),
+            Value::Vector(v) => v.type_name().to_string(),
+            Value::Matrix(m) => m.type_name().to_string(),
         }
     }
 
@@ -376,43 +386,207 @@ impl Value {
     }
 
     /// `IValue.EvaluateSwitch`
-    pub fn evaluate_switch(values: &[Value]) -> Value {
+    pub fn evaluate_switch(values: &[Value]) -> CResult<Value> {
         let len = values.len();
         let mut i = 0;
         while i + 1 < len {
-            if values[i].re().abs() >= LOGICAL_ZERO {
-                return values[i + 1].clone();
+            let scalar = values[i].as_value(Items::Argument)?;
+            if scalar.re().abs() >= LOGICAL_ZERO {
+                return Ok(values[i + 1].clone());
             }
             i += 2;
         }
         if len % 2 != 0 {
-            return values[len - 1].clone();
+            return Ok(values[len - 1].clone());
         }
-        Value::nan()
+        Ok(Value::nan())
     }
 
-    /// `IValue.EvaluateFunction(calc, index, a)` for scalars
+    /// `IValue.EvaluateFunction(calc, index, a)`
     pub fn evaluate_function(calc: &Calculator, index: i64, a: &Value) -> CResult<Value> {
-        calc.evaluate_function(index, a)
-    }
-
-    pub fn evaluate_operator(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
-        calc.evaluate_operator(index, a, b)
-    }
-
-    pub fn evaluate_function2(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
-        calc.evaluate_function2(index, a, b)
-    }
-
-    pub fn evaluate_interpolation(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
-        calc.evaluate_interpolation(index, values)
-    }
-
-    pub fn evaluate_multi_function(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
-        if index == crate::calculator::SWITCH_INDEX {
-            return Ok(Value::evaluate_switch(values));
+        match a {
+            Value::Real(_) | Value::Complex(_) => calc.evaluate_function(index, a),
+            Value::Vector(v) => Ok(Value::Vector(vector_calculator::evaluate_function(calc, index, v)?)),
+            Value::Matrix(m) => Ok(Value::Matrix(matrix_calculator::evaluate_function(calc, index, m)?)),
         }
-        calc.evaluate_multi_function(index, values)
+    }
+
+    /// `IValue.EvaluateOperator(calc, index, a, b)`
+    pub fn evaluate_operator(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
+        match a {
+            Value::Real(ra) => match b {
+                Value::Real(_) | Value::Complex(_) => return calc.evaluate_operator(index, a, b),
+                Value::Vector(vb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_operator_rv(
+                        calc, index, ra, vb,
+                    )?))
+                }
+                Value::Matrix(mb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_operator_rm(
+                        calc, index, ra, mb,
+                    )?))
+                }
+            },
+            Value::Complex(_) => {
+                if b.is_scalar() {
+                    return calc.evaluate_operator(index, a, b);
+                }
+            }
+            Value::Vector(va) => match b {
+                Value::Real(rb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_operator_vr(
+                        calc, index, va, rb,
+                    )?))
+                }
+                Value::Vector(vb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_operator(
+                        calc, index, va, vb,
+                    )?))
+                }
+                Value::Matrix(mb) => {
+                    let ma = Matrix::from_vector(va)?;
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_operator(
+                        calc, index, &ma, mb,
+                    )?));
+                }
+                Value::Complex(_) => {}
+            },
+            Value::Matrix(ma) => match b {
+                Value::Real(rb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_operator_mr(
+                        calc, index, ma, rb,
+                    )?))
+                }
+                Value::Vector(vb) => {
+                    let mb = Matrix::from_vector(vb)?;
+                    let c = matrix_calculator::evaluate_operator(calc, index, ma, &mb)?;
+                    if index == crate::calculator::MULTIPLY_OPERATOR_INDEX {
+                        if c.row_count() == 1 {
+                            return Ok(Value::Real(c.get(0, 0)));
+                        }
+                        if c.mtype() == crate::matrix::MatrixType::Column {
+                            return Ok(Value::Vector(c.row_ref(0)));
+                        }
+                        return Ok(Value::Vector(c.col(1)?));
+                    }
+                    return Ok(Value::Matrix(c));
+                }
+                Value::Matrix(mb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_operator(
+                        calc, index, ma, mb,
+                    )?))
+                }
+                Value::Complex(_) => {}
+            },
+        }
+        Err(exceptions::InvalidOperand(&format!(
+            "{}; {}",
+            a.to_cs_string(),
+            b.to_cs_string()
+        )))
+    }
+
+    /// `IValue.EvaluateFunction2(calc, index, a, b)`
+    pub fn evaluate_function2(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
+        match a {
+            Value::Real(ra) => match b {
+                Value::Real(_) | Value::Complex(_) => return calc.evaluate_function2(index, a, b),
+                Value::Vector(vb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_function2_rv(
+                        calc, index, ra, vb,
+                    )?))
+                }
+                Value::Matrix(mb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_function2_rm(
+                        calc, index, ra, mb,
+                    )?))
+                }
+            },
+            Value::Complex(_) => {
+                if b.is_scalar() {
+                    return calc.evaluate_function2(index, a, b);
+                }
+            }
+            Value::Vector(va) => match b {
+                Value::Real(rb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_function2_vr(
+                        calc, index, va, rb,
+                    )?))
+                }
+                Value::Vector(vb) => {
+                    return Ok(Value::Vector(vector_calculator::evaluate_function2(
+                        calc, index, va, vb,
+                    )?))
+                }
+                Value::Matrix(mb) => {
+                    let ma = Matrix::from_vector(va)?;
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_function2(
+                        calc, index, &ma, mb,
+                    )?));
+                }
+                Value::Complex(_) => {}
+            },
+            Value::Matrix(ma) => match b {
+                Value::Real(rb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_function2_mr(
+                        calc, index, ma, rb,
+                    )?))
+                }
+                Value::Vector(vb) => {
+                    let mb = Matrix::from_vector(vb)?;
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_function2(
+                        calc, index, ma, &mb,
+                    )?));
+                }
+                Value::Matrix(mb) => {
+                    return Ok(Value::Matrix(matrix_calculator::evaluate_function2(
+                        calc, index, ma, mb,
+                    )?))
+                }
+                Value::Complex(_) => {}
+            },
+        }
+        Err(exceptions::InvalidArgument(&format!(
+            "{}; {}",
+            a.to_cs_string(),
+            b.to_cs_string()
+        )))
+    }
+
+    /// `IValue.EvaluateInterpolation(calc, index, values)`
+    pub fn evaluate_interpolation(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
+        if values[0].is_scalar() {
+            if values[0].is_real() {
+                let x = values[0].as_real();
+                if values.len() == 2 {
+                    if let Value::Vector(vector) = &values[1] {
+                        return vector_calculator::evaluate_interpolation(index, &x, vector);
+                    }
+                }
+                if values.len() == 3 && values[1].is_scalar() && values[1].is_real() {
+                    if let Value::Matrix(matrix) = &values[2] {
+                        return matrix_calculator::evaluate_interpolation(index, &values[1].as_real(), &x, matrix);
+                    }
+                }
+            }
+        } else {
+            return Err(exceptions::CannotInterpolateWithNonScalarValue());
+        }
+        calc.evaluate_interpolation(index, &Value::expand_values(values)?)
+    }
+
+    /// `IValue.EvaluateMultiFunction(calc, index, values)`
+    pub fn evaluate_multi_function(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
+        if values.len() == 1 {
+            match &values[0] {
+                Value::Vector(v) => return vector_calculator::evaluate_multi_function(index, v),
+                Value::Matrix(m) => return matrix_calculator::evaluate_multi_function(index, m),
+                _ => {}
+            }
+        } else if index == crate::calculator::SWITCH_INDEX {
+            return Value::evaluate_switch(values);
+        }
+        calc.evaluate_multi_function(index, &Value::expand_values(values)?)
     }
 
     pub fn units_text(&self) -> String {

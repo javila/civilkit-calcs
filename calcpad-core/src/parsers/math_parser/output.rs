@@ -68,11 +68,11 @@ impl RenderToken {
                 r.argument_map = argument_map.clone();
                 r.positional_count = *positional_count;
             }
-            TokenKind::Vector => {
+            TokenKind::Vector(_) => {
                 r.parameter_count = t.index as i32 - 1;
                 r.index = -1;
             }
-            TokenKind::Matrix => {
+            TokenKind::Matrix(_) => {
                 r.parameter_count = (t.index / 10000000) as i32 - 1;
                 r.index = -1;
             }
