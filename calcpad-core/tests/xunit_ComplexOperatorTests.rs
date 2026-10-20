@@ -8,7 +8,16 @@
     clippy::excessive_precision,
     clippy::unnecessary_cast,
     clippy::eq_op,
-    clippy::identity_op
+    clippy::identity_op,
+    clippy::needless_borrow,
+    clippy::redundant_clone,
+    clippy::bool_assert_comparison,
+    clippy::useless_format,
+    clippy::clone_on_copy,
+    unused_imports,
+    dead_code,
+    suspicious_double_ref_op,
+    noop_method_call
 )]
 mod common;
 use common::*;
@@ -193,53 +202,53 @@ fn Subt_3_Plus_4i__2_Plus_3i() {
 fn Equals_1l__Sqrt_Minus_1() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("1i ≡ sqrt(-1)");
-    assert_equal(1.0, re);
+    assert_equal(1.0, re.clone());
 }
 #[test]
 fn Equals_e_Pow_Pi_i__Minus_1() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("e^πi ≡ -1");
-    assert_equal(1.0, re);
+    assert_equal(1.0, re.clone());
 }
 #[test]
 fn Equals_3_Plus_4i__4i_Plus_3() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("3 + 4i ≡ 4i + 3");
-    assert_equal(1.0, re);
+    assert_equal(1.0, re.clone());
 }
 #[test]
 fn NotEquals_i_1() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("1i ≠ 1");
-    assert_equal(1.0, re);
+    assert_equal(1.0, re.clone());
 }
 #[test]
 fn GreaterThan() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("(3 + 4i) > (2 + 3i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn GreaterOrEquals() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("(3 + 4i) ≥ (2 + 3i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn LessThan() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("-(3 + 2i) < (4 + 3i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn LessOrEquals_Real() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("2 + 2 ≤ 2*2");
-    assert_equal(1.0, re);
+    assert_equal(1.0, re.clone());
 }
 #[test]
 fn LessOrEquals_WhenEqual() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("3 + 4i ≤ 4i + 3");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }

@@ -8,7 +8,16 @@
     clippy::excessive_precision,
     clippy::unnecessary_cast,
     clippy::eq_op,
-    clippy::identity_op
+    clippy::identity_op,
+    clippy::needless_borrow,
+    clippy::redundant_clone,
+    clippy::bool_assert_comparison,
+    clippy::useless_format,
+    clippy::clone_on_copy,
+    unused_imports,
+    dead_code,
+    suspicious_double_ref_op,
+    noop_method_call
 )]
 mod common;
 use common::*;
@@ -379,7 +388,7 @@ fn Fact() {
 #[test]
 fn Abs() {
     let mut result = TestCalc::new(ms()).Run("abs(-2)");
-    assert_equal(2.0, result);
+    assert_equal(2.0, result.clone());
 }
 #[test]
 fn Re() {
@@ -389,12 +398,12 @@ fn Re() {
 #[test]
 fn Im() {
     let mut result = TestCalc::new(ms()).Run("im(1)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Phase_1() {
     let mut result = TestCalc::new(ms()).Run("phase(1)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Phase_Minus_1() {
@@ -404,12 +413,12 @@ fn Phase_Minus_1() {
 #[test]
 fn Min() {
     let mut result = TestCalc::new(ms()).Run("min(1; 2; -3; 0)");
-    assert_equal(-3.0, result);
+    assert_equal(-3.0, result.clone());
 }
 #[test]
 fn Max() {
     let mut result = TestCalc::new(ms()).Run("max(1; 2; -3; 0)");
-    assert_equal(2.0, result);
+    assert_equal(2.0, result.clone());
 }
 #[test]
 fn Sum() {
@@ -459,92 +468,92 @@ fn Spline() {
 #[test]
 fn If() {
     let mut result = TestCalc::new(ms()).Run("if(1; 2; 3)");
-    assert_equal(2.0, result);
+    assert_equal(2.0, result.clone());
 }
 #[test]
 fn Switch1() {
     let mut result = TestCalc::new(ms()).Run("switch(0)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Switch2() {
     let mut result = TestCalc::new(ms()).Run("switch(1; 2)");
-    assert_equal(2.0, result);
+    assert_equal(2.0, result.clone());
 }
 #[test]
 fn Switch() {
     let mut result = TestCalc::new(ms()).Run("switch(0; 1; 0; 2; 1; 3; 4)");
-    assert_equal(3.0, result);
+    assert_equal(3.0, result.clone());
 }
 #[test]
 fn Not_0() {
     let mut result = TestCalc::new(ms()).Run("not(0)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Not_1() {
     let mut result = TestCalc::new(ms()).Run("not(1)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn And_0_0() {
     let mut result = TestCalc::new(ms()).Run("and(0; 0)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn And_0_1() {
     let mut result = TestCalc::new(ms()).Run("and(0; 1)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn And_1_0() {
     let mut result = TestCalc::new(ms()).Run("and(1; 0)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn And_1_1() {
     let mut result = TestCalc::new(ms()).Run("and(1; 1)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Or_0_0() {
     let mut result = TestCalc::new(ms()).Run("or(0; 0)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Or_0_1() {
     let mut result = TestCalc::new(ms()).Run("or(0; 1)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Or_1_0() {
     let mut result = TestCalc::new(ms()).Run("or(1; 0)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Or_1_1() {
     let mut result = TestCalc::new(ms()).Run("or(1; 1)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Xor_0_0() {
     let mut result = TestCalc::new(ms()).Run("xor(0; 0)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Xor_0_1() {
     let mut result = TestCalc::new(ms()).Run("xor(0; 1)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Xor_1_0() {
     let mut result = TestCalc::new(ms()).Run("xor(1; 0)");
-    assert_equal(1.0, result);
+    assert_equal(1.0, result.clone());
 }
 #[test]
 fn Xor_1_1() {
     let mut result = TestCalc::new(ms()).Run("xor(1; 1)");
-    assert_equal(0.0, result);
+    assert_equal(0.0, result.clone());
 }
 #[test]
 fn Sign_Neg() {

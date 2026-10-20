@@ -8,7 +8,16 @@
     clippy::excessive_precision,
     clippy::unnecessary_cast,
     clippy::eq_op,
-    clippy::identity_op
+    clippy::identity_op,
+    clippy::needless_borrow,
+    clippy::redundant_clone,
+    clippy::bool_assert_comparison,
+    clippy::useless_format,
+    clippy::clone_on_copy,
+    unused_imports,
+    dead_code,
+    suspicious_double_ref_op,
+    noop_method_call
 )]
 mod common;
 use common::*;

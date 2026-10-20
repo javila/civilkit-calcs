@@ -90,11 +90,16 @@ class Translator:
         self.fields_fn = fields_fn  # names of readonly fields emitted as functions
         self.string_fields = string_fields
         self.helpers = helpers  # helper method name -> list of (param types)
+        self.string_names = set(string_fields)
+        self.named_helpers = set()
+        self.string_helpers = set()
 
     def expr(self, toks, i, stop):
         """Translate tokens from i until a token in stop at depth 0. Returns (text, i)."""
         out = []
         depth = 0
+        plus_at = []
+        stringy = False
         while i < len(toks):
             kind, v = toks[i]
             if depth == 0 and v in stop:
@@ -105,25 +110,51 @@ class Translator:
                 if depth == 0:
                     break
                 depth -= 1
+            if depth == 0 and v == "+":
+                plus_at.append(len(out))
+            if depth == 0 and (kind in ("str", "istr") or (kind == "id" and v in self.string_names)):
+                stringy = True
             text, i = self.atom(toks, i)
             out.append(text)
+        if plus_at and stringy:
+            parts = []
+            last = 0
+            for p in plus_at + [len(out)]:
+                parts.append(" ".join(out[last:p]))
+                last = p + 1
+            parts = [p[1:] if p.startswith("&format!") else p for p in parts]
+            return "&format!(\"" + "{}" * len(parts) + "\", " + ", ".join(parts) + ")", i
         return " ".join(out), i
 
     def args(self, toks, i):
         """toks[i] == '('; returns (list of arg texts, index after ')')."""
+        res, raw, j = self.args_raw(toks, i)
+        return res, j
+
+    def args_raw(self, toks, i):
+        """Like args, also returning the source tokens of each argument."""
         assert toks[i][1] == "(", toks[i]
         i += 1
         res = []
+        raw = []
         if toks[i][1] == ")":
-            return res, i + 1
+            return res, raw, i + 1
         while True:
-            a, i = self.expr(toks, i, {",", ")"})
-            res.append(a)
+            start = i
+            # named argument `name: value`
+            if toks[i][0] == "id" and toks[i + 1][1] == ":":
+                name = toks[i][1]
+                a, i = self.expr(toks, i + 2, {",", ")"})
+                res.append(("named", name, a))
+            else:
+                a, i = self.expr(toks, i, {",", ")"})
+                res.append(a)
+            raw.append(toks[start:i])
             if toks[i][1] == ",":
                 i += 1
                 continue
             assert toks[i][1] == ")"
-            return res, i + 1
+            return [r if isinstance(r, str) else r for r in res], raw, i + 1
 
     def settings(self, toks, i):
         """toks[i] == 'new', toks[i+1] == '(' : `new()` or `new() { P = v, ... }`."""
@@ -154,7 +185,7 @@ class Translator:
         if kind == "str":
             return rust_string(v), i + 1
         if kind == "istr":
-            raise Untranslatable("interpolated string")
+            return self.interpolated(v), i + 1
         if kind == "chr":
             return v, i + 1
         if kind == "id":
@@ -165,6 +196,31 @@ class Translator:
                 s, j = self.settings(toks, i + 3)
                 assert toks[j][1] == ")", toks[j]
                 return f"TestCalc::new({s})", j + 1
+            if v == "new" and nxt == "ExpressionParser":
+                j = i + 2
+                props = []
+                if toks[j][1] == "(":
+                    assert toks[j + 1][1] == ")"
+                    j += 2
+                if j < len(toks) and toks[j][1] == "{":
+                    j += 1
+                    while toks[j][1] != "}":
+                        prop = toks[j][1]
+                        assert toks[j + 1][1] == "="
+                        if prop == "Settings":
+                            # new Settings(): the default settings
+                            assert [t[1] for t in toks[j + 2 : j + 6]] == ["new", "Settings", "(", ")"]
+                            j += 6
+                        else:
+                            val, j = self.expr(toks, j + 2, {",", "}"})
+                            props.append(f'("{prop}", {val})')
+                        if toks[j][1] == ",":
+                            j += 1
+                    j += 1
+                return f"new_expression_parser(&[{', '.join(props)}])", j
+            if v == "new" and nxt == "MacroParser":
+                assert toks[i + 2][1] == "(" and toks[i + 3][1] == ")"
+                return "TestMacroParser::new()", i + 4
             if v == "new":
                 raise Untranslatable("new " + str(nxt))
             if v == "Assert" and nxt == ".":
@@ -180,7 +236,7 @@ class Translator:
             if v == "TestCalc" and nxt == ".":
                 name = toks[i + 2][1]
                 args, j = self.args(toks, i + 3)
-                return f"TestCalc::{name}({', '.join(args)})", j
+                return f"&TestCalc::{name}({', '.join(args)})", j
             if v in self.helpers and nxt == "(":
                 args, j = self.args(toks, i + 1)
                 return self.helper_call(v, args), j
@@ -205,13 +261,65 @@ class Translator:
                 return f".{name}()", i + 2
             if name == "Message":
                 return ".message", i + 2
+            if name == "HtmlResult":
+                return ".html_result", i + 2
+            if name == "Errors":
+                return ".errors_list", i + 2
+            if name == "Parse" and after == "(":
+                args, raw, j = self.args_raw(toks, i + 2)
+                if len(args) == 3 and raw[0] and not any(t[1] == "out" for r in raw for t in r):
+                    return f".parse({args[0]}, {args[1]})", j
+                if len(raw) == 5 and raw[1][0][1] == "out":
+                    return f".Parse({args[0]})", j
+                raise Untranslatable("Parse overload")
             return "." + name, i + 2
         if v == "=>":
             raise Untranslatable("lambda")
         return v, i + 1
 
+    def interpolated(self, v):
+        body = v[2:-1]
+        fmt = []
+        holes = []
+        k = 0
+        while k < len(body):
+            c = body[k]
+            if c == "{" and body[k + 1 : k + 2] == "{":
+                fmt.append("{{")
+                k += 2
+            elif c == "}" and body[k + 1 : k + 2] == "}":
+                fmt.append("}}")
+                k += 2
+            elif c == "{":
+                depth = 1
+                j = k + 1
+                while depth:
+                    if body[j] == "{":
+                        depth += 1
+                    elif body[j] == "}":
+                        depth -= 1
+                    j += 1
+                inner = body[k + 1 : j - 1]
+                if ":" in inner or "?" in inner:
+                    raise Untranslatable("interpolation format")
+                t = tokenize(inner)
+                e, _ = self.expr(t + [("op", ";")], 0, {";"})
+                holes.append(e)
+                fmt.append("{}")
+                k = j
+            else:
+                fmt.append(c)
+                k += 1
+        lit = rust_string('"' + "".join(fmt) + '"')
+        return "&format!(" + lit + "".join(", " + h for h in holes) + ")"
+
     def helper_call(self, name, args):
         overloads = self.helpers[name]
+        args = [f"&{a}" if isinstance(a, str) and a in self.string_names else a for a in args]
+        if name in self.named_helpers:
+            pos = [a for a in args if isinstance(a, str)]
+            named = [f'("{a[1]}", {a[2]})' for a in args if not isinstance(a, str)]
+            return f"{name}({', '.join(pos)}, &[{', '.join(named)}])"
         if len(overloads) == 1:
             return f"{name}({', '.join(args)})"
         is_str = args[1].startswith('"')
@@ -226,21 +334,35 @@ class Translator:
                 raise Untranslatable("Throws type")
             j += 3
             assert toks[j][1] == "("
-            assert [t[1] for t in toks[j + 1 : j + 5]] == ["(", ")", "=>", "{"], toks[j : j + 5]
-            body, k = self.block(toks, j + 4)
+            assert [t[1] for t in toks[j + 1 : j + 4]] == ["(", ")", "=>"], toks[j : j + 5]
+            if toks[j + 4][1] == "{":
+                body, k = self.block(toks, j + 4)
+            else:
+                e, k = self.expr(toks, j + 4, {")"})
+                body = "{ " + e + "; }"
             assert toks[k][1] == ")"
             return f"assert_throws(|| {body})", k + 1
-        args, k = self.args(toks, j)
+        args, raw, k = self.args_raw(toks, j)
         if name == "Equal":
             if len(args) == 3:
+                r3 = raw[2]
+                if len(r3) == 1 and r3[0][0] == "num" and re.fullmatch(r"\d+", r3[0][1]):
+                    return f"assert_equal_precision({args[0]}, {args[1]}, {r3[0][1]})", k
                 return f"assert_equal_tol({', '.join(args)})", k
             if args[0].startswith('"') or args[1].startswith('"'):
                 return f"assert_equal_str({args[0]}, &{args[1]})", k
+            args = [f"{a}.clone()" if re.fullmatch(r"\w+", a) and not re.fullmatch(r"[\d.]+", a) else a for a in args]
             return f"assert_equal({', '.join(args)})", k
         if name == "True":
             return f"assert!({args[0]})", k
         if name == "False":
             return f"assert!(!({args[0]}))", k
+        if name == "Single":
+            return f"assert_eq!({args[0]}.len(), 1)", k
+        if name == "NotNull":
+            return f"assert!({args[0]}.is_some())", k
+        if name == "NotEqual":
+            return f"assert_ne!({args[0]}, {args[1]})", k
         if name == "InRange":
             return f"assert_in_range({', '.join(args)})", k
         if name == "Contains":
@@ -255,6 +377,28 @@ class Translator:
         i += 1
         stmts = []
         while toks[i][1] != "}":
+            vals = [t[1] for t in toks[i : i + 12]]
+            # var a = p.Parse(src, out var b, null, 0, false);
+            if vals[0] == "var" and vals[2] == "=" and vals[4:6] == [".", "Parse"] and "out" in vals:
+                k = vals.index("out")
+                a, b, p = vals[1], vals[k + 2], vals[3]
+                src, j = self.expr(toks, i + 7, {","})
+                while toks[j][1] != ";":
+                    j += 1
+                stmts.append(f"let (mut {a}, mut {b}) = {p}.Parse({src});")
+                i = j + 1
+                continue
+            if vals[0] == "const" and vals[1] == "string":
+                name = vals[2]
+                self.string_names.add(name)
+                e, j = self.expr(toks, i + 4, {";"})
+                stmts.append(f"let {name} = {e};")
+                i = j + 1
+                continue
+            if vals[0] == "var" and toks[i + 3][0] in ("str", "istr"):
+                self.string_names.add(vals[1])
+            if vals[0] == "var" and vals[3] in self.string_helpers:
+                self.string_names.add(vals[1])
             s, i = self.expr(toks, i, {";"})
             assert toks[i][1] == ";", toks[i]
             i += 1
@@ -297,8 +441,7 @@ def split_members(src):
     m = re.search(r"public\s+class\s+(\w+)", src)
     cls = m.group(1)
     start = src.index("{", m.end())
-    end = src.rindex("}")
-    end = src.rindex("}", 0, end)
+    end = find_matching(src, start)
     body = src[start + 1 : end]
     return cls, body
 
@@ -416,14 +559,27 @@ def transcribe(ref, rel, out_dir):
                 fields_fn[name] = fields
         elif any(a.startswith("[Fact") or a.startswith("[Theory") for a in attrs):
             tests.append((attrs, header, kind, text))
+        elif "TheoryData" in header:
+            continue
         elif kind in ("block", "expr"):
             m = re.search(r"(\w+)\s*\(([^)]*)\)", header)
             helpers.setdefault(m.group(1), []).append((header, kind, text))
 
+    for typ, name, text in consts:
+        if typ == "string":
+            string_fields.add(name)
     tr = Translator(set(fields_fn), string_fields, {k: [h[0] for h in v] for k, v in helpers.items()})
+    for hname, overloads in helpers.items():
+        ov = OVERRIDES / f"{cls}.{hname}.helper.rs"
+        if ov.exists() and ov.read_text(encoding="utf-8").startswith("// named-options"):
+            tr.named_helpers.add(hname)
+        if ov.exists() and "-> String" in ov.read_text(encoding="utf-8"):
+            tr.string_helpers.add(hname)
+        elif re.search(r"\bstring\s+\w+\s*\(", overloads[0][0]):
+            tr.string_helpers.add(hname)
     lines = [
         f"//! Transcribed from Calcpad.Tests/{rel} by tools/transcribe_xunit.py.",
-        "#![allow(non_snake_case, non_upper_case_globals, unused_mut, unused_variables, clippy::approx_constant, clippy::excessive_precision, clippy::unnecessary_cast, clippy::eq_op, clippy::identity_op)]",
+        "#![allow(non_snake_case, non_upper_case_globals, unused_mut, unused_variables, clippy::approx_constant, clippy::excessive_precision, clippy::unnecessary_cast, clippy::eq_op, clippy::identity_op, clippy::needless_borrow, clippy::redundant_clone, clippy::bool_assert_comparison, clippy::useless_format, clippy::clone_on_copy, unused_imports, dead_code, suspicious_double_ref_op, noop_method_call)]",
         "mod common;",
         "use common::*;",
         "",
@@ -457,6 +613,10 @@ def transcribe(ref, rel, out_dir):
     lines.append("")
     # helpers
     for hname, overloads in helpers.items():
+        ov = OVERRIDES / f"{cls}.{hname}.helper.rs"
+        if ov.exists():
+            lines.append(ov.read_text(encoding="utf-8").rstrip())
+            continue
         for header, kind, text in overloads:
             m = re.search(r"(\w+)\s*\(([^)]*)\)", header)
             params = [p.strip().split() for p in m.group(2).split(",") if p.strip()]
@@ -479,10 +639,40 @@ def transcribe(ref, rel, out_dir):
             lines.append(f"fn {hname}{suffix}({', '.join(rparams)}) {b}")
     lines.append("")
     stats = {"translated": 0, "override": 0, "ignored": 0}
+    oos = {}
+    oos_file = HERE / "xunit_out_of_scope.txt"
+    if oos_file.exists():
+        for line in oos_file.read_text(encoding="utf-8").splitlines():
+            if line.strip() and not line.startswith("#"):
+                key, reason = line.split(" ", 1)
+                oos[key] = reason.strip()
+    expanded_tests = []
     for attrs, header, kind, text in tests:
-        name = header.split()[-1].split("(")[0]
+        name = re.search(r"(\w+)\s*\(", header).group(1)
+        inline = [a for a in attrs if a.startswith("[InlineData")]
+        if inline:
+            pm = re.search(r"\(([^)]*)\)\s*$", header)
+            params = [p.strip().split() for p in pm.group(1).split(",") if p.strip()]
+            for k, a in enumerate(inline, 1):
+                data_toks = tokenize(a[len("[InlineData") : -1])
+                vals, _ = tr.args(data_toks, 0)
+                binds = []
+                for (pt, pn), v in zip(params, vals):
+                    if pt == "string":
+                        tr.string_names.add(pn)
+                    binds.append(f"let {pn} = {v};")
+                expanded_tests.append((f"{name}_case{k}", name, kind, text, " ".join(binds)))
+        else:
+            expanded_tests.append((name, name, kind, text, ""))
+    for name, base_name, kind, text, binds in expanded_tests:
         rname = rust_ident(name)
         override = OVERRIDES / f"{cls}.{name}.rs"
+        if f"{cls}.{base_name}" in oos:
+            lines.append("#[test]")
+            lines.append(f'#[ignore = "out of scope for phase 1: {oos[f"{cls}.{base_name}"]}"]')
+            lines.append(f"fn {rname}() {{}}")
+            stats["out_of_scope"] = stats.get("out_of_scope", 0) + 1
+            continue
         lines.append("#[test]")
         if override.exists():
             lines.append(f"fn {rname}() {{")
@@ -497,6 +687,8 @@ def transcribe(ref, rel, out_dir):
             else:
                 e, _ = tr.expr(toks + [("op", ";")], 0, {";"})
                 b = "{ " + e + "; }"
+            if binds:
+                b = "{ " + binds + " " + b[1:]
             lines.append(f"fn {rname}() {b}")
             stats["translated"] += 1
         except (Untranslatable, AssertionError, IndexError) as ex:

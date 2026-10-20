@@ -8,7 +8,16 @@
     clippy::excessive_precision,
     clippy::unnecessary_cast,
     clippy::eq_op,
-    clippy::identity_op
+    clippy::identity_op,
+    clippy::needless_borrow,
+    clippy::redundant_clone,
+    clippy::bool_assert_comparison,
+    clippy::useless_format,
+    clippy::clone_on_copy,
+    unused_imports,
+    dead_code,
+    suspicious_double_ref_op,
+    noop_method_call
 )]
 mod common;
 use common::*;
@@ -139,7 +148,7 @@ fn Atan() {
     let mut re = calc.Run("atan(1i)");
     let mut im = calc.Imaginary();
     assert_equal_tol(0.0, re, Tol);
-    assert_equal(f64::INFINITY, im);
+    assert_equal(f64::INFINITY, im.clone());
 }
 #[test]
 fn Atan_I_div_2() {
@@ -147,7 +156,7 @@ fn Atan_I_div_2() {
     let mut re = calc.Run("atan(1i/2)");
     let mut im = calc.Imaginary();
     assert_equal_tol(0.0, re, Tol);
-    assert_equal(Math::Log(3.0) / 2.0, im);
+    assert_equal(Math::Log(3.0) / 2.0, im.clone());
 }
 #[test]
 fn Acsc() {
@@ -394,19 +403,19 @@ fn Trunc_Neg() {
 fn Mod() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("mod(7i; 5i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Gcd() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("gcd(18i; 24i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Lcm() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("lcm(6i; 4i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Fact() {
@@ -456,13 +465,13 @@ fn Phase() {
 fn Min() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("min(1i; 2i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Max() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("max(1i; 2i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Sum() {
@@ -517,8 +526,8 @@ fn Take() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("take(2.5; 1i; 2i; 3i)");
     let mut im = calc.Imaginary();
-    assert_equal(0.0, re);
-    assert_equal(3.0, im);
+    assert_equal(0.0, re.clone());
+    assert_equal(3.0, im.clone());
 }
 #[test]
 fn Line() {
@@ -526,7 +535,7 @@ fn Line() {
     let mut re = calc.Run("line(1.5 + 2.5i; 1 + 4i; 2 + 5i; 3 + 6i)");
     let mut im = calc.Imaginary();
     assert_equal_tol(1.5, re, Tol);
-    assert_equal(4.5, im);
+    assert_equal(4.5, im.clone());
 }
 #[test]
 fn Spline() {
@@ -534,15 +543,15 @@ fn Spline() {
     let mut re = calc.Run("spline(1.5 + 2.5i; 2 + 16i; 4 + 32i; 8 + 64i)");
     let mut im = calc.Imaginary();
     assert_equal_tol(2.8125, re, Tol);
-    assert_equal(0.0, im);
+    assert_equal(0.0, im.clone());
 }
 #[test]
 fn If() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("if(1; 1 + 2i; 3i)");
     let mut im = calc.Imaginary();
-    assert_equal(1.0, re);
-    assert_equal(2.0, im);
+    assert_equal(1.0, re.clone());
+    assert_equal(2.0, im.clone());
 }
 #[test]
 fn Switch() {
@@ -550,14 +559,14 @@ fn Switch() {
     calc.Run("x = 10");
     let mut re = calc.Run("switch(x ≤ 1; 1i; x ≤ 2; 2i; x ≤ 3; 3i; 4i)");
     let mut im = calc.Imaginary();
-    assert_equal(0.0, re);
-    assert_equal(4.0, im);
+    assert_equal(0.0, re.clone());
+    assert_equal(4.0, im.clone());
 }
 #[test]
 fn Sign_Neg() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("sign(-10i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Sign_Zero() {
@@ -569,7 +578,7 @@ fn Sign_Zero() {
 fn Sign_Pos() {
     let mut calc = TestCalc::new(ms().IsComplex(true));
     let mut re = calc.Run("sign(10i)");
-    assert_equal(f64::NAN, re);
+    assert_equal(f64::NAN, re.clone());
 }
 #[test]
 fn Random() {

@@ -332,3 +332,66 @@ pub mod Math {
         x.trunc()
     }
 }
+
+/// `Assert.Equal(double expected, double actual, int precision)`: both rounded to
+/// `precision` decimals (banker's rounding, like Math.Round) before comparing.
+#[track_caller]
+pub fn assert_equal_precision(expected: f64, actual: f64, precision: i32) {
+    let e = calcpad_core::netfmt::round_even_digits(expected, precision);
+    let a = calcpad_core::netfmt::round_even_digits(actual, precision);
+    assert!(
+        e.x_eq(&a),
+        "Assert.Equal() Failure (precision {precision})\nExpected: {e:?}\nActual:   {a:?}"
+    );
+}
+
+/// `new ExpressionParser { Settings = new Settings(), Debug = .., ForPrint = .., EnableUi = .. }`
+pub fn new_expression_parser(props: &[(&str, bool)]) -> ExpressionParser {
+    let mut p = ExpressionParser::new();
+    for (k, v) in props {
+        match *k {
+            "Debug" => p.debug = *v,
+            "ForPrint" => p.for_print = *v,
+            "EnableUi" => p.enable_ui = *v,
+            _ => panic!("unknown ExpressionParser property {k}"),
+        }
+    }
+    p
+}
+
+struct NoFiles;
+
+impl calcpad_core::parsers::macro_parser::FileProvider for NoFiles {
+    fn full_path(&self, path: &str, _base_dir: Option<&str>) -> String {
+        path.to_string()
+    }
+    fn exists(&self, _path: &str) -> bool {
+        false
+    }
+    fn directory_name(&self, _path: &str) -> Option<String> {
+        None
+    }
+    fn include(
+        &self,
+        _path: &str,
+        _fields: Option<std::collections::VecDeque<String>>,
+    ) -> calcpad_core::CResult<String> {
+        Ok(String::new())
+    }
+}
+
+static NO_FILES: NoFiles = NoFiles;
+
+/// `new MacroParser()`; `Parse(source, out expanded, null, 0, false)` returns (hasErrors, expanded).
+pub struct TestMacroParser;
+
+impl TestMacroParser {
+    pub fn new() -> TestMacroParser {
+        TestMacroParser
+    }
+
+    pub fn Parse(&self, source: &str) -> (bool, String) {
+        let mut mp = calcpad_core::parsers::macro_parser::MacroParser::new(&NO_FILES);
+        mp.parse(source, false)
+    }
+}
