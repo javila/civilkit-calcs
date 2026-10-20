@@ -13,3 +13,5 @@ xunit_vm = []
 [dependencies]
 # Deflate for the PNG raster of $Map (pure Rust, no I/O, wasm compatible).
 miniz_oxide = "0.8"
+# The #UI {...} payload (System.Text.Json in CalcpadCE).
+serde_json = "1"

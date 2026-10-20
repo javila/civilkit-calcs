@@ -681,6 +681,35 @@ pub fn round_even_digits(x: f64, digits: i32) -> f64 {
     }
 }
 
+/// `HttpUtility.HtmlAttributeEncode`: encodes `&`, `"`, `<` and `'`.
+pub fn html_attribute_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '\'' => out.push_str("&#39;"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// `double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture)` for plain
+/// numbers: optional whitespace and sign, digits with a decimal point, an exponent.
+pub fn parse_invariant_float(s: &str) -> Option<f64> {
+    let t = s.trim();
+    if t.is_empty()
+        || !t
+            .chars()
+            .all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))
+    {
+        return None;
+    }
+    t.parse::<f64>().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

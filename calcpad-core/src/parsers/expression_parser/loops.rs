@@ -81,6 +81,11 @@ impl Loop {
         ))
     }
 
+    /// 1 based pass number. `iteration` counts down, so this counts up.
+    pub fn pass(&self) -> i32 {
+        self.initial_count - self.iteration + 1
+    }
+
     pub fn is_first_pass(&self) -> bool {
         self.iteration == self.initial_count
     }

@@ -3,9 +3,10 @@
 //! comments and expressions, runs directives, conditions and loops, and writes HTML.
 pub mod condition;
 pub mod loops;
+mod ui;
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
 use crate::base_types::complex::Complex;
@@ -255,6 +256,8 @@ pub struct ExpressionParser {
     pub show_warnings: bool,
     pub show_error_lines: bool,
     pub enable_ui: bool,
+    /// Values entered into `#UI` controls, keyed by `data-ui-var` (e.g. "L:1").
+    pub ui_overrides: Option<HashMap<String, String>>,
     pub html_result: String,
     /// The first out of scope feature hit while parsing, if any.
     pub out_of_scope: Option<String>,
@@ -289,6 +292,7 @@ pub struct ExpressionParser {
     first_err_index_by_line: std::collections::HashMap<usize, i32>,
     /// `Errors`: recorded only in Debug mode, like CalcpadCE.
     pub errors_list: Vec<CalcpadError>,
+    ui: ui::UiState,
 }
 
 fn is_line_extension_char(c: char) -> bool {
@@ -316,6 +320,7 @@ impl ExpressionParser {
             show_warnings: true,
             show_error_lines: true,
             enable_ui: false,
+            ui_overrides: None,
             html_result: String::new(),
             out_of_scope: None,
             error_count: 0,
@@ -348,6 +353,7 @@ impl ExpressionParser {
             err_index: 0,
             first_err_index_by_line: std::collections::HashMap::new(),
             errors_list: Vec::new(),
+            ui: ui::UiState::default(),
         }
     }
 
@@ -499,6 +505,9 @@ impl ExpressionParser {
             if self.current_line as usize >= line_count {
                 break;
             }
+            // #UI metadata is scoped to the line that declared it. Clearing here
+            // covers the paths that skip ParseLine, e.g. an unsatisfied condition.
+            self.reset_ui_state();
             let cl = self.cur();
             let current_line_cache = self.line_cache[cl].clone();
             let mut keyword = current_line_cache.keyword;
@@ -608,7 +617,9 @@ impl ExpressionParser {
                 let tokens = if self.line_cache[cl].is_cached() {
                     self.line_cache[cl].tokens.clone().unwrap()
                 } else {
-                    let skip_chars = if keyword == Keyword::Const {
+                    let skip_chars = if keyword == Keyword::Ui {
+                        self.ui.ui_skip_chars
+                    } else if keyword == Keyword::Const {
                         keyword_length(Keyword::Const)
                     } else {
                         self.condition.keyword_length()
@@ -745,7 +756,18 @@ impl ExpressionParser {
                 let line_type = tokens.borrow().first().map(|t| t.ttype).unwrap_or(TokenTypes::Text);
                 let mut html_id: Option<String> = None;
                 if self.is_val != 1 {
-                    let id = self.html_id();
+                    let mut id = self.html_id();
+                    if self.has_ui_controls() {
+                        id = if self.enable_ui {
+                            if self.ui.line_ui_controls.as_ref().map_or(0, |c| c.len()) == 1 {
+                                format!("{}{}", id, self.get_ui_attributes(0))
+                            } else {
+                                id
+                            }
+                        } else {
+                            self.add_report_style(0, &id)
+                        };
+                    }
                     self.append_html_line_start(line_type, is_indent, &id);
                     html_id = Some(id);
                 }
@@ -773,6 +795,13 @@ impl ExpressionParser {
                 r?;
                 if self.is_val != 1 {
                     self.append_html_line_end(line_type, keyword == Keyword::If);
+                }
+                if let Some(e) = self.ui.pending_ui_error.take() {
+                    let h = self.err_html(&e);
+                    self.sb.push_str(&h);
+                }
+                if self.enable_ui && self.has_ui_controls() {
+                    self.append_ui_datagrids();
                 }
             }
         } else {
@@ -852,6 +881,8 @@ impl ExpressionParser {
             self.parse_mode = ParseMode::Cpd;
             self.mode_suppressed = false;
             self.parse_mode_stack.clear();
+            self.ui.ui_var_counts.clear();
+            self.ui.ui_declaration_index.clear();
         } else {
             if self.line_cache.len() < line_count {
                 self.line_cache.resize(line_count, LineInfo::empty());
@@ -867,6 +898,7 @@ impl ExpressionParser {
         self.visibility_stack.clear();
         self.md_buffer.clear();
         self.md_lines.clear();
+        self.reset_ui_state();
     }
 
     fn finalize(&mut self, line_count: usize) {
@@ -900,8 +932,20 @@ impl ExpressionParser {
         for i in 0..count {
             let token = tokens.borrow()[i].clone();
             if token.ttype == TokenTypes::Expression {
-                let expression = token.value.clone();
-                let r = self.parse_expression_token(tokens, i, &token, is_loop, is_output);
+                // What was actually parsed: a control's entered value replaces the right
+                // hand side, and an error has to name that rather than the source.
+                let mut expression = token.value.clone();
+                let ui = self.take_ui_control(&token.value);
+                let r = match ui {
+                    Some(ui) => match self.prepare_ui_expression(ui, &token.value) {
+                        Ok(e) => {
+                            expression = e;
+                            self.parse_ui_expression_token(ui, &expression, is_output)
+                        }
+                        Err(e) => Err(e),
+                    },
+                    None => self.parse_expression_token(tokens, i, &token, is_loop, is_output),
+                };
                 if let Err(ex) = r {
                     if ex.unexpected {
                         return Err(ex);
@@ -914,10 +958,21 @@ impl ExpressionParser {
                     };
                     let err_text = self.format_error(&err_text, &ex.message);
                     if is_output {
-                        let line = self.cur();
-                        let id = self.err_id(line);
-                        self.sb
-                            .push_str(&format!("<span class=\"err\"{}>{}</span>", id, err_text));
+                        // Keeping the control is what lets the user correct the value that
+                        // broke the line; the error goes below it rather than in its place.
+                        match ui {
+                            Some(ui) if self.enable_ui && self.ui_type_is_not_grid(ui) => {
+                                let control = self.build_ui_control_from_source(ui);
+                                self.sb.push_str(&format!("<span class=\"eq\">{}</span>", control));
+                                self.ui.pending_ui_error = Some(err_text.clone());
+                            }
+                            _ => {
+                                let line = self.cur();
+                                let id = self.err_id(line);
+                                self.sb
+                                    .push_str(&format!("<span class=\"err\"{}>{}</span>", id, err_text));
+                            }
+                        }
                     }
                     let line = self.cur();
                     self.record_error(line, &ex.message, self.debug);
@@ -963,6 +1018,36 @@ impl ExpressionParser {
                 self.sb.push_str(&v);
             } else {
                 let html = p.to_html()?;
+                if !html.is_empty() {
+                    self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The uncached path of `ParseTokens` for an expression that a `#UI` control drives.
+    fn parse_ui_expression_token(&mut self, ui: usize, expression: &str, is_output: bool) -> CResult<()> {
+        let p = self.parser.as_ref().unwrap();
+        p.parse(expression, true)?;
+        if self.calculate && self.is_val > -1 {
+            p.calculate(is_output, -1)?;
+        } else {
+            p.define_custom_units()?;
+        }
+        if is_output {
+            if self.is_val == 1 && self.calculate {
+                let v = p.result_as_val();
+                self.sb.push_str(&v);
+            } else {
+                let mut html = p.to_html()?;
+                if self.enable_ui {
+                    html = if self.ui_type_is_not_grid(ui) {
+                        self.inject_ui_input(ui, &html)
+                    } else {
+                        String::new()
+                    };
+                }
                 if !html.is_empty() {
                     self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
                 }
@@ -1277,11 +1362,7 @@ impl ExpressionParser {
             Keyword::Phasor => self.p().phasor.set(true),
             Keyword::Complex => self.p().phasor.set(false),
             Keyword::Settings => self.parse_keyword_settings(s),
-            Keyword::Ui => {
-                self.p().note_out_of_scope("#UI forms");
-                let msg = crate::parsers::math_parser::input::out_of_scope("#UI").message;
-                self.append_error(s, &msg);
-            }
+            Keyword::Ui => return self.parse_keyword_ui(s),
             Keyword::ProjectPath | Keyword::LibraryPath => {}
             Keyword::Global | Keyword::Local => {}
             _ => return Ok(KeywordResult::None),

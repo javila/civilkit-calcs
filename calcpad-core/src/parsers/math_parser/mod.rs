@@ -13,6 +13,7 @@ pub mod output;
 pub mod solve_block;
 pub mod syntax_analyser;
 pub mod tokens;
+pub mod ui;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};

@@ -43,6 +43,8 @@ pub mod plotter;
 pub mod settings;
 pub mod solver;
 pub mod sort;
+pub mod ui_dto;
+pub mod ui_syntax;
 pub mod validator;
 pub mod vector;
 

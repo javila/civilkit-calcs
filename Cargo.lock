@@ -26,6 +26,7 @@ name = "calcpad-core"
 version = "0.1.0"
 dependencies = [
  "miniz_oxide",
+ "serde_json",
 ]
 
 [[package]]
