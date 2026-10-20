@@ -13,6 +13,7 @@ use crate::base_types::real_value::RealValue;
 use crate::base_types::value::Value;
 use crate::calcpad_error::{CalcpadError, CalcpadErrorSource};
 use crate::extension_methods::{tag_end_index, trim, trim_end};
+use crate::markdig;
 use crate::math_parser_exception::{CResult, MathParserException};
 use crate::messages;
 use crate::netfmt::{self, fmt, html_encode};
@@ -26,6 +27,8 @@ use condition::{Condition, REMOVE_CONDITION_KEYWORD};
 use loops::{Loop, LoopKind, MAX_COUNT};
 
 const MAX_HTML_LINES: i32 = 200000;
+// Markdig is super-linear on pathological input, so a block is capped by size as well as by line count.
+const MAX_MARKDOWN_CHARS: usize = 4_000_000;
 
 /// Appended to the error of a condition that could not be evaluated (deviation D1).
 pub const UNRESOLVED_CONDITION: &str =
@@ -279,6 +282,8 @@ pub struct ExpressionParser {
     parse_mode: ParseMode,
     mode_suppressed: bool,
     parse_mode_stack: Vec<(ParseMode, bool)>,
+    md_buffer: String,
+    md_lines: Vec<(usize, i32)>,
     last_expression_failed: Option<(String, String)>,
     err_index: i32,
     first_err_index_by_line: std::collections::HashMap<usize, i32>,
@@ -337,6 +342,8 @@ impl ExpressionParser {
             parse_mode: ParseMode::Cpd,
             mode_suppressed: false,
             parse_mode_stack: Vec::new(),
+            md_buffer: String::new(),
+            md_lines: Vec::new(),
             last_expression_failed: None,
             err_index: 0,
             first_err_index_by_line: std::collections::HashMap::new(),
@@ -482,6 +489,7 @@ impl ExpressionParser {
                 self.append_error(&t, &ex.message);
             }
         }
+        self.flush_markdown();
         self.finalize(line_count);
     }
 
@@ -606,9 +614,9 @@ impl ExpressionParser {
                         self.condition.keyword_length()
                     };
                     let rest: String = ts.chars().skip(skip_chars).collect();
-                    let toks = self.get_tokens(&rest);
+                    let mut toks = self.get_tokens(&rest);
                     if self.is_markdown_on {
-                        self.p().note_out_of_scope("markdown");
+                        parse_markdown(&mut toks);
                     }
                     let toks = Rc::new(RefCell::new(toks));
                     self.line_cache[cl] = LineInfo {
@@ -630,6 +638,7 @@ impl ExpressionParser {
                 }
             }
         }
+        self.flush_markdown();
         if self.current_line as usize == line_count && (self.calculate || !self.is_paused()) {
             let if_not_closed = self.condition.id > 0 && !self.condition.is_loop();
             let loop_not_closed = !self.loops.is_empty();
@@ -840,6 +849,8 @@ impl ExpressionParser {
         self.current_line = self.start_line as isize - 1;
         self.is_visible = true;
         self.visibility_stack.clear();
+        self.md_buffer.clear();
+        self.md_lines.clear();
     }
 
     fn finalize(&mut self, line_count: usize) {
@@ -1065,11 +1076,25 @@ impl ExpressionParser {
                 messages::The_output_is_longer_than_0_lines_The_rest_will_be_skipped,
                 &[&MAX_HTML_LINES.to_string()],
             );
+            self.flush_markdown();
             self.append_error(line, &msg);
             return;
         }
         if self.parse_mode == ParseMode::Markdown {
-            self.p().note_out_of_scope("markdown");
+            if self.md_buffer.len() + line.len() > MAX_MARKDOWN_CHARS {
+                self.html_lines = MAX_HTML_LINES;
+                self.flush_markdown();
+                let msg = fmt(
+                    messages::The_output_is_longer_than_0_lines_The_rest_will_be_skipped,
+                    &[&MAX_HTML_LINES.to_string()],
+                );
+                self.append_error(line, &msg);
+                return;
+            }
+            self.md_buffer.push_str(line);
+            self.md_buffer.push('\n');
+            let source_line = self.p().line.get();
+            self.md_lines.push((self.cur(), source_line));
             return;
         }
         let html_id = self.html_id();
@@ -1081,6 +1106,34 @@ impl ExpressionParser {
             self.sb.push_str(&insert_attribute(trimmed, &html_id));
         }
         self.sb.push('\n');
+    }
+
+    /// `FlushMarkdown`: renders the buffered markdown, tagging each top level block with
+    /// its first source line.
+    fn flush_markdown(&mut self) {
+        if self.md_lines.is_empty() {
+            return;
+        }
+        let doc = markdig::parse(&self.md_buffer, &markdig::Pipeline::markdown_mode());
+        for (block_line, html) in markdig::render_blocks(&doc) {
+            if self.parser.as_ref().is_some_and(|p| p.is_canceled.get()) {
+                break;
+            }
+            let html = html.trim_end();
+            if html.is_empty() {
+                continue;
+            }
+            let (line, source_line) = self.md_lines[block_line.min(self.md_lines.len() - 1)];
+            let attributes = self.line_attributes(line, source_line);
+            if attributes.is_empty() {
+                self.sb.push_str(html);
+            } else {
+                self.sb.push_str(&insert_attribute(html, &attributes));
+            }
+            self.sb.push('\n');
+        }
+        self.md_buffer.clear();
+        self.md_lines.clear();
     }
 
     // ----- keywords (ExpressionParser.Keywords.cs) --------------------------------------
@@ -1117,11 +1170,9 @@ impl ExpressionParser {
         match kw {
             Keyword::Html => self.set_parse_mode(&chars, kw, ParseMode::Html),
             Keyword::Cpd => self.set_parse_mode(&chars, kw, ParseMode::Cpd),
-            Keyword::Markdown => {
-                self.p().note_out_of_scope("markdown");
-                self.set_parse_mode(&chars, kw, ParseMode::Markdown)
-            }
+            Keyword::Markdown => self.set_parse_mode(&chars, kw, ParseMode::Markdown),
             Keyword::EndHtml | Keyword::EndCpd | Keyword::EndMarkdown => {
+                self.flush_markdown();
                 let (m, sup) = self.parse_mode_stack.pop().unwrap_or((ParseMode::Cpd, false));
                 self.parse_mode = m;
                 self.mode_suppressed = sup;
@@ -1230,6 +1281,7 @@ impl ExpressionParser {
     }
 
     fn set_parse_mode(&mut self, s: &[char], keyword: Keyword, mode: ParseMode) {
+        self.flush_markdown();
         self.parse_mode_stack.push((self.parse_mode, self.mode_suppressed));
         self.parse_mode = mode;
         let kl = keyword_length(keyword);
@@ -1904,6 +1956,83 @@ fn parse_int(s: &str) -> Option<i32> {
 }
 
 /// `InsertAttribute(s, attr)` (only used with debug ids).
+/// `ParseMarkdown(tokens)`: renders the comment tokens of a line as markdown (`#md on`).
+/// The text tokens are joined with a record separator, rendered together and split back.
+fn parse_markdown(tokens: &mut Vec<Token>) {
+    if tokens.is_empty() {
+        return;
+    }
+    const RS: char = '\u{001E}';
+    let mut sb = String::new();
+    let starts_with_expression = tokens[0].ttype == TokenTypes::Expression;
+    if starts_with_expression {
+        sb.push(RS);
+    }
+    let n = tokens.len();
+    for token in tokens.iter() {
+        if token.ttype != TokenTypes::Expression {
+            if n == 1 {
+                sb.push_str(token.value.trim_end());
+            } else {
+                sb.push_str(&token.value);
+                sb.push(RS);
+            }
+        }
+    }
+    let doc = markdig::parse(&sb, &markdig::Pipeline::comments());
+    let result = markdig::render(&doc, true);
+    // SplitEnumerator: Current starts empty, MoveNext fails once the rest is empty.
+    let mut rest: &str = &result;
+    let mut move_next = |current: &mut String| -> bool {
+        if rest.is_empty() {
+            return false;
+        }
+        match rest.find(RS) {
+            None => {
+                *current = rest.to_string();
+                rest = "";
+            }
+            Some(i) => {
+                *current = rest[..i].to_string();
+                rest = &rest[i + RS.len_utf8()..];
+            }
+        }
+        true
+    };
+    let mut cs = String::new();
+    if starts_with_expression {
+        // `Current` is still empty here, so CalcpadCE always skips the first section.
+        move_next(&mut cs);
+    }
+    let mut i = 0;
+    while i < n {
+        let mut t = tokens[i].ttype;
+        if t != TokenTypes::Expression {
+            if !move_next(&mut cs) {
+                break;
+            }
+            if tokens[i].value.starts_with('#') {
+                t = TokenTypes::Html;
+            }
+            tokens[i] = Token {
+                value: cs.clone(),
+                ttype: t,
+                cache_id: -1,
+            };
+        }
+        i += 1;
+    }
+    while move_next(&mut cs) {
+        if !cs.is_empty() {
+            tokens.push(Token {
+                value: cs.clone(),
+                ttype: TokenTypes::Html,
+                cache_id: -1,
+            });
+        }
+    }
+}
+
 pub fn insert_attribute(s: &str, attr: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() > 2 && chars[0] == '<' && chars[1].is_alphabetic() {
