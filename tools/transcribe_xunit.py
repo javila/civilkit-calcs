@@ -104,7 +104,9 @@ class Translator:
             kind, v = toks[i]
             if depth == 0 and v in stop:
                 break
-            if v in "([{":
+            if v == "[" and self.is_collection(toks, i):
+                pass  # consumed whole by atom()
+            elif v in "([{":
                 depth += 1
             elif v in ")]}":
                 if depth == 0:
@@ -233,6 +235,8 @@ class Translator:
                 if name not in m:
                     raise Untranslatable("double." + name)
                 return m[name], i + 3
+            if v == "Validator" and nxt == "." and toks[i + 2][1] == "IsVariable":
+                return "calcpad_core::validator::is_variable", i + 3
             if v == "TestCalc" and nxt == ".":
                 name = toks[i + 2][1]
                 args, j = self.args(toks, i + 3)
@@ -259,6 +263,12 @@ class Translator:
                 return ".Run", i + 2
             if name in ("Real", "Imaginary", "Complex") and after != "(":
                 return f".{name}()", i + 2
+            if name == "Concat" and after == "(":
+                args, j = self.args(toks, i + 2)
+                return f".iter().map(|s| s.to_string()).chain({args[0]}).collect::<Vec<String>>()", j
+            if name == "ToArray" and after == "(":
+                assert toks[i + 3][1] == ")"
+                return "", i + 4
             if name == "Message":
                 return ".message", i + 2
             if name == "HtmlResult":
@@ -275,7 +285,21 @@ class Translator:
             return "." + name, i + 2
         if v == "=>":
             raise Untranslatable("lambda")
+        if v == "[" and self.is_collection(toks, i):
+            # C# 12 collection expression of strings: [a, b, ...]
+            items = []
+            j = i + 1
+            while toks[j][1] != "]":
+                e, j = self.expr(toks, j, {",", "]"})
+                items.append(f"({e}).to_string()")
+                if toks[j][1] == ",":
+                    j += 1
+            return "vec![" + ", ".join(items) + "]", j + 1
         return v, i + 1
+
+    @staticmethod
+    def is_collection(toks, i):
+        return i == 0 or toks[i - 1][0] not in ("id", "num") and toks[i - 1][1] not in (")", "]")
 
     def interpolated(self, v):
         body = v[2:-1]
@@ -316,6 +340,14 @@ class Translator:
     def helper_call(self, name, args):
         overloads = self.helpers[name]
         args = [f"&{a}" if isinstance(a, str) and a in self.string_names else a for a in args]
+        if len(overloads) == 1 and name not in self.named_helpers:
+            m = re.search(r"\(([^)]*)\)", overloads[0])
+            params = [p.strip() for p in m.group(1).split(",") if p.strip()]
+            for p in params[len(args):]:
+                if "=" not in p:
+                    raise Untranslatable(f"missing argument for {name}")
+                default = p.split("=", 1)[1].strip()
+                args.append(rust_string(default) if default.startswith('"') else default)
         if name in self.named_helpers:
             pos = [a for a in args if isinstance(a, str)]
             named = [f'("{a[1]}", {a[2]})' for a in args if not isinstance(a, str)]
@@ -328,6 +360,19 @@ class Translator:
     def assert_call(self, toks, i):
         name = toks[i + 2][1]
         j = i + 3
+        if name == "ThrowsAny":
+            # Assert.ThrowsAny<Exception>( () => body ): any exception type
+            if [t[1] for t in toks[j : j + 3]] != ["<", "Exception", ">"]:
+                raise Untranslatable("ThrowsAny type")
+            j += 3
+            assert [t[1] for t in toks[j + 1 : j + 4]] == ["(", ")", "=>"], toks[j : j + 5]
+            if toks[j + 4][1] == "{":
+                body, k = self.block(toks, j + 4)
+            else:
+                e, k = self.expr(toks, j + 4, {")"})
+                body = "{ " + e + "; }"
+            assert toks[k][1] == ")"
+            return f"assert_throws_any(|| {body})", k + 1
         if name == "Throws":
             # Assert.Throws<MathParserException>( () => { body } )
             if [t[1] for t in toks[j : j + 3]] != ["<", "MathParserException", ">"]:
@@ -393,6 +438,15 @@ class Translator:
                 self.string_names.add(name)
                 e, j = self.expr(toks, i + 4, {";"})
                 stmts.append(f"let {name} = {e};")
+                i = j + 1
+                continue
+            if vals[0] in ("string", "double", "int", "bool", "char") and toks[i + 1][0] == "id" and vals[2] == "=":
+                # typed local: `string x = ...;`
+                name = vals[1]
+                if vals[0] == "string":
+                    self.string_names.add(name)
+                e, j = self.expr(toks, i + 3, {";"})
+                stmts.append(f"let mut {name} = {e};")
                 i = j + 1
                 continue
             if vals[0] == "var" and toks[i + 3][0] in ("str", "istr"):
@@ -579,7 +633,7 @@ def transcribe(ref, rel, out_dir):
             tr.string_helpers.add(hname)
     lines = [
         f"//! Transcribed from Calcpad.Tests/{rel} by tools/transcribe_xunit.py.",
-        "#![allow(non_snake_case, non_upper_case_globals, unused_mut, unused_variables, clippy::approx_constant, clippy::excessive_precision, clippy::unnecessary_cast, clippy::eq_op, clippy::identity_op, clippy::needless_borrow, clippy::redundant_clone, clippy::bool_assert_comparison, clippy::useless_format, clippy::clone_on_copy, unused_imports, dead_code, suspicious_double_ref_op, noop_method_call)]",
+        "#![allow(non_snake_case, non_upper_case_globals, unused_mut, unused_variables, clippy::approx_constant, clippy::excessive_precision, clippy::unnecessary_cast, clippy::eq_op, clippy::identity_op, clippy::needless_borrow, clippy::redundant_clone, clippy::bool_assert_comparison, clippy::useless_format, clippy::clone_on_copy, unused_imports, dead_code, suspicious_double_ref_op, noop_method_call, clippy::needless_borrows_for_generic_args)]",
         "mod common;",
         "use common::*;",
         "",
@@ -588,6 +642,9 @@ def transcribe(ref, rel, out_dir):
         toks = tokenize(text)
         if typ == "string[]":
             items = [rust_string(v) for k, v in toks if k == "str"]
+            others = [v for k, v in toks if k != "str" and v not in ("[", "]", ",")]
+            if others:
+                raise SystemExit(f"{name}: non-literal string[] element {others}")
             lines.append(f"const {name}: [&str; {len(items)}] = [{', '.join(items)}];")
         elif typ == "double[]":
             items = []
@@ -619,24 +676,32 @@ def transcribe(ref, rel, out_dir):
             continue
         for header, kind, text in overloads:
             m = re.search(r"(\w+)\s*\(([^)]*)\)", header)
-            params = [p.strip().split() for p in m.group(2).split(",") if p.strip()]
+            params = [p.strip().split(None, 2) for p in m.group(2).split(",") if p.strip()]
             rparams = []
-            for t, n in params:
-                rparams.append(f"{n}: {'&str' if t == 'string' else 'f64'}")
+            for p in params:
+                t, n = p[0], p[1]
+                rt = {"string": "&str", "char": "char", "double": "f64", "int": "i32"}[t]
+                rparams.append(f"{n}: {rt}")
             suffix = ""
             if len(overloads) > 1:
                 suffix = "_str" if params[1][0] == "string" else "_f64"
             toks = tokenize(text)
+            ret = ""
+            if re.search(r"\bstring\[\]\s+\w+\s*\(", header):
+                ret = " -> Vec<String>"
             try:
                 if kind == "block":
                     b, _ = tr.block(toks, 0)
+                elif ret:
+                    e, _ = tr.expr(toks + [("op", ";")], 0, {";"})
+                    b = "{ " + e + " }"
                 else:
                     e, _ = tr.expr(toks + [("op", ";")], 0, {";"})
                     b = "{ " + e + "; }"
             except (Untranslatable, AssertionError) as ex:
                 raise SystemExit(f"helper {hname} untranslatable: {ex}")
             lines.append("#[track_caller]")
-            lines.append(f"fn {hname}{suffix}({', '.join(rparams)}) {b}")
+            lines.append(f"fn {hname}{suffix}({', '.join(rparams)}){ret} {b}")
     lines.append("")
     stats = {"translated": 0, "override": 0, "ignored": 0}
     oos = {}
@@ -669,7 +734,7 @@ def transcribe(ref, rel, out_dir):
         override = OVERRIDES / f"{cls}.{name}.rs"
         if f"{cls}.{base_name}" in oos:
             lines.append("#[test]")
-            lines.append(f'#[ignore = "out of scope for phase 1: {oos[f"{cls}.{base_name}"]}"]')
+            lines.append(f'#[ignore = "out of scope: {oos[f"{cls}.{base_name}"]}"]')
             lines.append(f"fn {rname}() {{}}")
             stats["out_of_scope"] = stats.get("out_of_scope", 0) + 1
             continue
