@@ -58,9 +58,12 @@ import './styles/app.css';
 
 // Monaco worker setup - must run before editor creation
 import './editor/workers';
+// calcpad-rs: answer the Calcpad.Server API with the in-page wasm engine.
+import { installWasmTransport } from './wasm/transport';
 
 /** Runtime check: are we running inside a Tauri webview? */
 const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
+if (!isTauri) (window as any).calcpadEngine = installWasmTransport();
 
 /** Link schemes a worksheet may ask to open outside the app. */
 const EXTERNAL_LINK_SCHEMES = /^(https?|file):/i;

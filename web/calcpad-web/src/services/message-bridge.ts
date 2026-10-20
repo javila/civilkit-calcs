@@ -4,6 +4,7 @@ import type { CalcpadSettings } from 'calcpad-frontend/types/settings';
 import type { ExportVariant } from 'calcpad-frontend/types/api';
 import { mimeFromExtension, bytesToBase64, pdfResponseError } from 'calcpad-frontend';
 import { setAppTheme, coerceAppTheme } from '../editor/app-theme';
+import { serverOnlyMessage } from '../wasm/server-only';
 
 const SETTINGS_KEY = 'calcpad-settings';
 
@@ -94,6 +95,14 @@ export class MessageBridge extends BaseMessageBridge {
         const data = new Uint8Array(await file.arrayBuffer());
         const mimeType = file.type || mimeFromExtension(file.name);
         return `data:${mimeType};base64,${bytesToBase64(data)}`;
+    }
+
+    /** calcpad-rs: exports that need Calcpad.Server say so (see wasm/server-only.ts). */
+    protected handlePlatformMessage(message: any): boolean {
+        const notice = serverOnlyMessage(message?.type);
+        if (notice == null) return false;
+        void this.showAlert('Not available in the browser', notice, 'info');
+        return true;
     }
 
     protected async saveExportedFile(req: ExportRequest): Promise<string | null> {

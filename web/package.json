@@ -1,0 +1,19 @@
+{
+  "name": "calcpad-rs-web",
+  "private": true,
+  "description": "The CalcpadCE web editor (Calcpad.Web/frontend, MIT) running on the calcpad-rs WebAssembly engine",
+  "license": "MIT",
+  "workspaces": [
+    "calcpad-frontend",
+    "calcpad-web"
+  ],
+  "scripts": {
+    "build:wasm": "sh ../tools/build_wasm.sh",
+    "build": "npm run build -w calcpad-frontend && npm run build -w calcpad-web",
+    "dev": "npm run dev -w calcpad-web",
+    "preview": "npm run preview -w calcpad-web"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.1"
+  }
+}

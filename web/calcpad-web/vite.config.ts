@@ -1,4 +1,4 @@
-import { resolveVersion } from '../../../tools/version.mjs';
+import { resolveVersion } from '../version.mjs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import path from 'path';
