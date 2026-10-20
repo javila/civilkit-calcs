@@ -7,6 +7,7 @@ use super::{VecData, Vector, MAX_LENGTH};
 use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::{OptUnit, Unit};
 use crate::base_types::value::Value;
+use crate::calculator::{RealFn, RealOp};
 use crate::exceptions;
 use crate::math_parser_exception::{CResult, MathParserException};
 
@@ -391,6 +392,48 @@ impl Vector {
     pub(crate) fn hp_lcm(&self) -> CResult<RealValue> {
         Err(hp_not_ported())
     }
+}
+
+// ----- static members used by VectorCalculator ---------------------------------------------
+
+/// `HpVector.EvaluateOperator(op, HpVector a, HpVector b, index)`
+pub fn evaluate_operator(_op: RealOp, _a: &Vector, _b: &Vector, _index: i64) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.EvaluateOperator(op, HpVector a, in RealValue b, index)`
+pub fn evaluate_operator_vr(_op: RealOp, _a: &Vector, _b: &RealValue, _index: i64) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.EvaluateOperator(op, in RealValue a, HpVector b, index)`
+pub fn evaluate_operator_rv(_op: RealOp, _a: &RealValue, _b: &Vector, _index: i64) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.EvaluateFunction(f, HpVector a)`
+pub fn evaluate_function(_f: RealFn, _a: &Vector) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.Range(start, end, step)`
+pub fn range(_start: &RealValue, _end: &RealValue, _step: &RealValue) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.CrossProduct(a, b)`
+pub fn cross_product(_a: &Vector, _b: &Vector) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.DotProduct(a, b)`
+pub fn dot_product(_a: &Vector, _b: &Vector) -> CResult<RealValue> {
+    Err(hp_not_ported())
+}
+
+/// `HpVector.Lookup(Vector dest, RealValue value, Relation rel)` (x is this HpVector)
+pub fn lookup(_x: &Vector, _dest: &Vector, _value: &RealValue, _rel: super::Relation) -> CResult<Vector> {
+    Err(hp_not_ported())
 }
 
 /// The HpVector operators (`HpVector op RealValue`, `RealValue op HpVector`,

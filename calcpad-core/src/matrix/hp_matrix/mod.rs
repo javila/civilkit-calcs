@@ -6,9 +6,12 @@
 use super::{Matrix, MatrixType, MAX_SIZE};
 use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::OptUnit;
+use crate::calculator::{RealFn, RealOp};
 use crate::exceptions;
 use crate::math_parser_exception::{CResult, MathParserException};
 use crate::vector::{hp_vector, Relation, Vector};
+
+pub mod numerics;
 
 pub(crate) fn hp_not_ported() -> MathParserException {
     MathParserException::new("HP matrices are not supported by calcpad-rs yet.")
@@ -268,6 +271,100 @@ pub(super) fn add_to(_m: &Matrix, _target: &Matrix, _i: i64, _j: i64) -> CResult
     Err(hp_not_ported())
 }
 pub(super) fn diagonal(_m: &Matrix) -> CResult<Vector> {
+    Err(hp_not_ported())
+}
+
+// ----- conversions and static members used by MatrixCalculator -----------------------------
+
+/// `new HpMatrix(Matrix)`, `new HpColumnMatrix(ColumnMatrix)`, `new HpDiagonalMatrix(DiagonalMatrix)`,
+/// `new HpLowerTriangularMatrix(...)`, `new HpUpperTriangularMatrix(...)`,
+/// `new HpSymmetricMatrix(...)`: the `hp()` conversion of a non-HP matrix.
+pub fn from_matrix(_m: &Matrix) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `new HpMatrix(Vector v)`: a one row HP matrix.
+pub fn from_row_vector(_v: &Vector) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `new HpDiagonalMatrix(Vector v)`
+pub fn diagonal_from_vector(_v: &Vector) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `new HpDiagonalMatrix(int length, in RealValue value)`
+pub fn diagonal_with_value(_n: usize, _value: &RealValue) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `new HpColumnMatrix(int length, RealValue value)`
+pub fn column_with_value(_n: usize, _value: &RealValue) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.Hadamard(a, b)`
+pub fn hadamard(_a: &Matrix, _b: &Matrix) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.Frobenius(a, b)`
+pub fn frobenius(_a: &Matrix, _b: &Matrix) -> CResult<RealValue> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.Kronecker(a, b)`
+pub fn kronecker(_a: &Matrix, _b: &Matrix) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatmulWinograd.Multiply(a, b)`
+pub fn matmul(_a: &Matrix, _b: &Matrix) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `FFT(bool inverse)`
+pub fn fft(_m: &Matrix, _inverse: bool) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.Augment(params HpMatrix[])`
+pub fn augment(_matrices: &[Matrix]) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.Stack(params HpMatrix[])`
+pub fn stack(_matrices: &[Matrix]) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.CreateFromCols(HpVector[] cols, int m)`
+pub fn create_from_cols(_cols: &[Vector], _m: usize) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.CreateFromRows(HpVector[] rows, int n)`
+pub fn create_from_rows(_rows: &[Vector], _n: usize) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.EvaluateOperator(op, HpMatrix a, HpMatrix b, index)`
+pub fn evaluate_operator(_op: RealOp, _a: &Matrix, _b: &Matrix, _index: i64) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.EvaluateOperator(op, HpMatrix a, RealValue b, index)`
+pub fn evaluate_operator_mr(_op: RealOp, _a: &Matrix, _b: &RealValue, _index: i64) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.EvaluateOperator(op, RealValue a, HpMatrix b, index)`
+pub fn evaluate_operator_rm(_op: RealOp, _a: &RealValue, _b: &Matrix, _index: i64) -> CResult<Matrix> {
+    Err(hp_not_ported())
+}
+
+/// `HpMatrix.EvaluateFunction(f, HpMatrix a, index)`
+pub fn evaluate_function(_f: RealFn, _a: &Matrix, _index: i64) -> CResult<Matrix> {
     Err(hp_not_ported())
 }
 
