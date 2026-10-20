@@ -568,3 +568,136 @@ pub fn timer() -> f64 {
 pub fn complex_from_real(r: RealValue) -> ComplexValue {
     ComplexValue::from_real(&r)
 }
+
+// ----- Typed delegates used by vectors and matrices -----------------------------------------
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RealOpKind {
+    Operator,
+    Function2,
+}
+
+/// `Calculator.Operator<RealValue>` as returned by `GetOperator` and `GetFunction2`.
+#[derive(Clone, Copy)]
+pub struct RealOp<'a> {
+    calc: &'a Calculator,
+    index: i64,
+    kind: RealOpKind,
+}
+
+/// `Calculator.Function<RealValue>` as returned by `GetFunction`.
+#[derive(Clone, Copy)]
+pub struct RealFn<'a> {
+    calc: &'a Calculator,
+    index: i64,
+}
+
+/// The explicit `(RealValue)ComplexValue` conversion applied by the complex calculator's
+/// typed delegates.
+fn explicit_real(v: Value) -> CResult<RealValue> {
+    match v {
+        Value::Real(r) => Ok(r),
+        Value::Complex(c) => {
+            if !c.is_real() {
+                return Err(exceptions::MustBeReal(exceptions::Items::Value));
+            }
+            Ok(RealValue::new(c.a, c.units))
+        }
+        _ => Err(MathParserException::unexpected("Specified cast is not valid.")),
+    }
+}
+
+fn scalar_real(v: Value) -> CResult<RealValue> {
+    match v {
+        Value::Real(r) => Ok(r),
+        other => explicit_real(other),
+    }
+}
+
+impl<'a> RealOp<'a> {
+    pub fn apply(&self, a: &RealValue, b: &RealValue) -> CResult<RealValue> {
+        if self.calc.is_complex {
+            // ComplexCalculator.GetOperator and GetFunction2 both index _operators.
+            let r = complex_calculator::evaluate_operator(
+                self.index,
+                &ComplexValue::from_real(a),
+                &ComplexValue::from_real(b),
+            )?;
+            return explicit_real(r);
+        }
+        match self.kind {
+            RealOpKind::Operator => {
+                if self.index == 0 {
+                    real_calculator::pow(a, b)
+                } else {
+                    scalar_real(real_calculator::evaluate_operator(self.index, a, b)?)
+                }
+            }
+            RealOpKind::Function2 => {
+                if self.index == ROOT_FUNCTION_INDEX {
+                    real_calculator::root(a, b, false)
+                } else {
+                    scalar_real(real_calculator::evaluate_function2(self.calc, self.index, a, b)?)
+                }
+            }
+        }
+    }
+}
+
+impl<'a> RealFn<'a> {
+    pub fn apply(&self, a: &RealValue) -> CResult<RealValue> {
+        if self.calc.is_complex {
+            let r = complex_calculator::evaluate_function(self.calc, self.index, &ComplexValue::from_real(a))?;
+            return explicit_real(r);
+        }
+        match self.index {
+            SQR_FUNCTION_INDEX | SQRT_FUNCTION_INDEX => Ok(real_calculator::sqrt(a, false)),
+            CBRT_FUNCTION_INDEX => Ok(real_calculator::cbrt(a, false)),
+            i => scalar_real(real_calculator::evaluate_function(self.calc, i, a)?),
+        }
+    }
+}
+
+/// `Calculator.IsZeroPreservingFunction(index)`: f(0) == 0 for the real calculator.
+pub fn is_zero_preserving_function(index: i64) -> bool {
+    if index < 0 {
+        return index == -1;
+    }
+    thread_local! {
+        static ZERO_PRESERVING: Vec<bool> = {
+            let calc = Calculator::new(false);
+            (0..FUNCTION_NAMES.len() as i64)
+                .map(|i| match calc.get_function(i).apply(&RealValue::ZERO) {
+                    Ok(v) => v.equals(&RealValue::ZERO),
+                    Err(_) => false,
+                })
+                .collect()
+        };
+    }
+    ZERO_PRESERVING.with(|z| z.get(index as usize).copied().unwrap_or(false))
+}
+
+impl Calculator {
+    /// `GetOperator(index)`
+    pub fn get_operator(&self, index: i64) -> RealOp<'_> {
+        RealOp {
+            calc: self,
+            index,
+            kind: RealOpKind::Operator,
+        }
+    }
+
+    /// `GetFunction2(index)`
+    pub fn get_function2(&self, index: i64) -> RealOp<'_> {
+        RealOp {
+            calc: self,
+            index,
+            kind: RealOpKind::Function2,
+        }
+    }
+
+    /// `GetFunction(index)`
+    pub fn get_function(&self, index: i64) -> RealFn<'_> {
+        RealFn { calc: self, index }
+    }
+}

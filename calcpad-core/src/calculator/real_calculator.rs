@@ -222,7 +222,7 @@ pub fn sqrt(value: &RealValue, is_unit: bool) -> RealValue {
     }
 }
 
-fn cbrt(value: &RealValue, is_unit: bool) -> RealValue {
+pub fn cbrt(value: &RealValue, is_unit: bool) -> RealValue {
     let u = &value.units;
     if let Some(uu) = u {
         if uu.is_dimensionless() {
@@ -236,7 +236,7 @@ fn cbrt(value: &RealValue, is_unit: bool) -> RealValue {
     }
 }
 
-fn root(value: &RealValue, root: &RealValue, is_unit: bool) -> CResult<RealValue> {
+pub fn root(value: &RealValue, root: &RealValue, is_unit: bool) -> CResult<RealValue> {
     let n = get_root(&Value::Real(root.clone()))?;
     let u = &value.units;
     let d = match u {

@@ -61,7 +61,7 @@ impl Loop {
     pub fn for_loop(start_line: usize, start: &Value, end: &Value, counter: VarRef, id: usize) -> CResult<Loop> {
         let diff = Value::s_sub(start, end)?;
         let count = diff.re().abs() + 1.0;
-        let inc = diff.neg();
+        let inc = Value::s_sub_neg(&diff);
         let inc_re = math_sign(inc.re())? as f64;
         let inc_im = math_sign(inc.im())? as f64;
         let inc_units = inc.units().clone();

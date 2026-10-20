@@ -32,13 +32,16 @@ pub mod calculator;
 pub mod exceptions;
 pub mod extension_methods;
 pub mod math_parser_exception;
+pub mod matrix;
 pub mod messages;
 pub mod netfmt;
 pub mod output;
 pub mod parsers;
 pub mod settings;
 pub mod solver;
+pub mod sort;
 pub mod validator;
+pub mod vector;
 
 pub use math_parser_exception::{CResult, MathParserException};
 pub use parsers::math_parser::MathParser;

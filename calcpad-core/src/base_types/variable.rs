@@ -86,7 +86,7 @@ impl Variable {
         let units: OptUnit = match &*self.value.borrow() {
             Some(Value::Real(r)) => r.units.clone(),
             Some(Value::Complex(c)) => c.units.clone(),
-            None => None,
+            _ => None,
         };
         *self.value.borrow_mut() = Some(Value::Complex(ComplexValue::from_c(number, units)));
     }
@@ -96,7 +96,7 @@ impl Variable {
         let nv = match cur {
             Some(Value::Real(r)) => Value::Real(RealValue::new(number, r.units.clone())),
             Some(Value::Complex(c)) => Value::Real(RealValue::new(number, c.units.clone())),
-            None => Value::Complex(ComplexValue::num(number)),
+            _ => Value::Complex(ComplexValue::num(number)),
         };
         *self.value.borrow_mut() = Some(nv);
     }
@@ -106,7 +106,12 @@ impl Variable {
         let nv = match cur {
             Some(Value::Real(r)) => Value::Real(RealValue::new(r.d, units)),
             Some(Value::Complex(c)) => Value::Complex(ComplexValue::new(c.a, c.b, units)),
-            None => return,
+            // ((Vector)Value).SetUnits(units)
+            Some(Value::Vector(v)) => {
+                let _ = v.set_units(&units);
+                return;
+            }
+            _ => return,
         };
         *self.value.borrow_mut() = Some(nv);
     }

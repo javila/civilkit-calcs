@@ -295,7 +295,7 @@ impl MathParser {
             {
                 let va = a.const_value();
                 if content == NEG_STR {
-                    return Ok(Expr::Const(va.neg()));
+                    return Ok(Expr::Const(va.neg()?));
                 }
                 let mut vb = Value::evaluate_function(self.calc(), index, &va)?;
                 self.normalize_units(&mut vb);
@@ -373,7 +373,7 @@ impl MathParser {
         match e {
             Expr::Const(v) => Ok(v.clone()),
             Expr::Var(v) => v.value().ok_or_else(|| exceptions::InvalidOperand("")),
-            Expr::Neg(a) => Ok(self.eval_expr(a)?.neg()),
+            Expr::Neg(a) => self.eval_expr(a)?.neg(),
             Expr::Bin(op, a, b) => {
                 let va = self.eval_expr(a)?;
                 let vb = self.eval_expr(b)?;
@@ -389,9 +389,9 @@ impl MathParser {
                     BinOp::Ge => Value::ge(&va, &vb),
                     BinOp::Eq => Value::equal(&va, &vb),
                     BinOp::Ne => Value::not_equal(&va, &vb),
-                    BinOp::And => Ok(Value::and(&va, &vb)),
-                    BinOp::Or => Ok(Value::or(&va, &vb)),
-                    BinOp::Xor => Ok(Value::xor(&va, &vb)),
+                    BinOp::And => Value::and(&va, &vb),
+                    BinOp::Or => Value::or(&va, &vb),
+                    BinOp::Xor => Value::xor(&va, &vb),
                 }
             }
             Expr::CalcOp(index, a, b) => {

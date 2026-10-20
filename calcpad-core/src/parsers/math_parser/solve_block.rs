@@ -612,6 +612,12 @@ impl SolverBlock {
                     Value::Complex(_) => return Err(MathParserException::unexpected(
                         "Unable to cast object of type 'Calcpad.Core.ComplexValue' to type 'Calcpad.Core.RealValue'.",
                     )),
+                    other => {
+                        return Err(MathParserException::unexpected(format!(
+                            "Unable to cast object of type '{}' to type 'Calcpad.Core.RealValue'.",
+                            other.to_cs_string()
+                        )))
+                    }
                 };
             parser.set_variable(&s, Value::Real(rv));
         }
@@ -629,6 +635,7 @@ impl SolverBlock {
                     Value::Complex(ComplexValue::new(c.a, c.b, su))
                 }
             }
+            other => other,
         };
         *self.result.borrow_mut() = res.clone();
         Ok(res)

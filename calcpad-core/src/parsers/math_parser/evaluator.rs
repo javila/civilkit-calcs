@@ -13,6 +13,8 @@ use crate::base_types::value::Value;
 use crate::calculator::{index_out_of_range, NEG_STR};
 use crate::exceptions;
 use crate::math_parser_exception::CResult;
+use crate::matrix::{hp_matrix, Matrix};
+use crate::vector::Vector;
 
 struct Stack {
     values: Vec<Value>,
@@ -83,7 +85,7 @@ impl MathParser {
                         return Err(exceptions::MissingOperand());
                     }
                     let a = stack.pop()?;
-                    stack.push(a.neg());
+                    stack.push(a.neg()?);
                 }
                 TokenTypes::Function => {
                     if stack.at_base() {
@@ -377,14 +379,7 @@ impl MathParser {
     /// `Evaluator.NormalizeUnits(ref IValue)`
     pub(crate) fn normalize_units(&self, ival: &mut Value) {
         match ival {
-            Value::Real(real) => {
-                if let Some(u) = &real.units {
-                    let d = u.normalize();
-                    if d != 1.0 {
-                        *real = RealValue::new(real.d * d, real.units.clone());
-                    }
-                }
-            }
+            Value::Real(real) => normalize_real(real),
             Value::Complex(c) => {
                 if let Some(u) = &c.units {
                     let d = u.normalize();
@@ -393,7 +388,52 @@ impl MathParser {
                     }
                 }
             }
+            Value::Vector(v) => normalize_vector(v),
+            Value::Matrix(m) => {
+                if m.is_hp() {
+                    if let Some(u) = hp_matrix::units(m) {
+                        let d = u.normalize();
+                        if d != 1.0 {
+                            hp_matrix::scale(m, d);
+                        }
+                    }
+                } else {
+                    for r in m.rows() {
+                        normalize_vector(&r);
+                    }
+                }
+            }
         }
+    }
+}
+
+fn normalize_real(real: &mut RealValue) {
+    if let Some(u) = &real.units {
+        let d = u.normalize();
+        if d != 1.0 {
+            *real = RealValue::new(real.d * d, real.units.clone());
+        }
+    }
+}
+
+/// `Evaluator.NormalizeUnits(Vector)`
+fn normalize_vector(vector: &Vector) {
+    if vector.is_hp() {
+        if let Some(u) = vector.hp_units() {
+            let d = u.normalize();
+            if d != 1.0 {
+                vector.hp_scale(d);
+            }
+        }
+        return;
+    }
+    for i in 0..vector.size() {
+        let _ = vector.update_by_ref(i, &mut |v| {
+            if v.units.is_some() {
+                normalize_real(v);
+            }
+            Ok(())
+        });
     }
 }
 
@@ -411,7 +451,62 @@ pub fn apply_units(ival: &mut Value, u: &OptUnit) -> CResult<OptUnit> {
     match ival {
         Value::Real(real) => apply_units_real(real, u),
         Value::Complex(c) => apply_units_complex(c, u),
+        Value::Vector(v) => apply_units_vector(v, u),
+        Value::Matrix(m) => apply_units_matrix(m, u),
     }
+}
+
+/// `ApplyUnits(Matrix M, Unit u)`: converts the matrix in place.
+fn apply_units_matrix(m: &Matrix, u: &OptUnit) -> CResult<OptUnit> {
+    if m.is_hp() {
+        let mut value = RealValue::new(1.0, hp_matrix::units(m));
+        let result = apply_units_real(&mut value, u)?;
+        let d = value.d;
+        if d != 1.0 {
+            hp_matrix::scale(m, d);
+        }
+        hp_matrix::set_units_prop(m, result.clone());
+        return Ok(result);
+    }
+    let rows = m.rows();
+    if rows.is_empty() {
+        return Err(crate::vector::index_was_outside());
+    }
+    let result = apply_units_vector(&rows[0], u)?;
+    for r in &rows[1..] {
+        apply_units_vector(r, u)?;
+    }
+    Ok(result)
+}
+
+/// `ApplyUnits(Vector vector, Unit u)`: converts the vector in place.
+fn apply_units_vector(vector: &Vector, u: &OptUnit) -> CResult<OptUnit> {
+    if vector.size() == 0 {
+        return Ok(u.clone());
+    }
+    if vector.is_hp() {
+        let hu = vector.hp_units();
+        if u.is_none() && hu.is_none() {
+            return Ok(None);
+        }
+        let mut value = RealValue::new(1.0, hu);
+        let result = apply_units_real(&mut value, u)?;
+        let d = value.d;
+        if d != 1.0 {
+            vector.hp_scale(d);
+        }
+        vector.set_hp_units(result.clone());
+        return Ok(result);
+    }
+    for i in (0..vector.size()).rev() {
+        vector.update_by_ref(i, &mut |v| apply_units_real(v, u).map(|_| ()))?;
+    }
+    let mut result = None;
+    vector.update_by_ref(0, &mut |v| {
+        result = apply_units_real(v, u)?;
+        Ok(())
+    })?;
+    Ok(result)
 }
 
 fn apply_units_complex(value: &mut ComplexValue, u: &OptUnit) -> CResult<OptUnit> {

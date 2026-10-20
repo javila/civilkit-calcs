@@ -504,6 +504,10 @@ impl MathParser {
                 *self.result.borrow_mut() = Value::Real(RealValue::new(c.a, self.units()));
                 Ok(c.a)
             }
+            _ => {
+                *self.result.borrow_mut() = r.clone();
+                Err(exceptions::MustBeScalar(exceptions::Items::Result))
+            }
         }
     }
 
