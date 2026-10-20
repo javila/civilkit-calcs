@@ -127,7 +127,8 @@ pub fn format_general(d: f64, precision: usize) -> String {
             "-\u{221E}".to_string()
         };
     }
-    let neg = d.is_sign_negative() && d != 0.0;
+    // .NET Core 3.0 and later print negative zero as "-0".
+    let neg = d.is_sign_negative();
     let max_digits: i32 = if precision == 0 { 15 } else { precision as i32 };
     let (ds, scale) = if d == 0.0 {
         (Vec::new(), 0)
