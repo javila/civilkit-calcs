@@ -5,7 +5,7 @@ use super::is_assignment;
 use super::tokens::{Rpn, Token, TokenKind, TokenTypes, ValueTypes, DEFAULT_ORDER};
 use super::{MathParser, VariableSubstitutionOptions};
 use crate::base_types::value::Value;
-use crate::calculator::{operator_index, NEG_CHAR, NEG_STR, OPERATOR_ORDER, SWITCH_INDEX};
+use crate::calculator::{operator_index, vector_calculator, NEG_CHAR, NEG_STR, OPERATOR_ORDER, SWITCH_INDEX};
 use crate::exceptions;
 use crate::math_parser_exception::CResult;
 use crate::messages;
@@ -73,7 +73,7 @@ impl RenderToken {
                 r.index = -1;
             }
             TokenKind::Matrix(_) => {
-                r.parameter_count = (t.index / 10000000) as i32 - 1;
+                r.parameter_count = (t.index / crate::vector::MAX_LENGTH) as i32 - 1;
                 r.index = -1;
             }
             _ => {}
@@ -85,11 +85,18 @@ impl RenderToken {
             let mut v = Value::zero();
             match &t.kind {
                 TokenKind::Value(val) => v = val.clone(),
-                TokenKind::Variable(Some(var)) => {
-                    if let Some(val) = var.value() {
-                        v = val;
+                TokenKind::Variable(Some(var)) => match var.value() {
+                    Some(Value::Vector(_)) => {
+                        r.val_type = ValueTypes::Vector;
+                        return r;
                     }
-                }
+                    Some(Value::Matrix(_)) => {
+                        r.val_type = ValueTypes::Matrix;
+                        return r;
+                    }
+                    Some(val) => v = val,
+                    None => {}
+                },
                 _ => {}
             }
             r.val_type = if v.is_unit() {
@@ -286,7 +293,11 @@ impl MathParser {
                         }
                     }
                 }
-                let res = writer.format_value(&self.result.borrow());
+                let res = match &*self.result.borrow() {
+                    Value::Vector(v) => writer.format_vector(v),
+                    Value::Matrix(m) => writer.format_matrix(m),
+                    r => writer.format_value(r),
+                };
                 if has_operators && res != subst || subst.is_empty() {
                     if !sb.is_empty() {
                         sb.push_str(&assignment);
@@ -350,8 +361,11 @@ impl<'a> Renderer<'a> {
                 } else if tt == TokenTypes::Operator {
                     self.render_operator_token(&mut t, b)?;
                 } else {
-                    if tt == TokenTypes::VectorIndex || tt == TokenTypes::MatrixIndex {
-                        return Err(super::input::out_of_scope("Vector and matrix element access"));
+                    if tt == TokenTypes::VectorIndex {
+                        self.render_vector_index_token(&mut t, b)?;
+                    } else if tt == TokenTypes::MatrixIndex {
+                        let a = self.pop()?;
+                        self.render_matrix_index_token(&mut t, a, b)?;
                     } else if matches!(
                         tt,
                         TokenTypes::Function2
@@ -439,7 +453,11 @@ impl<'a> Renderer<'a> {
     fn render_solver(&mut self, index: usize) -> CResult<String> {
         let sb = self.p.solve_blocks.borrow()[index].clone();
         if self.substitute {
-            return Ok(self.writer.format_value(&sb.result()));
+            return Ok(match sb.result() {
+                Value::Vector(v) => self.writer.format_vector(&v),
+                Value::Matrix(m) => self.writer.format_matrix(&m),
+                r => self.writer.format_value(&r),
+            });
         }
         self.p.output_has_variables.set(true);
         if self.writer.format_type() == OutputFormat::Html {
@@ -498,6 +516,28 @@ impl<'a> Renderer<'a> {
             var.and_then(|v| v.value())
         };
         match ival {
+            Some(Value::Vector(vector)) => {
+                let s = if !self.p.settings.borrow().substitute
+                    && self.p.function_definition_index.get() < 0
+                    && self.p.is_calculated.get()
+                {
+                    self.text_writer.format_vector(&vector)
+                } else {
+                    String::new()
+                };
+                t.content = self.writer.format_variable(&format!("\u{20D7}{}", t.content), &s, true);
+            }
+            Some(Value::Matrix(matrix)) => {
+                let s = if !self.p.settings.borrow().substitute
+                    && self.p.function_definition_index.get() < 0
+                    && self.p.is_calculated.get()
+                {
+                    self.text_writer.format_matrix(&matrix)
+                } else {
+                    String::new()
+                };
+                t.content = self.writer.format_variable(&t.content, &s, true);
+            }
             Some(scalar) => {
                 if self.substitute {
                     t.content = self.writer.format_value(&scalar);
@@ -524,6 +564,75 @@ impl<'a> Renderer<'a> {
                 t.content = self.writer.format_variable(&t.content, "", false);
             }
         }
+    }
+
+    /// `RenderVectorIndexToken(t, b)`
+    fn render_vector_index_token(&mut self, t: &mut RenderToken, b: RenderToken) -> CResult<()> {
+        let a = self.pop()?;
+        if self.substitute {
+            let variable_name = format!("{}.{}", t.content, t.index);
+            let backup = self.p.backup_variable.borrow().clone();
+            let value = if backup.0.as_deref() == Some(variable_name.as_str()) {
+                backup.1.clone().unwrap_or_else(Value::zero)
+            } else {
+                let var = self.p.variables.borrow().get(&t.content).cloned();
+                match var.and_then(|v| v.value()) {
+                    Some(Value::Vector(vector)) => Value::Real(vector.try_get((t.index - 1).max(0) as usize)?),
+                    other => return Err(super::evaluator::invalid_cast(&other, "Calcpad.Core.Vector")),
+                }
+            };
+            t.content = self.writer.format_value(&value);
+        } else {
+            let s = if self.p.is_calculated.get() && self.p.function_definition_index.get() < 0 {
+                t.index.to_string()
+            } else {
+                b.content.clone()
+            };
+            t.content = if t.content.contains('_') {
+                self.writer.append_subscript(&a.content, &s)
+            } else {
+                self.writer.format_subscript(&a.content, &s)
+            };
+        }
+        Ok(())
+    }
+
+    /// `RenderMatrixIndexToken(t, b, c)`
+    fn render_matrix_index_token(&mut self, t: &mut RenderToken, b: RenderToken, c: RenderToken) -> CResult<()> {
+        let a = match self.stack.pop() {
+            Some(a) => a,
+            None => return Err(exceptions::MissingMatrixIndex(&t.content)),
+        };
+        let i = t.index / crate::vector::MAX_LENGTH;
+        let j = t.index % crate::vector::MAX_LENGTH;
+        if self.substitute {
+            let variable_name = format!("{}.{}.{}", t.content, i, j);
+            let backup = self.p.backup_variable.borrow().clone();
+            let value = if backup.0.as_deref() == Some(variable_name.as_str()) {
+                backup.1.clone().unwrap_or_else(Value::zero)
+            } else {
+                let var = self.p.variables.borrow().get(&t.content).cloned();
+                match var.and_then(|v| v.value()) {
+                    Some(Value::Matrix(matrix)) => {
+                        Value::Real(matrix.try_get((i - 1).max(0) as usize, (j - 1).max(0) as usize)?)
+                    }
+                    other => return Err(super::evaluator::invalid_cast(&other, "Calcpad.Core.Matrix")),
+                }
+            };
+            t.content = self.writer.format_value(&value);
+        } else {
+            let s = if self.p.is_calculated.get() && self.p.function_definition_index.get() < 0 {
+                format!("{},{}", i, j)
+            } else {
+                format!("{}{}{}", b.content, self.writer.format_operator(','), c.content)
+            };
+            t.content = if t.content.contains('_') {
+                self.writer.append_subscript(&a.content, &s)
+            } else {
+                self.writer.format_subscript(&a.content, &s)
+            };
+        }
+        Ok(())
     }
 
     fn render_negation_token(&mut self, t: &mut RenderToken, b: RenderToken) {
@@ -708,7 +817,9 @@ impl<'a> Renderer<'a> {
             self.add_brackets(&b.content, b.level, b.min_offset, b.max_offset, '(', ')')
         );
         t.level = b.level;
-        if t.ttype == TokenTypes::Function && b.val_type == ValueTypes::Vector {
+        if t.ttype == TokenTypes::Function && b.val_type == ValueTypes::Vector
+            || t.ttype == TokenTypes::VectorFunction && vector_calculator::is_vector_result_function(&st)
+        {
             t.val_type = ValueTypes::Vector;
         }
     }
@@ -730,7 +841,9 @@ impl<'a> Renderer<'a> {
                 self.add_brackets(&inner, t.level, t.min_offset, t.max_offset, '(', ')')
             );
         }
-        if t.ttype == TokenTypes::Function2 && (a.val_type == ValueTypes::Vector || b.val_type == ValueTypes::Vector) {
+        if t.ttype == TokenTypes::Function2 && (a.val_type == ValueTypes::Vector || b.val_type == ValueTypes::Vector)
+            || t.ttype == TokenTypes::VectorFunction2 && vector_calculator::is_vector_result_function(&st)
+        {
             t.val_type = ValueTypes::Vector;
         }
         Ok(())
@@ -752,7 +865,9 @@ impl<'a> Renderer<'a> {
                 self.add_brackets(&inner, t.level, t.min_offset, t.max_offset, '(', ')')
             );
         }
-        if t.ttype == TokenTypes::Function3 && (b.val_type == ValueTypes::Vector || c.val_type == ValueTypes::Vector) {
+        if t.ttype == TokenTypes::Function3 && (b.val_type == ValueTypes::Vector || c.val_type == ValueTypes::Vector)
+            || t.ttype == TokenTypes::VectorFunction3 && vector_calculator::is_vector_result_function(&st)
+        {
             t.val_type = ValueTypes::Vector;
         }
         Ok(())
