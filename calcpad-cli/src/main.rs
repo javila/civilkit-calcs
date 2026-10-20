@@ -16,10 +16,11 @@ use std::process::ExitCode;
 
 use calcpad_core::parsers::expression_parser::ExpressionParser;
 use calcpad_core::parsers::macro_parser::MacroParser;
-use calcpad_core::settings::MathSettings;
+use calcpad_core::settings::{ColorScales, LightDirections, MathSettings, PlotSettings};
 
 struct CliSettings {
     math: MathSettings,
+    plot: PlotSettings,
     is_us: bool,
 }
 
@@ -49,6 +50,7 @@ fn get_settings() -> CliSettings {
     let mut math = MathSettings::default();
     math.set_decimals(6);
     let mut is_us = true;
+    let mut plot = PlotSettings::default();
     if let Some(path) = settings_path() {
         if let Ok(xml) = std::fs::read_to_string(&path) {
             // XmlSerializer creates a new Settings object first (Decimals = 2) and then applies the file.
@@ -80,12 +82,51 @@ fn get_settings() -> CliSettings {
                     math.set_max_output_count(v);
                 }
             }
+            if let Some(plot_xml) = xml_value(&xml, "Plot") {
+                let b = |t: &str| xml_value(plot_xml, t).map(|s| s.eq_ignore_ascii_case("true"));
+                if let Some(v) = b("IsAdaptive") {
+                    plot.is_adaptive = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "ScreenScaleFactor").and_then(|s| s.parse().ok()) {
+                    plot.screen_scale_factor = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "Width").and_then(|s| s.parse().ok()) {
+                    plot.width = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "Height").and_then(|s| s.parse().ok()) {
+                    plot.height = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "Step").and_then(|s| s.parse().ok()) {
+                    plot.step = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "ImagePath") {
+                    plot.image_path = v.to_string();
+                }
+                if let Some(v) = xml_value(plot_xml, "ImageUri") {
+                    plot.image_uri = v.to_string();
+                }
+                if let Some(v) = b("VectorGraphics") {
+                    plot.vector_graphics = v;
+                }
+                if let Some(v) = xml_value(plot_xml, "ColorScale").and_then(ColorScales::parse) {
+                    plot.color_scale = v;
+                }
+                if let Some(v) = b("SmoothScale") {
+                    plot.smooth_scale = v;
+                }
+                if let Some(v) = b("Shadows") {
+                    plot.set_shadows(v);
+                }
+                if let Some(v) = xml_value(plot_xml, "LightDirection").and_then(LightDirections::parse) {
+                    plot.light_direction = v;
+                }
+            }
             if let Some(v) = xml_value(&xml, "IsUs") {
                 is_us = v.eq_ignore_ascii_case("true");
             }
         }
     }
-    CliSettings { math, is_us }
+    CliSettings { math, plot, is_us }
 }
 
 fn main() -> ExitCode {
@@ -168,6 +209,7 @@ fn main() -> ExitCode {
         let mut parser = ExpressionParser::new();
         *parser.math_settings.borrow_mut() = settings.math.clone();
         parser.is_us = settings.is_us;
+        parser.plot_settings = settings.plot.clone();
         parser.parse(&unwrapped, true);
         out_of_scope = parser.out_of_scope.clone();
         parser.html_result.clone()
