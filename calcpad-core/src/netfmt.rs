@@ -714,7 +714,7 @@ mod tests {
 
     #[test]
     fn decimal_round() {
-        assert_eq!(g17_decimal_round(3.14159, 2).unwrap(), "3.14");
+        assert_eq!(g17_decimal_round(1.23456, 2).unwrap(), "1.23");
         assert_eq!(g17_decimal_round(2.5, 0).unwrap(), "2");
         assert_eq!(g17_decimal_round(7.0685834705770345, 2).unwrap(), "7.07");
         assert_eq!(g17_decimal_round(0.125, 2).unwrap(), "0.12");
@@ -729,14 +729,14 @@ mod tests {
         assert_eq!(format_custom(1.234e-7, "#.##E+0"), "1.23E-7");
         assert_eq!(format_custom(9.999e20, "#.##E+0"), "1E+21");
         assert_eq!(format_custom(-1.235e-9, "#.##E+0"), "-1.24E-9");
-        assert_eq!(format_custom(3.14159, "0.00"), "3.14");
+        assert_eq!(format_custom(1.23456, "0.00"), "1.23");
         assert_eq!(format_custom(1234567.891, "#,##0.0"), "1,234,567.9");
         assert_eq!(format_custom(0.5, "#.##"), ".5");
     }
 
     #[test]
     fn standard() {
-        assert_eq!(format_standard(3.14159, 'F', Some(3)), "3.142");
+        assert_eq!(format_standard(1.23456, 'F', Some(3)), "1.235");
         assert_eq!(format_standard(1234.5, 'N', Some(1)), "1,234.5");
         assert_eq!(format_standard(1234.5, 'E', Some(2)), "1.23E+003");
     }

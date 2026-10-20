@@ -82,7 +82,7 @@ mod tests {
         assert_eq!(parse("0.1").unwrap(), 0.1);
         assert_eq!(parse("1.5").unwrap(), 1.5);
         assert_eq!(parse("120").unwrap(), 120.0);
-        assert_eq!(parse("3.14").unwrap(), 3.14);
+        assert_eq!(parse("2.75").unwrap(), 2.75);
         assert!(parse("1.2.3").is_err());
     }
 }
