@@ -17,7 +17,8 @@
     unused_imports,
     dead_code,
     suspicious_double_ref_op,
-    noop_method_call
+    noop_method_call,
+    clippy::needless_borrows_for_generic_args
 )]
 mod common;
 use common::*;
@@ -51,13 +52,13 @@ fn SettingsDirective_ChangesSettingsMidFile() {
     assert_does_not_contain("8.7654", &html);
 }
 #[test]
-#[ignore = "out of scope for phase 1: plots ($Plot)"]
+#[ignore = "out of scope: plots ($Plot)"]
 fn SettingsDirective_LaterDirective_OverridesEarlierVariable() {}
 #[test]
-#[ignore = "out of scope for phase 1: plots ($Plot)"]
+#[ignore = "out of scope: plots ($Plot)"]
 fn SettingsDirective_LaterVariable_OverridesEarlierDirective() {}
 #[test]
-#[ignore = "out of scope for phase 1: plot settings (plotWidth)"]
+#[ignore = "out of scope: plot settings (plotWidth)"]
 fn SettingsDirective_SettingControllingVariable_StaysReadable() {}
 #[test]
 fn SettingsDirective_MalformedJson_ReportsError() {

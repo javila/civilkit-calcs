@@ -177,6 +177,12 @@ impl XEq<&str> for &str {
     }
 }
 
+impl XEq for bool {
+    fn x_eq(&self, other: &bool) -> bool {
+        self == other
+    }
+}
+
 impl XEq<String> for String {
     fn x_eq(&self, other: &String) -> bool {
         self == other
@@ -253,6 +259,15 @@ pub fn assert_throws<F: FnOnce()>(f: F) -> MathParserException {
             Err(p) => std::panic::resume_unwind(p),
         },
     }
+}
+
+/// `Assert.ThrowsAny<Exception>(...)`: passes when any exception (panic) is raised.
+pub fn assert_throws_any<F: FnOnce()>(f: F) {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let r = catch_unwind(AssertUnwindSafe(f));
+    std::panic::set_hook(prev);
+    assert!(r.is_err(), "Assert.ThrowsAny() Failure: No exception was thrown");
 }
 
 /// `System.Math` as used by the tests.

@@ -1,6 +1,6 @@
 # Class.Method reason   (tests transcribed as #[ignore] because they exercise phase 2+ features)
-FunctionKeywordArgumentTests.VectorDefault_WithSemicolons vectors
-FunctionKeywordArgumentTests.DefaultCanBeAVector vectors
 SettingsDirectiveTests.SettingsDirective_LaterDirective_OverridesEarlierVariable plots ($Plot)
 SettingsDirectiveTests.SettingsDirective_LaterVariable_OverridesEarlierDirective plots ($Plot)
 SettingsDirectiveTests.SettingsDirective_SettingControllingVariable_StaysReadable plot settings (plotWidth)
+FunctionKeywordArgumentTests.VectorDefault_WithSemicolons vectors (phase 2 in progress)
+FunctionKeywordArgumentTests.DefaultCanBeAVector vectors (phase 2 in progress)

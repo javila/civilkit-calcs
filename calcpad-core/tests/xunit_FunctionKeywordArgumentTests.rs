@@ -17,7 +17,8 @@
     unused_imports,
     dead_code,
     suspicious_double_ref_op,
-    noop_method_call
+    noop_method_call,
+    clippy::needless_borrows_for_generic_args
 )]
 mod common;
 use common::*;
@@ -52,7 +53,7 @@ fn PositionalFollowedByKeyword_IsAllowed() {
     assert_equal(103.0, calc.Run("f(1; z = 100)"));
 }
 #[test]
-#[ignore = "out of scope for phase 1: vectors"]
+#[ignore = "out of scope: vectors (phase 2 in progress)"]
 fn VectorDefault_WithSemicolons() {}
 #[test]
 fn KeywordArgumentsWithoutSpaces_AreRecognized() {
@@ -76,7 +77,7 @@ fn DefaultExpression_CanContainFunctionCalls() {
     assert_equal(5.0, calc.Run("f(1)"));
 }
 #[test]
-#[ignore = "out of scope for phase 1: vectors"]
+#[ignore = "out of scope: vectors (phase 2 in progress)"]
 fn DefaultCanBeAVector() {}
 #[test]
 fn FunctionWithoutDefaults_IsUnaffected() {

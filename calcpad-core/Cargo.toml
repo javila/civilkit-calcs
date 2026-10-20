@@ -5,4 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Rust port of the CalcpadCE calculation engine (Calcpad.Core)"
 
+[features]
+# Runs the vector, matrix and HP xunit classes that are still being ported
+# (tools/xunit_gated.txt).
+xunit_vm = []
+
 [dependencies]

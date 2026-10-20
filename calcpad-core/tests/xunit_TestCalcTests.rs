@@ -17,7 +17,8 @@
     unused_imports,
     dead_code,
     suspicious_double_ref_op,
-    noop_method_call
+    noop_method_call,
+    clippy::needless_borrows_for_generic_args
 )]
 mod common;
 use common::*;
