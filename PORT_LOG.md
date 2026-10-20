@@ -62,27 +62,49 @@ module(s) it became (after `cargo fmt`, max width 120).
 | tools/transcribe_xunit.py + 19 hand transcriptions in tools/xunit_overrides | 700 + 260 | 0.20 |
 | calcpad-core/tests/common/mod.rs (TestCalc, xunit assertions) | 330 | 0.03 |
 
+## Phase 2: vectors, matrices, HP, plotting and markdown
+
+Phase 2 ran as one coordinating agent plus five parallel agents in separate git worktrees
+(markdown, xunit transcription, non-HP matrix numerics, HP types, plotting), merged into
+main. Hours are measured agent time (wall clock of each agent); the coordinating agent ran
+for about 3.7 hours, the five forks for about 2.2 hours together.
+
+| C# file(s) | C# lines | Rust module | Rust lines | Hours | Tests unlocked |
+|---|---:|---|---:|---:|---|
+| Vector/Vector.cs, LargeVector.cs, ColumnVector.cs, RowVector.cs | 2433 | vector/mod.rs, large_vector.rs, column_vector.rs, row_vector.rs | 2013 | 0.4 | Vector*Tests (388) |
+| Vector/HpVector.cs | 2304 | vector/hp_vector.rs | 2626 | 0.4 | HPVector*Tests (409) |
+| Matrix/Matrix.cs (storage, operators, members) and the five subclasses (non-numerical parts) | 2900 | matrix/mod.rs and the subclass modules | 2700 | 0.5 | Matrix*OperatorTests |
+| Matrix/Matrix.cs numerics and the subclass overrides (LU, QR, SVD, solve, inverse, eigen, Cholesky, LDLT) | 1600 | matrix/matrix_solvers.rs | 2108 | 0.2 | MatrixFunctionTests (200) |
+| Matrix/HpMatrix/*.cs (HpMatrix, Hp subclasses, linear, eigen and SVD solvers, Winograd matmul, FFT, Vectorized) | 7177 | matrix/hp_matrix/*.rs | 6400 | 0.4 | HP matrix classes (1610) |
+| Calculator/VectorCalculator.cs, MatrixCalculator.cs | 1509 | calculator/vector_calculator.rs, matrix_calculator.rs | 1170 | 0.3 | all vector and matrix functions |
+| .NET ArraySortHelper (introsort used by Span.Sort) | n/a | sort.rs | 445 | 0.1 | sort, order, sort_rows |
+| Vector and matrix branches of IValue, the parsers (tokenizer, syntax analyser, evaluator, compiler, output) and the writers | about 900 | base_types/value.rs, parsers/math_parser/*, output/* | about 1500 | 1.2 | ElementAccessTests, all in-function classes |
+| MathParser.CustomFunction.cs result cache (CustomFunction1/2) | 120 | parsers/math_parser/custom_function.rs | 150 | 0.2 | speed of nested integrals |
+| Plotter/*.cs, Parsers/ChartParser.cs, MapParser.cs, PlotParser.cs and the plot parts of ExpressionParser (SVG output; the SkiaSharp raster drawing is not ported) | 2010 | plotter/*.rs, parsers/{chart,map,plot}_parser.rs | 1831 | 0.6 | 49 plot worksheets, SettingsDirectiveTests |
+| Markdig 0.43.0 subset used by CalcpadCE (CommonMark core, emphasis extras, list extras, pipe tables, task lists, autolinks) | about 4000 of 10000 | markdig/*.rs | 3202 | 0.4 | ParseModeTests (12 markdown cases), 4 worksheets |
+| xunit transcription of Calcpad.Tests/Vectors, Matrices (incl. HP) and ElementAccessTests | (tests) | tools/transcribe_xunit.py, 58 test files | 3626 tests | 0.2 | |
+
 ## Totals by Calcpad.Core folder
 
-| Folder | C# lines | Ported in phase 1 | Remaining |
+| Folder | C# lines | Ported | Remaining |
 |---|---:|---:|---:|
-| BaseTypes | 4053 | 4053 (IValue vector/matrix branches return out of scope) | 0 |
-| Calculator | 3147 | 1638 | 1509 (VectorCalculator, MatrixCalculator) |
-| Output | 1662 | 1051 | 611 (XmlWriter) |
-| Parsers | 12083 | 10279 | 1804 (ExpressionParser.UI, DataExchange, ReadWriteOptions, Portable, MathParser.UI, Chart/Map/PlotParser) |
-| root files | 4279 | 3624 (incl. 1872 generated Messages) | 655 (UiDto, UiSyntax, PathRoots, ImageReferences) |
-| Vector | 4737 | 0 | 4737 |
-| Matrix (incl. HP) | 12235 | 0 | 12235 |
-| Plotter | 1711 | 0 | 1711 |
-| **Total** | **43907** | **20645** (18327 hand ported) | **23262** |
+| BaseTypes | 4053 | 4053 | 0 |
+| Calculator | 3147 | 3147 | 0 |
+| Output | 1662 | 1051 | 611 (XmlWriter, Word export) |
+| Parsers | 12083 | 10578 | 1505 (ExpressionParser.UI, DataExchange, ReadWriteOptions, Portable; MathParser.UI) |
+| root files | 4279 | 3579 (incl. 1872 generated Messages) | 700 (UiDto, UiSyntax, PathRoots, ImageReferences, DirectiveDto) |
+| Vector | 4737 | 4737 | 0 |
+| Matrix (incl. HP) | 12235 | 12235 | 0 |
+| Plotter | 1711 | 1711 (SVG; the SkiaSharp raster paths report not supported) | raster drawing only |
+| **Total** | **43907** | **41091** | **2816** |
 
-Hand-ported C# per agent hour in phase 1: about 18300 lines / 1.7 h, roughly 10000 to
-11000 lines per hour, with the conformance gates green at the end.
+Pace: phase 1 ported about 18,300 hand-written C# lines in 1.7 agent hours; phase 2 about
+25,000 lines (including the Markdig subset) in about 5.9 agent hours, 3.7 hours of wall
+clock. The phase 2 rate per agent hour is lower because the numerical code needed exact
+SIMD reduction orders, .NET overload resolution and sort algorithms to match the stubs.
 
 ## Known gaps inside ported files
 
-* The custom function result cache (`CustomFunction1/2._cache`) is not ported; results are
-  always recomputed (no output difference, see DEVIATIONS.md).
 * `#ProjectPath`/`#LibraryPath` path roots and `{project}`/`{library}` image tokens are
   passed through unexpanded (`PathRoots.cs`, `ImageReferences.cs` not ported).
 * `.cpdz` zipped worksheets are not read by the CLI.

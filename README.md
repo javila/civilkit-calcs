@@ -1,17 +1,14 @@
 # calcpad-rs
 
 A Rust port of the [CalcpadCE](https://github.com/imartincei/CalcpadCE) calculation engine
-(Calcpad.Core), ported from commit `0cf438f`. Phase 1 covers the scalar engine: real and
-complex values, the unit system with target units and custom units, operators, the scalar
-function library, variables, custom functions with keyword and default arguments, solve
-blocks (`$Root`, `$Find`, `$Sup`, `$Inf`, `$Area`, `$Integral`, `$Slope`, `$Derivative`,
-`$Sum`, `$Product`, `$Repeat`, `$While`, `$Block`, `$Inline`), comments and headings, HTML
-passthrough, `#if`/`#else if`/`#else`, `#repeat`/`#for`/`#while` loops with
-`#break`/`#continue`, `#def` macros, `#include`, the visibility and output directives and
-the settings directives.
+(Calcpad.Core), ported from commit `0cf438f`. It covers the scalar engine (real and complex
+values, units, operators, functions, custom functions, solve blocks, the directives and
+settings), vectors and matrices including the high performance (HP) types and their
+solvers, `$Plot`/`$Map` SVG plots and charts, and the markdown modes (a port of the Markdig
+subset that CalcpadCE uses).
 
-Vectors, matrices, high performance types, plots, `#UI` forms, `#read`/`#write` and
-markdown are out of scope for phase 1 and are reported as such.
+Not ported: `#UI` forms, `#read`/`#write`/`#append`, Word/OpenXml export and raster
+(SkiaSharp) plot output. These report "not supported" errors.
 
 ## Layout
 
@@ -44,11 +41,11 @@ cargo build --release
 
 ## Status
 
-* xunit: 879/879 scalar tests (Calcpad.Tests/Scalars) and 134/134 in-scope tests of the
-  other scalar classes pass; 17 transcribed tests need out-of-scope features and are
-  `#[ignore]`d with the reason.
-* Stubs: 97 of the 98 in-scope worksheets match; 271 worksheets use out-of-scope
-  features. See PORT_LOG.md for the line counts and DEVIATIONS.md for deliberate changes.
+* xunit: 4692 transcribed tests pass (Scalars, Vectors, Matrices incl. HP, MathParser,
+  Macros, ExpressionParser and the others); 2 raster plot tests are ignored.
+* Stubs (369 worksheets): 343 PASS, 16 PNG-PIXEL (`$Map` rasters with equal pixels but a
+  different deflate stream), 1 NOISE, 1 FAIL (libm last digit), 8 OUT-OF-SCOPE (`#UI`,
+  `#read`). See `tools/classify_failures.py`, PORT_LOG.md and DEVIATIONS.md.
 
 ## Licence
 
