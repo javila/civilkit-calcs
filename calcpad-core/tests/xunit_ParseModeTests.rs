@@ -53,11 +53,15 @@ fn UnknownHashLine_DoesNotCrashKeywordLookup_case2() {
     assert_does_not_contain("Unexpected error", &Render(&line, &[]));
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_IsNotMistakenForMd() {}
+fn Markdown_IsNotMistakenForMd() {
+    let mut html = Render("#markdown\n**bold**\n#end markdown", &[]);
+    assert_contains("<strong>bold</strong>", &html);
+    assert_does_not_contain("**bold**", &html);
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn MdOn_StillRendersComments() {}
+fn MdOn_StillRendersComments() {
+    assert_contains("<strong>b</strong>", &Render("#md on\n'**b**'", &[]));
+}
 #[test]
 fn Html_PassesMultilineScriptThroughUnwrapped() {
     let mut html = Render("#html\n<script>\nlet a = 1;\nlet b = a < 2;\n</script>\n#end html", &[]);
@@ -73,20 +77,49 @@ fn Html_KeepsIndentation() {
     );
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_RendersTableAsOneBlock() {}
+fn Markdown_RendersTableAsOneBlock() {
+    let mut html = Render(
+        "#markdown\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n#end markdown",
+        &[],
+    );
+    assert_equal(1.0, Count(&html, "<table"));
+    assert_contains("<td>4</td>", &html);
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_KeepsIndentationForNestedLists() {}
+fn Markdown_KeepsIndentationForNestedLists() {
+    let html = Render("#markdown\n- one\n  - two\n- three\n#end markdown", &[]);
+    // Assert.Matches(@"<li>one\s*<ul>\s*<li>two</li>\s*</ul>\s*</li>", html)
+    let squeezed: String = html.split_whitespace().collect();
+    assert_contains("<li>one<ul><li>two</li></ul></li>", &squeezed);
+    assert_equal(2.0, Count(&html, "<ul>"));
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_BlankLineSeparatesParagraphs() {}
+fn Markdown_BlankLineSeparatesParagraphs() {
+    assert_equal(
+        2.0,
+        Count(Render("#markdown\nfirst\n\nsecond\n#end markdown", &[]), "<p>"),
+    );
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_SupportsEmphasisExtras() {}
+fn Markdown_SupportsEmphasisExtras() {
+    let mut html = Render("#markdown\n++ins++ and H~2~O and x^2^\n#end markdown", &[]);
+    assert_contains("<ins>ins</ins>", &html);
+    assert_contains("<sub>2</sub>", &html);
+    assert_contains("<sup>2</sup>", &html);
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_TagsEachBlockWithItsSourceLine() {}
+fn Markdown_TagsEachBlockWithItsSourceLine() {
+    let html = Render("#markdown\n# Title\n\nparagraph\n#end markdown", &[("debug", true)]);
+    // Assert.Matches("<h1[^>]*data-source-line=\"2\"[^>]*>Title</h1>", html)
+    let i = html.find("<h1").expect("no <h1");
+    let tag_end = i + html[i..].find('>').expect("unclosed <h1");
+    assert_contains("data-source-line=\"2\"", &html[i..tag_end]);
+    assert!(html[tag_end..].starts_with(">Title</h1>"), "{}", html);
+    // Assert.Matches("<p[^>]*data-source-line=\"4\"[^>]*>paragraph</p>", html)
+    let i = html.find(">paragraph</p>").expect("no paragraph");
+    let tag_start = html[..i].rfind("<p").expect("no <p");
+    assert_contains("data-source-line=\"4\"", &html[tag_start..i]);
+}
 #[test]
 fn Html_TagsOpeningTagsWithSourceLine() {
     // Assert.Matches("<div[^>]*data-source-line=\"2\"", ...)
@@ -195,14 +228,20 @@ fn UnrecognizedKeywords_AreContentInHtmlMode_case9() {
     assert_contains(line, &Render(&format!("#html\n{}\n#end html", line), &[]));
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn UnrecognizedKeywords_AreContentInMarkdownMode_case1() {}
+fn UnrecognizedKeywords_AreContentInMarkdownMode_case1() {
+    let line = "#round 2";
+    assert_contains(line, &Render(&format!("#markdown\n{}\n#end markdown", line), &[]));
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn UnrecognizedKeywords_AreContentInMarkdownMode_case2() {}
+fn UnrecognizedKeywords_AreContentInMarkdownMode_case2() {
+    let line = "#end html";
+    assert_contains(line, &Render(&format!("#markdown\n{}\n#end markdown", line), &[]));
+}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn UnrecognizedKeywords_AreContentInMarkdownMode_case3() {}
+fn UnrecognizedKeywords_AreContentInMarkdownMode_case3() {
+    let line = "#tag";
+    assert_contains(line, &Render(&format!("#markdown\n{}\n#end markdown", line), &[]));
+}
 #[test]
 fn ControlBlocks_WrapModeBlocks() {
     let mut html = Render(
@@ -213,8 +252,11 @@ fn ControlBlocks_WrapModeBlocks() {
     assert_does_not_contain("<b>no</b>", &html);
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn MarkdownHeadings_AreContentNotKeywords() {}
+fn MarkdownHeadings_AreContentNotKeywords() {
+    let mut html = Render("#markdown\n# One\n## Two\n#end markdown", &[]);
+    assert_contains(">One</h1>", &html);
+    assert_contains(">Two</h2>", &html);
+}
 #[test]
 fn MacroCalls_ExpandInsideHtml() {
     assert_contains(
@@ -240,8 +282,11 @@ fn MacrosThatSwitchMode_ApplyAtTheCallSite() {
     assert_does_not_contain("class=\"err\"", &html);
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
-fn Markdown_SupportsStrikethroughAndAutolinks() {}
+fn Markdown_SupportsStrikethroughAndAutolinks() {
+    let mut html = Render("#markdown\n~~old~~ see https://example.com\n#end markdown", &[]);
+    assert_contains("<del>old</del>", &html);
+    assert_contains("<a href=\"https://example.com\">", &html);
+}
 #[test]
 fn TrailingOperatorCharacters_DoNotJoinHtmlLines() {
     let mut html = Render("#html\n<style>\np { color: red;\n}\n</style>\n#end html", &[]);
