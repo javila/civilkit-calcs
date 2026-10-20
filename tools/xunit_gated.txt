@@ -1,10 +1,5 @@
 # xunit classes compiled only with `--features xunit_vm` until the engine passes them.
 # Remove a class from this list once all of its tests pass.
-ColumnMatrixOperatorInFunctionTests
-ColumnMatrixOperatorTests
-DiagMatrixOperatorInFunctionTests
-DiagMatrixOperatorTests
-ElementAccessTests
 HDiagonalMatrixComparison
 HPColumnMatrixComparison
 HPColumnMatrixComparisonInFunction
@@ -40,21 +35,3 @@ HPVectorOperatorInFunctionTests
 HPVectorOperatorTests
 HPVectorScalarFunctionInFunctionTests
 HPVectorScalarFunctionTests
-LTriangMatrixOperatorInFunctionTests
-LTriangMatrixOperatorTests
-MatrixFunctionInFunctionTests
-MatrixFunctionTests
-MatrixOperatorInFunctionTests
-MatrixOperatorTests
-MatrixScalarFunctionInFunctionTests
-MatrixScalarFunctionTests
-SymmetricMatrixOperatorInFunctionTests
-SymmetricMatrixOperatorTests
-UtriangMatrixOperatorInFunctionTests
-UtriangMatrixOperatorTests
-VectorFunctionInFunctionTests
-VectorFunctionTests
-VectorOperatorInFunctionTests
-VectorOperatorTests
-VectorScalarFunctionInFunctionTests
-VectorScalarFunctionTests

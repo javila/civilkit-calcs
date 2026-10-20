@@ -53,8 +53,12 @@ fn PositionalFollowedByKeyword_IsAllowed() {
     assert_equal(103.0, calc.Run("f(1; z = 100)"));
 }
 #[test]
-#[ignore = "out of scope: vectors (phase 2 in progress)"]
-fn VectorDefault_WithSemicolons() {}
+fn VectorDefault_WithSemicolons() {
+    let mut calc = NewCalc();
+    calc.Run("f(x; v = [1; 2; 3]) = x + sum(v)");
+    assert_equal(7.0, calc.Run("f(1)"));
+    assert_equal(31.0, calc.Run("f(1; v = [10; 20])"));
+}
 #[test]
 fn KeywordArgumentsWithoutSpaces_AreRecognized() {
     let mut calc = NewCalc();
@@ -77,8 +81,11 @@ fn DefaultExpression_CanContainFunctionCalls() {
     assert_equal(5.0, calc.Run("f(1)"));
 }
 #[test]
-#[ignore = "out of scope: vectors (phase 2 in progress)"]
-fn DefaultCanBeAVector() {}
+fn DefaultCanBeAVector() {
+    let mut calc = NewCalc();
+    calc.Run("f(x; v = [1; 2; 3]) = x*len(v)");
+    assert_equal(6.0, calc.Run("f(2)"));
+}
 #[test]
 fn FunctionWithoutDefaults_IsUnaffected() {
     let mut calc = NewCalc();
