@@ -1,4 +1,3 @@
-#![cfg(feature = "xunit_vm")]
 //! Transcribed from Calcpad.Tests/Matrices/HP/Large/HPColumnMatrixComparison.cs by tools/transcribe_xunit.py.
 #![allow(
     non_snake_case,

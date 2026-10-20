@@ -9,3 +9,8 @@ license = "MIT"
 
 [profile.release]
 debug = false
+
+# The HP comparison tests multiply and decompose 500x500 matrices; build the tests
+# optimized so that `cargo test` stays fast.
+[profile.test]
+opt-level = 3

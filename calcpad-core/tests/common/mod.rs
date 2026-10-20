@@ -53,6 +53,7 @@ pub struct TestCalc {
 }
 
 fn raise(e: MathParserException) -> ! {
+    eprintln!("calcpad error: {}", e.message);
     std::panic::panic_any(e)
 }
 

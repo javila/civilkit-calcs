@@ -2,6 +2,7 @@
 # Runs the gated xunit classes (tools/xunit_gated.txt) in release mode and prints
 # passed/total per class. Usage: tools/run_gated.sh [filter] [seconds-per-class]
 cd "$(dirname "$0")/.."
+mkdir -p target/tmp && export TMPDIR="$PWD/target/tmp"
 FILTER=${1:-}
 LIMIT=${2:-300}
 cargo test -q --release --features xunit_vm --no-run >/dev/null 2>&1 || { echo "build failed"; exit 1; }
