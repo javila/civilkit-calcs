@@ -17,7 +17,8 @@
     unused_imports,
     dead_code,
     suspicious_double_ref_op,
-    noop_method_call
+    noop_method_call,
+    clippy::needless_borrows_for_generic_args
 )]
 mod common;
 use common::*;
@@ -53,10 +54,10 @@ fn UnknownHashLine_DoesNotCrashKeywordLookup_case2() {
     assert_does_not_contain("Unexpected error", &Render(&line, &[]));
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_IsNotMistakenForMd() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn MdOn_StillRendersComments() {}
 #[test]
 fn Html_PassesMultilineScriptThroughUnwrapped() {
@@ -73,19 +74,19 @@ fn Html_KeepsIndentation() {
     );
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_RendersTableAsOneBlock() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_KeepsIndentationForNestedLists() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_BlankLineSeparatesParagraphs() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_SupportsEmphasisExtras() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_TagsEachBlockWithItsSourceLine() {}
 #[test]
 fn Html_TagsOpeningTagsWithSourceLine() {
@@ -195,13 +196,13 @@ fn UnrecognizedKeywords_AreContentInHtmlMode_case9() {
     assert_contains(line, &Render(&format!("#html\n{}\n#end html", line), &[]));
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn UnrecognizedKeywords_AreContentInMarkdownMode_case1() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn UnrecognizedKeywords_AreContentInMarkdownMode_case2() {}
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn UnrecognizedKeywords_AreContentInMarkdownMode_case3() {}
 #[test]
 fn ControlBlocks_WrapModeBlocks() {
@@ -213,7 +214,7 @@ fn ControlBlocks_WrapModeBlocks() {
     assert_does_not_contain("<b>no</b>", &html);
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn MarkdownHeadings_AreContentNotKeywords() {}
 #[test]
 fn MacroCalls_ExpandInsideHtml() {
@@ -240,7 +241,7 @@ fn MacrosThatSwitchMode_ApplyAtTheCallSite() {
     assert_does_not_contain("class=\"err\"", &html);
 }
 #[test]
-#[ignore = "out of scope for phase 1: markdown"]
+#[ignore = "out of scope: markdown"]
 fn Markdown_SupportsStrikethroughAndAutolinks() {}
 #[test]
 fn TrailingOperatorCharacters_DoNotJoinHtmlLines() {
