@@ -177,6 +177,13 @@ impl XEq<&str> for &str {
     }
 }
 
+/// `Assert.Equal(string, string)` with null strings.
+impl XEq for Option<String> {
+    fn x_eq(&self, other: &Option<String>) -> bool {
+        self == other
+    }
+}
+
 impl XEq for bool {
     fn x_eq(&self, other: &bool) -> bool {
         self == other

@@ -602,7 +602,7 @@ impl ExpressionParser {
             }
             self.p().is_calculation.set(self.is_val != -1);
             let first = ts.chars().next().unwrap_or('\0');
-            let is_plot = first == '$' && self.parse_plot(&ts);
+            let is_plot = first == '$' && self.parse_plot(&ts)?;
             if !is_plot && self.parse_condition(&ts, keyword)? {
                 let cl = self.cur();
                 let tokens = if self.line_cache[cl].is_cached() {
@@ -661,16 +661,32 @@ impl ExpressionParser {
         Ok(())
     }
 
-    fn parse_plot(&mut self, s: &str) -> bool {
+    fn parse_plot(&mut self, s: &str) -> CResult<bool> {
         if validator::starts_with_ignore_case(s, "$plot") || validator::starts_with_ignore_case(s, "$map") {
             if self.is_visible && self.is_enabled() {
-                self.p().note_out_of_scope("plotting");
-                let msg = crate::parsers::math_parser::input::out_of_scope("Plotting").message;
-                self.append_error(s, &msg);
+                let is_chart = validator::starts_with_ignore_case(s, "$p");
+                let calculate = self.calculate;
+                let parser = self.parser.as_ref().unwrap();
+                parser.is_plotting.set(true);
+                let result = if is_chart {
+                    crate::parsers::chart_parser::parse(parser, &self.plot_settings, s, calculate)
+                } else {
+                    crate::parsers::map_parser::parse(parser, &mut self.plot_settings, s, calculate)
+                };
+                match result {
+                    Ok(s1) => {
+                        let id = self.html_id();
+                        self.sb.push_str(&insert_attribute(&s1, &id));
+                        self.p().is_plotting.set(false);
+                    }
+                    // C# leaves IsPlotting set when the plot fails.
+                    Err(e) if e.unexpected => return Err(e),
+                    Err(e) => self.append_error(s, &e.message),
+                }
             }
-            return true;
+            return Ok(true);
         }
-        false
+        Ok(false)
     }
 
     fn parse_condition(&mut self, s: &str, keyword: Keyword) -> CResult<bool> {
@@ -1837,6 +1853,62 @@ impl ExpressionParser {
             ("precision", JsonValue::Num(d)) => {
                 self.math_settings.borrow_mut().precision = *d;
                 self.p().set_variable_f("Precision", *d);
+            }
+            ("vectorgraphics", JsonValue::Bool(b)) => {
+                self.plot_settings.vector_graphics = *b;
+                self.p().set_variable_f("PlotSVG", if *b { 1.0 } else { 0.0 });
+            }
+            ("colorscale", JsonValue::Str(name)) => match crate::settings::ColorScales::parse(name) {
+                Some(cs) => {
+                    self.plot_settings.color_scale = cs;
+                    self.p().set_variable_f("PlotPalette", cs as i32 as f64);
+                }
+                None => {
+                    let m = format!(
+                        "'colorScale' must be one of: {}",
+                        crate::settings::ColorScales::names().join(", ")
+                    );
+                    self.append_error(line, &m);
+                }
+            },
+            ("smoothscale", JsonValue::Bool(b)) => {
+                self.plot_settings.smooth_scale = *b;
+                self.p().set_variable_f("PlotSmooth", if *b { 1.0 } else { 0.0 });
+            }
+            ("shadows", JsonValue::Bool(b)) => {
+                self.plot_settings.set_shadows(*b);
+                self.p().set_variable_f("PlotShadows", if *b { 1.0 } else { 0.0 });
+            }
+            ("adaptiveplot", JsonValue::Bool(b)) => {
+                self.plot_settings.is_adaptive = *b;
+                self.p().set_variable_f("PlotAdaptive", if *b { 1.0 } else { 0.0 });
+            }
+            ("plotwidth", JsonValue::Num(d)) => {
+                if *d < 1.0 {
+                    let m = range_err("plotWidth", 1.0, None);
+                    self.append_error(line, &m);
+                } else {
+                    self.plot_settings.width = *d as i32;
+                    self.p().set_variable_f("PlotWidth", (*d as i32) as f64);
+                }
+            }
+            ("plotheight", JsonValue::Num(d)) => {
+                if *d < 1.0 {
+                    let m = range_err("plotHeight", 1.0, None);
+                    self.append_error(line, &m);
+                } else {
+                    self.plot_settings.height = *d as i32;
+                    self.p().set_variable_f("PlotHeight", (*d as i32) as f64);
+                }
+            }
+            ("plotstep", JsonValue::Num(d)) => {
+                if *d < 0.0 {
+                    let m = range_err("plotStep", 0.0, None);
+                    self.append_error(line, &m);
+                } else {
+                    self.plot_settings.step = *d as i32;
+                    self.p().set_variable_f("PlotStep", (*d as i32) as f64);
+                }
             }
             ("tol", JsonValue::Num(d)) => {
                 self.math_settings.borrow_mut().tol = *d;

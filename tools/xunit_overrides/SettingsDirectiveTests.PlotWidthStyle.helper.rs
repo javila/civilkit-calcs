@@ -1,12 +1,14 @@
-// Regex width:(\d+)pt over the rendered plot; plots are out of scope for phase 1.
+// Regex.Match(Render(source), @"width:(\d+)pt"): the first "width:" followed by digits and "pt".
 fn PlotWidthStyle(source: &str) -> Option<String> {
     let html = render(source);
-    let i = html.find("width:")?;
-    let rest = &html[i + 6..];
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() && rest[digits.len()..].starts_with("pt") {
-        Some(digits)
-    } else {
-        None
+    let mut from = 0;
+    while let Some(i) = html[from..].find("width:") {
+        let rest = &html[from + i + 6..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() && rest[digits.len()..].starts_with("pt") {
+            return Some(digits);
+        }
+        from += i + 6;
     }
+    None
 }

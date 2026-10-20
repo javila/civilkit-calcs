@@ -322,7 +322,8 @@ impl Complex {
     }
 
     fn check_trig_scope(angle: f64, func: &str) -> CResult<()> {
-        if !(TRIG_MIN..=TRIG_MAX).contains(&angle) {
+        // NaN passes, as in C# (both comparisons are false).
+        if angle < TRIG_MIN || angle > TRIG_MAX {
             return Err(exceptions::ArgumentOutOfRange(func));
         }
         Ok(())

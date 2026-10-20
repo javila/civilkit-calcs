@@ -26,17 +26,19 @@ use common::*;
 fn Render(source: &str) -> String {
     render(source)
 }
-// Regex width:(\d+)pt over the rendered plot; plots are out of scope for phase 1.
+// Regex.Match(Render(source), @"width:(\d+)pt"): the first "width:" followed by digits and "pt".
 fn PlotWidthStyle(source: &str) -> Option<String> {
     let html = render(source);
-    let i = html.find("width:")?;
-    let rest = &html[i + 6..];
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
-    if !digits.is_empty() && rest[digits.len()..].starts_with("pt") {
-        Some(digits)
-    } else {
-        None
+    let mut from = 0;
+    while let Some(i) = html[from..].find("width:") {
+        let rest = &html[from + i + 6..];
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() && rest[digits.len()..].starts_with("pt") {
+            return Some(digits);
+        }
+        from += i + 6;
     }
+    None
 }
 
 #[test]
@@ -52,14 +54,16 @@ fn SettingsDirective_ChangesSettingsMidFile() {
     assert_does_not_contain("8.7654", &html);
 }
 #[test]
-#[ignore = "out of scope: plots ($Plot)"]
+#[ignore = "out of scope: raster (PNG) plots drawn by SkiaSharp (default VectorGraphics=false)"]
 fn SettingsDirective_LaterDirective_OverridesEarlierVariable() {}
 #[test]
-#[ignore = "out of scope: plots ($Plot)"]
+#[ignore = "out of scope: raster (PNG) plots drawn by SkiaSharp (default VectorGraphics=false)"]
 fn SettingsDirective_LaterVariable_OverridesEarlierDirective() {}
 #[test]
-#[ignore = "out of scope: plot settings (plotWidth)"]
-fn SettingsDirective_SettingControllingVariable_StaysReadable() {}
+fn SettingsDirective_SettingControllingVariable_StaysReadable() {
+    let mut html = Render("#settings {\"plotWidth\": 400}\nw = PlotWidth");
+    assert_contains("400", &html);
+}
 #[test]
 fn SettingsDirective_MalformedJson_ReportsError() {
     let mut parser = new_expression_parser(&[("Debug", true)]);

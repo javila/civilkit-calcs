@@ -38,6 +38,7 @@ pub mod messages;
 pub mod netfmt;
 pub mod output;
 pub mod parsers;
+pub mod plotter;
 pub mod settings;
 pub mod solver;
 pub mod sort;
