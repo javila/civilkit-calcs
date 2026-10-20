@@ -161,110 +161,77 @@ impl Value {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::add(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::add(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::add(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn sub(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::sub(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::sub(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::sub(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn mul(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::mul_op(ra, rb)));
         }
-        Ok(Value::Complex(ComplexValue::mul(
-            &a.as_complex(),
-            &b.as_complex(),
-        )))
+        Ok(Value::Complex(ComplexValue::mul(&a.as_complex(), &b.as_complex())))
     }
 
     pub fn div(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::div_op(ra, rb)));
         }
-        Ok(Value::Complex(ComplexValue::div(
-            &a.as_complex(),
-            &b.as_complex(),
-        )))
+        Ok(Value::Complex(ComplexValue::div(&a.as_complex(), &b.as_complex())))
     }
 
     pub fn rem(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::rem(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::rem(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::rem(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn lt(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::lt_op(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::lt_op(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::lt_op(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn gt(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::gt_op(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::gt_op(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::gt_op(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn le(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::le_op(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::le_op(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::le_op(&a.as_complex(), &b.as_complex())?))
     }
 
     pub fn ge(a: &Value, b: &Value) -> CResult<Value> {
         if let (Value::Real(ra), Value::Real(rb)) = (a, b) {
             return Ok(Value::Real(RealValue::ge_op(ra, rb)?));
         }
-        Ok(Value::Complex(ComplexValue::ge_op(
-            &a.as_complex(),
-            &b.as_complex(),
-        )?))
+        Ok(Value::Complex(ComplexValue::ge_op(&a.as_complex(), &b.as_complex())?))
     }
 
     /// `IValue.Equal` (uses the IScalarValue static method)
     pub fn equal(a: &Value, b: &Value) -> CResult<Value> {
         match (a, b) {
             (Value::Real(ra), Value::Real(rb)) => Ok(Value::Real(RealValue::eq_op(ra, rb)?)),
-            _ => Ok(Value::Complex(ComplexValue::eq_op(
-                &a.as_complex(),
-                &b.as_complex(),
-            )?)),
+            _ => Ok(Value::Complex(ComplexValue::eq_op(&a.as_complex(), &b.as_complex())?)),
         }
     }
 
     pub fn not_equal(a: &Value, b: &Value) -> CResult<Value> {
         match (a, b) {
             (Value::Real(ra), Value::Real(rb)) => Ok(Value::Real(RealValue::ne_op(ra, rb)?)),
-            _ => Ok(Value::Complex(ComplexValue::ne_op(
-                &a.as_complex(),
-                &b.as_complex(),
-            )?)),
+            _ => Ok(Value::Complex(ComplexValue::ne_op(&a.as_complex(), &b.as_complex())?)),
         }
     }
 
@@ -378,37 +345,19 @@ impl Value {
         calc.evaluate_function(index, a)
     }
 
-    pub fn evaluate_operator(
-        calc: &Calculator,
-        index: i64,
-        a: &Value,
-        b: &Value,
-    ) -> CResult<Value> {
+    pub fn evaluate_operator(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
         calc.evaluate_operator(index, a, b)
     }
 
-    pub fn evaluate_function2(
-        calc: &Calculator,
-        index: i64,
-        a: &Value,
-        b: &Value,
-    ) -> CResult<Value> {
+    pub fn evaluate_function2(calc: &Calculator, index: i64, a: &Value, b: &Value) -> CResult<Value> {
         calc.evaluate_function2(index, a, b)
     }
 
-    pub fn evaluate_interpolation(
-        calc: &Calculator,
-        index: i64,
-        values: &[Value],
-    ) -> CResult<Value> {
+    pub fn evaluate_interpolation(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
         calc.evaluate_interpolation(index, values)
     }
 
-    pub fn evaluate_multi_function(
-        calc: &Calculator,
-        index: i64,
-        values: &[Value],
-    ) -> CResult<Value> {
+    pub fn evaluate_multi_function(calc: &Calculator, index: i64, values: &[Value]) -> CResult<Value> {
         if index == crate::calculator::SWITCH_INDEX {
             return Ok(Value::evaluate_switch(values));
         }

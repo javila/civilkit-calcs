@@ -16,10 +16,7 @@ fn root_pad(level: i32, n: &str) -> String {
     match level {
         0 => format!("&hairsp;<sup class=\"nth\">{}</sup>&hairsp;&hairsp;", n),
         1 => format!("&nbsp;<small class=\"nth\">{}</small>&nbsp;&hairsp;", n),
-        2 => format!(
-            "&hairsp;&nbsp;<small class=\"nth\">{}</small>&nbsp;&thinsp;",
-            n
-        ),
+        2 => format!("&hairsp;&nbsp;<small class=\"nth\">{}</small>&nbsp;&thinsp;", n),
         _ => format!("&ensp;<small class=\"nth\">{}</small>&ensp;", n),
     }
 }
@@ -86,13 +83,7 @@ impl OutputWriter for HtmlWriter {
         units.html()
     }
 
-    fn format_input(
-        &self,
-        s: &str,
-        units: &Option<UnitRef>,
-        line: i32,
-        is_calculated: bool,
-    ) -> String {
+    fn format_input(&self, s: &str, units: &Option<UnitRef>, line: i32, is_calculated: bool) -> String {
         let output = if s == "?" {
             format!(
                 "<input type=\"text\" size=\"2\" name=\"Var\" class=\"input-{}\">\u{2009}",
@@ -101,7 +92,10 @@ impl OutputWriter for HtmlWriter {
         } else if is_calculated {
             format!("<u class=\"input-{}\">{}</u>\u{2009}", line, s)
         } else {
-            format!("<input type=\"text\" size=\"2\" name=\"Var\" class=\"input-{}\" value=\"{}\">\u{2009}", line, s)
+            format!(
+                "<input type=\"text\" size=\"2\" name=\"Var\" class=\"input-{}\" value=\"{}\">\u{2009}",
+                line, s
+            )
         };
         match units {
             Some(u) => format!("{} <i>{}</i>", output, u.html()),
@@ -127,20 +121,14 @@ impl OutputWriter for HtmlWriter {
         let mut name = name.to_string();
         if name.starts_with('\u{20D7}') {
             is_bold = false;
-            name = format!(
-                "<span class=\"vec\">\u{20D7}</span>{}",
-                &name['\u{20D7}'.len_utf8()..]
-            );
+            name = format!("<span class=\"vec\">\u{20D7}</span>{}", &name['\u{20D7}'.len_utf8()..]);
         }
         let format_bold = |x: String| if is_bold { format!("<b>{}</b>", x) } else { x };
         if let Some(i) = name.find('_') {
             if i > 0 {
                 let i1 = i + 1;
                 if i1 < name.len() {
-                    return self.format_subscript(
-                        &format_bold(format!("<var{}>{}</var>", s, &name[..i])),
-                        &name[i1..],
-                    );
+                    return self.format_subscript(&format_bold(format!("<var{}>{}</var>", s, &name[..i])), &name[i1..]);
                 }
             }
         }
@@ -235,16 +223,16 @@ impl OutputWriter for HtmlWriter {
             } else {
                 (sa.to_string(), sb.to_string())
             };
-            return format!(
-                "<span class=\"dvc\">{}<span class=\"dvl\"></span>{}</span>",
-                sa, sb
-            );
+            return format!("<span class=\"dvc\">{}<span class=\"dvl\"></span>{}</span>", sa, sb);
         }
         format!("{} \u{00F7} {}", sa, sb)
     }
 
     fn format_nary(&self, symbol: &str, sub: &str, sup: &str, expr: &str) -> String {
-        format!("<span class=\"dvr\"><small>{}</small><span class=\"nary\">{}</span><small>{}</small></span>{}", sup, symbol, sub, expr)
+        format!(
+            "<span class=\"dvr\"><small>{}</small><span class=\"nary\">{}</span><small>{}</small></span>{}",
+            sup, symbol, sub, expr
+        )
     }
 
     fn format_value(&self, value: &Value) -> String {
@@ -268,21 +256,13 @@ impl OutputWriter for HtmlWriter {
         if level == 0 && left == '(' {
             format!("\u{200A}{}\u{200A}{}\u{200A}{}\u{200A}", left, s, right)
         } else {
-            format!(
-                "{}{}{}",
-                format_brackets(left, level),
-                s,
-                format_brackets(right, level)
-            )
+            format!("{}{}{}", format_brackets(left, level), s, format_brackets(right, level))
         }
     }
 
     fn format_abs(&self, s: &str, level: i32) -> String {
         match level {
-            0 => format!(
-                "<b class=\"b0\">|</b>&hairsp;{}&hairsp;<b class=\"b0\">|</b>",
-                s
-            ),
+            0 => format!("<b class=\"b0\">|</b>&hairsp;{}&hairsp;<b class=\"b0\">|</b>", s),
             _ => format!(
                 "<span class=\"b{}\">|</span>{}<span class=\"b{}\">|</span>",
                 level, s, level
@@ -351,10 +331,7 @@ impl OutputWriter for HtmlWriter {
     fn format_switch(&self, sa: &[String], level: i32) -> String {
         let len = sa.len();
         if len == 1 {
-            return format!(
-                "<b>switch</b>{}",
-                self.add_brackets(&sa[0], level, '(', ')')
-            );
+            return format!("<b>switch</b>{}", self.add_brackets(&sa[0], level, '(', ')'));
         }
         if len == 2 {
             return format!(
@@ -380,11 +357,7 @@ impl OutputWriter for HtmlWriter {
     }
 
     fn close_curly_brackets(&self, sa: &str, level: i32) -> String {
-        format!(
-            "{}{}</span>",
-            drop_last_chars(sa, 7),
-            format_right_curl(level)
-        )
+        format!("{}{}</span>", drop_last_chars(sa, 7), format_right_curl(level))
     }
 
     fn format_if(&self, sc: &str, sa: &str, sb: &str, level: i32) -> String {

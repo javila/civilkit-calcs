@@ -27,6 +27,7 @@
 )]
 
 pub mod base_types;
+pub mod calcpad_error;
 pub mod calculator;
 pub mod exceptions;
 pub mod extension_methods;

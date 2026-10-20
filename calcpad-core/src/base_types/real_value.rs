@@ -149,11 +149,7 @@ impl RealValue {
     pub fn int_div(a: &RealValue, b: &RealValue) -> RealValue {
         let (uc, d) = Unit::divide(&a.units, &b.units, false);
         let is_unit = a.is_unit && b.is_unit && uc.is_some();
-        let c = if b.d == 0.0 {
-            f64::NAN
-        } else {
-            (a.d / b.d * d).trunc()
-        };
+        let c = if b.d == 0.0 { f64::NAN } else { (a.d / b.d * d).trunc() };
         RealValue::with_flag(c, uc, is_unit)
     }
 

@@ -4,18 +4,14 @@ use std::collections::VecDeque;
 use std::path::{Component, Path, PathBuf};
 
 use calcpad_core::extension_methods::{enumerate_comments, enumerate_lines};
-use calcpad_core::parsers::macro_parser::{
-    get_fields, has_input_fields, set_line_input_fields, FileProvider,
-};
+use calcpad_core::parsers::macro_parser::{get_fields, has_input_fields, set_line_input_fields, FileProvider};
 use calcpad_core::validator::is_keyword;
 use calcpad_core::{CResult, MathParserException};
 
 fn read_all_text(path: &str) -> std::io::Result<String> {
     let bytes = std::fs::read(path)?;
     let s = String::from_utf8_lossy(&bytes).to_string();
-    Ok(s.strip_prefix('\u{FEFF}')
-        .map(|x| x.to_string())
-        .unwrap_or(s))
+    Ok(s.strip_prefix('\u{FEFF}').map(|x| x.to_string()).unwrap_or(s))
 }
 
 /// `CalcpadReader.Read(fileName)`
@@ -125,24 +121,14 @@ fn get_module_name(s: &str) -> Option<String> {
         .position(|&c| c == '\'' || c == '"')
         .map(|x| x as isize)
         .unwrap_or(-1);
-    let n1: isize = chars
-        .iter()
-        .rposition(|&c| c == '#')
-        .map(|x| x as isize)
-        .unwrap_or(-1);
+    let n1: isize = chars.iter().rposition(|&c| c == '#').map(|x| x as isize).unwrap_or(-1);
     if n < 9 || n1 > 0 && n1 < n {
         n = n1;
     }
     if n < 9 {
         n = chars.len() as isize;
     }
-    Some(
-        chars[8..n as usize]
-            .iter()
-            .collect::<String>()
-            .trim()
-            .to_string(),
-    )
+    Some(chars[8..n as usize].iter().collect::<String>().trim().to_string())
 }
 
 /// `CalcpadReader.Include(fileName, fields)`
@@ -165,11 +151,7 @@ pub fn include(file_name: &str, fields: Option<VecDeque<String>>) -> CResult<Str
         } else if !is_local {
             if is_keyword(line, "#include") {
                 let name = get_module_name(line).unwrap_or_default();
-                let nested = if fields.is_none() {
-                    None
-                } else {
-                    Some(VecDeque::new())
-                };
+                let nested = if fields.is_none() { None } else { Some(VecDeque::new()) };
                 get_lines.push(include(&name, nested)?);
             } else {
                 get_lines.push(line.to_string());
@@ -229,7 +211,10 @@ pub fn code_to_html(code: &str) -> String {
         let line_num_text = line_number.to_string();
         let n = line_num_text.len();
         let pad = &SPACES[(6 * n).min(SPACES.len())..];
-        sb.push_str(&format!("<p class=\"line-text\" id=\"line-{}><span title=\"Source line {}\">{}{}</span>&emsp;\u{2502}&emsp;", line_number, source_line, pad, line_number));
+        sb.push_str(&format!(
+            "<p class=\"line-text\" id=\"line-{}><span title=\"Source line {}\">{}{}</span>&emsp;\u{2502}&emsp;",
+            line_number, source_line, pad, line_number
+        ));
         if line.starts_with("#Error") {
             errors.push_back(line_number);
             let lt: String = line_text.chars().skip(1).collect();
@@ -304,9 +289,7 @@ impl FileProvider for DiskFiles {
     }
 
     fn directory_name(&self, path: &str) -> Option<String> {
-        Path::new(path)
-            .parent()
-            .map(|p| p.to_string_lossy().to_string())
+        Path::new(path).parent().map(|p| p.to_string_lossy().to_string())
     }
 
     fn include(&self, path: &str, fields: Option<VecDeque<String>>) -> CResult<String> {

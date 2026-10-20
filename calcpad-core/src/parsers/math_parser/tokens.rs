@@ -179,18 +179,13 @@ impl Token {
 
     pub fn parameter_count(&self) -> i32 {
         match &self.kind {
-            TokenKind::Function {
-                parameter_count, ..
-            } => *parameter_count,
+            TokenKind::Function { parameter_count, .. } => *parameter_count,
             _ => 0,
         }
     }
 
     pub fn set_parameter_count(&mut self, n: i32) {
-        if let TokenKind::Function {
-            parameter_count, ..
-        } = &mut self.kind
-        {
+        if let TokenKind::Function { parameter_count, .. } = &mut self.kind {
             *parameter_count = n;
         }
     }
@@ -204,9 +199,7 @@ impl Token {
 
     pub fn positional_count(&self) -> i32 {
         match &self.kind {
-            TokenKind::Function {
-                positional_count, ..
-            } => *positional_count,
+            TokenKind::Function { positional_count, .. } => *positional_count,
             _ => 0,
         }
     }

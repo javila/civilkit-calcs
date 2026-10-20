@@ -80,9 +80,7 @@ impl ComplexValue {
     pub fn equals(&self, other: &ComplexValue) -> bool {
         match (&self.units, &other.units) {
             (None, None) => dbl_equals(self.a, other.a) && dbl_equals(self.b, other.b),
-            (Some(x), Some(y)) => {
-                dbl_equals(self.a, other.a) && dbl_equals(self.b, other.b) && Unit::equals(x, y)
-            }
+            (Some(x), Some(y)) => dbl_equals(self.a, other.a) && dbl_equals(self.b, other.b) && Unit::equals(x, y),
             _ => false,
         }
     }
@@ -114,10 +112,7 @@ impl ComplexValue {
         if a.units.is_none() {
             if let Some(bu) = &b.units {
                 if bu.is_dimensionless() && !b.is_unit {
-                    return ComplexValue::from_c(
-                        a.complex() * b.complex() * bu.get_dimensionless_factor(),
-                        None,
-                    );
+                    return ComplexValue::from_c(a.complex() * b.complex() * bu.get_dimensionless_factor(), None);
                 }
             }
             return ComplexValue::from_c(a.complex() * b.complex(), b.units.clone());

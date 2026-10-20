@@ -80,11 +80,7 @@ impl CustomFunction {
     }
 
     /// `CheckRecursion(f, functions)`. Errors are reported as `Err(())` (C# catches and maps).
-    pub fn check_recursion(
-        self: &Rc<Self>,
-        f: Option<&Rc<CustomFunction>>,
-        functions: &Container,
-    ) -> Result<bool, ()> {
+    pub fn check_recursion(self: &Rc<Self>, f: Option<&Rc<CustomFunction>>, functions: &Container) -> Result<bool, ()> {
         if let Some(f) = f {
             if Rc::ptr_eq(f, self) {
                 return Ok(true);
@@ -105,11 +101,7 @@ impl CustomFunction {
     }
 }
 
-fn check_recursion_rpn(
-    rpn: &Rpn,
-    f: &Rc<CustomFunction>,
-    functions: &Container,
-) -> Result<bool, ()> {
+fn check_recursion_rpn(rpn: &Rpn, f: &Rc<CustomFunction>, functions: &Container) -> Result<bool, ()> {
     for t in rpn.iter() {
         let (tt, index) = {
             let t = t.borrow();

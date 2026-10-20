@@ -40,11 +40,7 @@ impl Loop {
             count
         };
         // (int)NaN is int.MinValue in .NET.
-        let it = if count.is_nan() {
-            i32::MIN
-        } else {
-            count as i32
-        };
+        let it = if count.is_nan() { i32::MIN } else { count as i32 };
         Loop {
             start_line,
             iteration: it,
@@ -59,21 +55,10 @@ impl Loop {
     }
 
     pub fn while_loop(start_line: usize, condition: String, id: usize) -> Loop {
-        Loop::base(
-            start_line,
-            MAX_COUNT as f64,
-            id,
-            LoopKind::While { condition },
-        )
+        Loop::base(start_line, MAX_COUNT as f64, id, LoopKind::While { condition })
     }
 
-    pub fn for_loop(
-        start_line: usize,
-        start: &Value,
-        end: &Value,
-        counter: VarRef,
-        id: usize,
-    ) -> CResult<Loop> {
+    pub fn for_loop(start_line: usize, start: &Value, end: &Value, counter: VarRef, id: usize) -> CResult<Loop> {
         let diff = Value::s_sub(start, end)?;
         let count = diff.re().abs() + 1.0;
         let inc = diff.neg();

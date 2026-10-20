@@ -19,11 +19,7 @@ pub enum OutputFormat {
     Xml,
 }
 
-pub const ANGLE_FACTORS: [f64; 3] = [
-    180.0 / std::f64::consts::PI,
-    1.0,
-    200.0 / std::f64::consts::PI,
-];
+pub const ANGLE_FACTORS: [f64; 3] = [180.0 / std::f64::consts::PI, 1.0, 200.0 / std::f64::consts::PI];
 pub const THIN_SPACE: char = '\u{2009}';
 pub const HAIR_SPACE: char = '\u{200A}';
 pub const VECTOR_SPACING: &str = "\u{2002}";
@@ -73,13 +69,7 @@ pub trait OutputWriter {
     fn angle_units(&self) -> [&'static str; 3];
 
     fn unit_string(&self, units: &UnitRef) -> String;
-    fn format_input(
-        &self,
-        s: &str,
-        units: &Option<UnitRef>,
-        line: i32,
-        is_calculated: bool,
-    ) -> String;
+    fn format_input(&self, s: &str, units: &Option<UnitRef>, line: i32, is_calculated: bool) -> String;
     fn format_subscript(&self, sa: &str, sb: &str) -> String;
     fn append_subscript(&self, sa: &str, sb: &str) -> String;
     fn format_variable(&self, name: &str, value: &str, is_bold: bool) -> String;
@@ -118,8 +108,7 @@ pub trait OutputWriter {
                 let chars: Vec<char> = s.chars().collect();
                 let head: String = chars[..chars.len() - n].iter().collect();
                 let tail: String = chars[chars.len() - (n - 1)..].iter().collect();
-                return w
-                    .format_subscript(&w.format_units(&head), &format!("{}{}", HAIR_SPACE, tail));
+                return w.format_subscript(&w.format_units(&head), &format!("{}{}", HAIR_SPACE, tail));
             }
             if s.contains(['/', '\u{2215}', '\u{00B7}']) {
                 return s.to_string();
@@ -160,21 +149,13 @@ pub trait OutputWriter {
             }
             match c {
                 '\u{2215}' | '/' | '*' => {
-                    let in_power_bracket =
-                        is_power && brackets.last().is_some_and(|&ind| ind < power.len());
+                    let in_power_bracket = is_power && brackets.last().is_some_and(|&ind| ind < power.len());
                     if in_power_bracket {
                         let oper = self.format_operator(c);
                         power.push_str(&oper);
                     } else {
                         let oper = get_product_or_division_operator(self.format_type(), c == '*');
-                        append_power(
-                            self,
-                            &mut sb,
-                            &mut literal,
-                            &mut power,
-                            &mut is_power,
-                            &mut sub,
-                        );
+                        append_power(self, &mut sb, &mut literal, &mut power, &mut is_power, &mut sub);
                         sb.push_str(oper);
                     }
                 }
@@ -196,14 +177,7 @@ pub trait OutputWriter {
                             power.push(')');
                         }
                     } else {
-                        append_power(
-                            self,
-                            &mut sb,
-                            &mut literal,
-                            &mut power,
-                            &mut is_power,
-                            &mut sub,
-                        );
+                        append_power(self, &mut sb, &mut literal, &mut power, &mut is_power, &mut sub);
                         let s = sb[index..].to_string();
                         sb.truncate(index);
                         literal.clear();
@@ -242,14 +216,7 @@ pub trait OutputWriter {
             return Err(exceptions::MissingRightBracket());
         }
         if !literal.is_empty() {
-            append_power(
-                self,
-                &mut sb,
-                &mut literal,
-                &mut power,
-                &mut is_power,
-                &mut sub,
-            );
+            append_power(self, &mut sb, &mut literal, &mut power, &mut is_power, &mut sub);
         }
         Ok(sb)
     }
@@ -268,11 +235,7 @@ pub trait OutputWriter {
             let deg = b.degrees.clamp(0, 2) as usize;
             let phase = im.atan2(re) * ANGLE_FACTORS[deg];
             let abs_string = self.format_real(abs, format, false);
-            let phase_string = format!(
-                "{}{}",
-                self.format_real(phase, format, false),
-                self.angle_units()[deg]
-            );
+            let phase_string = format!("{}{}", self.format_real(phase, format, false), self.angle_units()[deg]);
             return format!("{}\u{2220}{}", abs_string, phase_string);
         }
         let s_re = self.format_real(re, format, false);
@@ -301,9 +264,7 @@ pub fn format_number(d: f64, format: Option<&str>, base: &WriterBase) -> String 
     if d == f64::NEG_INFINITY {
         return "-\u{221E}".to_string();
     }
-    let format = format
-        .map(|s| s.to_string())
-        .or_else(|| base.format_string.clone());
+    let format = format.map(|s| s.to_string()).or_else(|| base.format_string.clone());
     if let Some(format) = format.as_deref() {
         if !format.is_empty() {
             let s = if let Some(rest) = format.strip_prefix('D') {

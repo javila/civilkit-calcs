@@ -57,9 +57,7 @@ impl MathParser {
             base: 0,
         };
         let mut i0 = 0;
-        if rpn[0].borrow().ttype == TokenTypes::Variable
-            && is_assignment(&rpn[rpn_length - 1].borrow().content)
-        {
+        if rpn[0].borrow().ttype == TokenTypes::Variable && is_assignment(&rpn[rpn_length - 1].borrow().content) {
             i0 = 1;
         }
         *self.backup_variable.borrow_mut() = (None, Some(Value::zero()));
@@ -73,11 +71,7 @@ impl MathParser {
             };
             match tt {
                 TokenTypes::Constant => {
-                    let v = t
-                        .borrow()
-                        .token_value()
-                        .cloned()
-                        .unwrap_or_else(Value::zero);
+                    let v = t.borrow().token_value().cloned().unwrap_or_else(Value::zero);
                     stack.push(v);
                 }
                 TokenTypes::Unit | TokenTypes::Variable | TokenTypes::Input => {
@@ -99,9 +93,7 @@ impl MathParser {
                     let index = t.borrow().index;
                     stack.push(Value::evaluate_function(self.calc(), index, &a)?);
                 }
-                TokenTypes::VectorFunction
-                | TokenTypes::MatrixFunction
-                | TokenTypes::MatrixOptionalFunction => {
+                TokenTypes::VectorFunction | TokenTypes::MatrixFunction | TokenTypes::MatrixOptionalFunction => {
                     self.note_out_of_scope(&format!("vector/matrix function {}", content));
                     return Err(out_of_scope("Vector and matrix functions"));
                 }
@@ -129,9 +121,7 @@ impl MathParser {
                     };
                     stack.push(r);
                 }
-                TokenTypes::VectorFunction2
-                | TokenTypes::MatrixFunction2
-                | TokenTypes::MatrixIterativeFunction => {
+                TokenTypes::VectorFunction2 | TokenTypes::MatrixFunction2 | TokenTypes::MatrixIterativeFunction => {
                     self.note_out_of_scope(&format!("vector/matrix function {}", content));
                     return Err(out_of_scope("Vector and matrix functions"));
                 }
@@ -140,10 +130,7 @@ impl MathParser {
                     let b = stack.pop()?;
                     let a = stack.pop()?;
                     let index = t.borrow().index;
-                    stack.push(
-                        self.evaluator_calc()
-                            .evaluate_function3(index, &a, &b, &c)?,
-                    );
+                    stack.push(self.evaluator_calc().evaluate_function3(index, &a, &b, &c)?);
                 }
                 TokenTypes::VectorFunction3
                 | TokenTypes::MatrixFunction3
@@ -158,10 +145,7 @@ impl MathParser {
                         (tb.index, tb.parameter_count())
                     };
                     let params = stack.pop_values(pc.max(0) as usize)?;
-                    stack.push(
-                        self.evaluator_calc()
-                            .evaluate_interpolation(index, &params)?,
-                    );
+                    stack.push(self.evaluator_calc().evaluate_interpolation(index, &params)?);
                 }
                 TokenTypes::MultiFunction => {
                     let (index, pc) = {
@@ -172,10 +156,7 @@ impl MathParser {
                     if index == crate::calculator::SWITCH_INDEX {
                         stack.push(Value::evaluate_switch(&params));
                     } else {
-                        stack.push(
-                            self.evaluator_calc()
-                                .evaluate_multi_function(index, &params)?,
-                        );
+                        stack.push(self.evaluator_calc().evaluate_multi_function(index, &params)?);
                     }
                 }
                 TokenTypes::VectorMultiFunction | TokenTypes::MatrixMultiFunction => {
@@ -222,21 +203,13 @@ impl MathParser {
                 let tb = t.borrow();
                 match &tb.kind {
                     TokenKind::Value(v) => Ok(v.clone()),
-                    TokenKind::Variable(Some(var)) => {
-                        var.value().ok_or_else(|| exceptions::InvalidOperand(""))
-                    }
+                    TokenKind::Variable(Some(var)) => var.value().ok_or_else(|| exceptions::InvalidOperand("")),
                     _ => Err(exceptions::InvalidOperand("")),
                 }
             }
             TokenTypes::Variable => self.evaluate_variable_token(t),
-            TokenTypes::Input if t.borrow().content == "?" => {
-                Err(exceptions::UndefinedInputField())
-            }
-            _ => Ok(t
-                .borrow()
-                .token_value()
-                .cloned()
-                .unwrap_or_else(Value::zero)),
+            TokenTypes::Input if t.borrow().content == "?" => Err(exceptions::UndefinedInputField()),
+            _ => Ok(t.borrow().token_value().cloned().unwrap_or_else(Value::zero)),
         }
     }
 
@@ -250,9 +223,7 @@ impl MathParser {
             None => return Err(exceptions::UndefinedVariableOrUnits(&content)),
         };
         if v.is_initialized() || tt == TokenTypes::Vector || tt == TokenTypes::Matrix {
-            return v
-                .value()
-                .ok_or_else(|| exceptions::UndefinedVariableOrUnits(&content));
+            return v.value().ok_or_else(|| exceptions::UndefinedVariableOrUnits(&content));
         }
         let custom = self.units.borrow().get(&content).cloned();
         let u: OptUnit = match custom {
@@ -264,8 +235,7 @@ impl MathParser {
         };
         t.borrow_mut().ttype = TokenTypes::Unit;
         v.set_unit_value(u);
-        v.value()
-            .ok_or_else(|| exceptions::UndefinedVariableOrUnits(&content))
+        v.value().ok_or_else(|| exceptions::UndefinedVariableOrUnits(&content))
     }
 
     fn evaluate_assignment(&self, b: Value, rpn: &Rpn, is_visible: bool) -> CResult<Value> {
@@ -311,10 +281,7 @@ impl MathParser {
             Some(cf) => cf,
             None => return Err(index_out_of_range()),
         };
-        let cf_param_count = map
-            .as_ref()
-            .map(|m| m.len())
-            .unwrap_or(cf.parameter_count());
+        let cf_param_count = map.as_ref().map(|m| m.len()).unwrap_or(cf.parameter_count());
         if cf.is_recursion.get() {
             stack.base -= cf_param_count as isize;
             return Ok(Value::nan());
@@ -326,10 +293,7 @@ impl MathParser {
         }
     }
 
-    pub(crate) fn ensure_compiled(
-        &self,
-        cf: &CustomFunctionRef,
-    ) -> CResult<Rc<super::compiler::Expr>> {
+    pub(crate) fn ensure_compiled(&self, cf: &CustomFunctionRef) -> CResult<Rc<super::compiler::Expr>> {
         if let Some(f) = cf.function.borrow().clone() {
             return Ok(f);
         }
@@ -367,11 +331,7 @@ impl MathParser {
             let a = match arguments[i].take() {
                 Some(a) => a,
                 None => {
-                    let rpn = cf
-                        .defaults
-                        .borrow()
-                        .as_ref()
-                        .and_then(|d| d.get(i).cloned().flatten());
+                    let rpn = cf.defaults.borrow().as_ref().and_then(|d| d.get(i).cloned().flatten());
                     let rpn = match rpn {
                         Some(r) => r,
                         None => return Err(exceptions::InvalidNumberOfArguments()),
@@ -401,11 +361,7 @@ impl MathParser {
     }
 
     /// `Evaluator.EvaluateFunction(cf, x...)`
-    pub(crate) fn evaluate_custom_function(
-        &self,
-        cf: &CustomFunctionRef,
-        args: Vec<Value>,
-    ) -> CResult<Value> {
+    pub(crate) fn evaluate_custom_function(&self, cf: &CustomFunctionRef, args: Vec<Value>) -> CResult<Value> {
         let f = self.ensure_compiled(cf)?;
         let parameters = cf.parameters();
         for (p, a) in parameters.iter().zip(args) {
@@ -479,20 +435,13 @@ fn apply_units_complex(value: &mut ComplexValue, u: &OptUnit) -> CResult<OptUnit
     if u.is_dimensionless() {
         match &vu {
             None => {
-                *value = ComplexValue::from_c(
-                    value.complex().div_f(u.get_dimensionless_factor()),
-                    Some(u.clone()),
-                );
+                *value = ComplexValue::from_c(value.complex().div_f(u.get_dimensionless_factor()), Some(u.clone()));
                 return Ok(Some(u));
             }
             Some(vuu) => {
                 if let Some(format) = u.format_string_with_prefix() {
                     let fu = get_field_unit(vuu);
-                    let c = if Rc::ptr_eq(&fu, vuu) {
-                        1.0
-                    } else {
-                        vuu.convert_to(&fu)
-                    };
+                    let c = if Rc::ptr_eq(&fu, vuu) { 1.0 } else { vuu.convert_to(&fu) };
                     let nvu = Rc::new(Unit::copy(&fu));
                     nvu.set_text(&format!("{}{}", fu.text(), format));
                     *value = ComplexValue::from_c(value.complex() * c, Some(nvu.clone()));
@@ -502,19 +451,13 @@ fn apply_units_complex(value: &mut ComplexValue, u: &OptUnit) -> CResult<OptUnit
         }
     }
     if !Unit::is_consistent_opt(&vu, &Some(u.clone())) {
-        return Err(exceptions::InconsistentTargetUnits(
-            &Unit::get_text_of(&vu),
-            &u.text(),
-        ));
+        return Err(exceptions::InconsistentTargetUnits(&Unit::get_text_of(&vu), &u.text()));
     }
     let vu = vu.unwrap();
     let d = vu.convert_to(&u);
     if u.is_temp() {
         let c = value.complex() * d
-            + crate::base_types::complex::Complex::real(Unit::get_temp_units_delta(
-                &vu.text(),
-                &u.text(),
-            ));
+            + crate::base_types::complex::Complex::real(Unit::get_temp_units_delta(&vu.text(), &u.text()));
         *value = ComplexValue::from_c(c, Some(u.clone()));
     } else {
         *value = ComplexValue::from_c(value.complex() * d, Some(u.clone()));
@@ -549,11 +492,7 @@ fn apply_units_real(value: &mut RealValue, u: &OptUnit) -> CResult<OptUnit> {
             Some(vuu) => {
                 if let Some(format) = u.format_string_with_prefix() {
                     let fu = get_field_unit(vuu);
-                    let c = if Rc::ptr_eq(&fu, vuu) {
-                        1.0
-                    } else {
-                        vuu.convert_to(&fu)
-                    };
+                    let c = if Rc::ptr_eq(&fu, vuu) { 1.0 } else { vuu.convert_to(&fu) };
                     let nvu = Rc::new(Unit::copy(&fu));
                     nvu.set_text(&format!("{}{}", fu.text(), format));
                     *value = RealValue::new(value.d * c, Some(nvu.clone()));
@@ -563,10 +502,7 @@ fn apply_units_real(value: &mut RealValue, u: &OptUnit) -> CResult<OptUnit> {
         }
     }
     if !Unit::is_consistent_opt(&vu, &Some(u.clone())) {
-        return Err(exceptions::InconsistentTargetUnits(
-            &Unit::get_text_of(&vu),
-            &u.text(),
-        ));
+        return Err(exceptions::InconsistentTargetUnits(&Unit::get_text_of(&vu), &u.text()));
     }
     let vu = vu.unwrap();
     let d = vu.convert_to(&u);

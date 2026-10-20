@@ -88,10 +88,7 @@ fn check(input: &[Token]) -> CResult<()> {
             }
         }
         if !CORRECT_ORDER[pt.ttype as usize][t.ttype as usize] {
-            return Err(exceptions::InvalidSyntax(&format!(
-                "{} {}",
-                pt.content, t.content
-            )));
+            return Err(exceptions::InvalidSyntax(&format!("{} {}", pt.content, t.content)));
         }
         pt = t.clone();
     }
@@ -117,22 +114,14 @@ fn operator_order(op: &str) -> i32 {
 }
 
 /// `UnitsParser.Parse`
-pub fn parse(
-    expression: &str,
-    units: Option<&HashMap<String, OptUnit>>,
-    is_us: bool,
-) -> CResult<OptUnit> {
+pub fn parse(expression: &str, units: Option<&HashMap<String, OptUnit>>, is_us: bool) -> CResult<OptUnit> {
     let input = get_input(expression, units, is_us)?;
     check(&input)?;
     let mut rpn = get_rpn(input);
     evaluate(&mut rpn)
 }
 
-fn get_input(
-    expression: &str,
-    units: Option<&HashMap<String, OptUnit>>,
-    is_us: bool,
-) -> CResult<Vec<Token>> {
+fn get_input(expression: &str, units: Option<&HashMap<String, OptUnit>>, is_us: bool) -> CResult<Vec<Token>> {
     let ex: Vec<char> = expression.chars().collect();
     let mut tokens: Vec<Token> = Vec::new();
     let mut pt = TokenTypes::None;
@@ -292,12 +281,7 @@ fn evaluate(rpn: &mut [Token]) -> CResult<OptUnit> {
                 let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                 stack.push(evaluate_operator(t, a, b)?);
             }
-            _ => {
-                return Err(exceptions::InvalidLiteral(
-                    &t.content,
-                    &format!("{:?}", t.ttype),
-                ))
-            }
+            _ => return Err(exceptions::InvalidLiteral(&t.content, &format!("{:?}", t.ttype))),
         }
     }
     let t = match stack.pop() {
@@ -345,11 +329,9 @@ fn evaluate_operator(t: &Token, a: Token, b: Token) -> CResult<Token> {
                 '^' => match ua.pow(b.value as f32) {
                     Some(u) => Token::unit(u),
                     None => {
-                        return Err(
-                            crate::math_parser_exception::MathParserException::unexpected(
-                                "Object reference not set to an instance of an object.",
-                            ),
-                        )
+                        return Err(crate::math_parser_exception::MathParserException::unexpected(
+                            "Object reference not set to an instance of an object.",
+                        ))
                     }
                 },
                 _ => return Err(exceptions::InvalidOperator(c)),
@@ -362,11 +344,9 @@ fn evaluate_operator(t: &Token, a: Token, b: Token) -> CResult<Token> {
                 '/' => match Unit::f_div(a.value, &ub) {
                     Some(u) => Token::unit(u),
                     None => {
-                        return Err(
-                            crate::math_parser_exception::MathParserException::unexpected(
-                                "Object reference not set to an instance of an object.",
-                            ),
-                        )
+                        return Err(crate::math_parser_exception::MathParserException::unexpected(
+                            "Object reference not set to an instance of an object.",
+                        ))
                     }
                 },
                 '^' => return Err(exceptions::PowerNotUnitless()),
@@ -397,9 +377,7 @@ fn render_expression(rpn: &mut [Token]) -> String {
                 Some(b) => b,
                 None => continue,
             };
-            let mut a = stack
-                .pop()
-                .unwrap_or_else(|| Token::new("", TokenTypes::None));
+            let mut a = stack.pop().unwrap_or_else(|| Token::new("", TokenTypes::None));
             if a.order > t.order {
                 a.content = format!("({})", a.content);
             }

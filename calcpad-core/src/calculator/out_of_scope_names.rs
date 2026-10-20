@@ -21,9 +21,7 @@ pub const VECTOR_FUNCTIONS: [&str; 15] = [
     "unit",
     "vector_hp",
 ];
-pub const VECTOR_FUNCTIONS2: [&str; 8] = [
-    "resize", "fill", "first", "last", "extract", "dot", "cross", "norm_p",
-];
+pub const VECTOR_FUNCTIONS2: [&str; 8] = ["resize", "fill", "first", "last", "extract", "dot", "cross", "norm_p"];
 pub const VECTOR_FUNCTIONS3: [&str; 19] = [
     "slice",
     "range",
@@ -127,8 +125,7 @@ pub const MATRIX_FUNCTIONS2: [&str; 36] = [
     "setunits",
     "matmul",
 ];
-pub const MATRIX_ITERATIVE_FUNCTIONS: [&str; 5] =
-    ["slsolve", "smsolve", "eigenvals", "eigenvecs", "eigen"];
+pub const MATRIX_ITERATIVE_FUNCTIONS: [&str; 5] = ["slsolve", "smsolve", "eigenvals", "eigenvecs", "eigen"];
 pub const MATRIX_FUNCTIONS3: [&str; 3] = ["fill_row", "fill_col", "mresize"];
 pub const MATRIX_FUNCTIONS4: [&str; 17] = [
     "msearch",

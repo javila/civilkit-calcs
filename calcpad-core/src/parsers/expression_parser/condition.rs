@@ -190,9 +190,7 @@ impl Condition {
         }
         let d = value.re();
         if d.is_nan() || d.is_infinite() {
-            return Err(exceptions::ConditionResultInvalid(
-                &netfmt::double_to_string(d),
-            ));
+            return Err(exceptions::ConditionResultInvalid(&netfmt::double_to_string(d)));
         }
         Ok(d.abs() > 1e-12)
     }

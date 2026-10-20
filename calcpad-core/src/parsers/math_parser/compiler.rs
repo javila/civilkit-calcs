@@ -98,11 +98,7 @@ impl MathParser {
     }
 
     /// `Compiler.RpnToExpressionTree`
-    pub(crate) fn rpn_to_expression_tree(
-        &self,
-        rpn: &Rpn,
-        allow_assignment: bool,
-    ) -> CResult<Expr> {
+    pub(crate) fn rpn_to_expression_tree(&self, rpn: &Rpn, allow_assignment: bool) -> CResult<Expr> {
         self.compile_rpn(rpn, allow_assignment)
     }
 
@@ -128,16 +124,10 @@ impl MathParser {
             };
             match tt {
                 TokenTypes::Constant => {
-                    let v = t
-                        .borrow()
-                        .token_value()
-                        .cloned()
-                        .unwrap_or_else(Value::zero);
+                    let v = t.borrow().token_value().cloned().unwrap_or_else(Value::zero);
                     stack.push(Expr::Const(v));
                 }
-                TokenTypes::Unit | TokenTypes::Variable | TokenTypes::Input => {
-                    stack.push(self.compile_token0(t)?)
-                }
+                TokenTypes::Unit | TokenTypes::Variable | TokenTypes::Input => stack.push(self.compile_token0(t)?),
                 TokenTypes::Operator if content == NEG_STR => {
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token1(t, a)?);
@@ -146,9 +136,7 @@ impl MathParser {
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token1(t, a)?);
                 }
-                TokenTypes::VectorFunction
-                | TokenTypes::MatrixFunction
-                | TokenTypes::MatrixOptionalFunction => {
+                TokenTypes::VectorFunction | TokenTypes::MatrixFunction | TokenTypes::MatrixOptionalFunction => {
                     self.note_out_of_scope(&format!("vector/matrix function {}", content));
                     return Err(out_of_scope("Vector and matrix functions"));
                 }
@@ -157,9 +145,7 @@ impl MathParser {
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token2(t, a, b)?);
                 }
-                TokenTypes::VectorFunction2
-                | TokenTypes::MatrixFunction2
-                | TokenTypes::MatrixIterativeFunction => {
+                TokenTypes::VectorFunction2 | TokenTypes::MatrixFunction2 | TokenTypes::MatrixIterativeFunction => {
                     self.note_out_of_scope(&format!("vector/matrix function {}", content));
                     return Err(out_of_scope("Vector and matrix functions"));
                 }
@@ -185,11 +171,7 @@ impl MathParser {
                     let args = pop_values(&mut stack, n)?;
                     if args.iter().all(Expr::is_const) {
                         let values: Vec<Value> = args.iter().map(Expr::const_value).collect();
-                        stack.push(Expr::Const(Value::evaluate_interpolation(
-                            self.calc(),
-                            index,
-                            &values,
-                        )?));
+                        stack.push(Expr::Const(Value::evaluate_interpolation(self.calc(), index, &values)?));
                     } else {
                         stack.push(Expr::Interp(index, args));
                     }
@@ -223,10 +205,7 @@ impl MathParser {
                         None => return Err(crate::calculator::index_out_of_range()),
                     };
                     let map = t.borrow().argument_map();
-                    let n = map
-                        .as_ref()
-                        .map(|m| m.len())
-                        .unwrap_or(cf.parameter_count());
+                    let n = map.as_ref().map(|m| m.len()).unwrap_or(cf.parameter_count());
                     let args = pop_values(&mut stack, n)?;
                     if cf.is_recursion.get() {
                         stack.push(Expr::Const(Value::nan()));
@@ -264,18 +243,15 @@ impl MathParser {
                 };
                 match v {
                     Value::Real(_) => Ok(Expr::Const(v)),
-                    _ => Err(MathParserException::unexpected("Unable to cast object of type 'Calcpad.Core.ComplexValue' to type 'Calcpad.Core.RealValue'.")),
+                    _ => Err(MathParserException::unexpected(
+                        "Unable to cast object of type 'Calcpad.Core.ComplexValue' to type 'Calcpad.Core.RealValue'.",
+                    )),
                 }
             }
             TokenTypes::Variable => self.compile_variable_token(t),
-            TokenTypes::Input if t.borrow().content == "?" => {
-                Err(exceptions::UndefinedInputField())
-            }
+            TokenTypes::Input if t.borrow().content == "?" => Err(exceptions::UndefinedInputField()),
             _ => Ok(Expr::Const(
-                t.borrow()
-                    .token_value()
-                    .cloned()
-                    .unwrap_or_else(Value::zero),
+                t.borrow().token_value().cloned().unwrap_or_else(Value::zero),
             )),
         }
     }

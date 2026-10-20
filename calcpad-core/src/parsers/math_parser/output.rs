@@ -201,11 +201,7 @@ impl MathParser {
             let cf = self.functions.borrow().get(fdi).unwrap();
             for i in 0..cf.parameter_count() {
                 sb.push_str(&writer.format_variable(&cf.parameter_name(i), "", false));
-                let default_rpn = cf
-                    .defaults
-                    .borrow()
-                    .as_ref()
-                    .and_then(|d| d.get(i).cloned().flatten());
+                let default_rpn = cf.defaults.borrow().as_ref().and_then(|d| d.get(i).cloned().flatten());
                 if let Some(d) = default_rpn {
                     let (s, _) = self.render_rpn(&d, false, writer)?;
                     sb.push_str(&assignment);
@@ -229,18 +225,11 @@ impl MathParser {
                 if format == OutputFormat::Text {
                     sb.push_str(warning);
                 } else if format == OutputFormat::Html {
-                    sb.push_str(&format!(
-                        "<b class=\"err\" title = \"{}\"> !!!</b>",
-                        warning
-                    ));
+                    sb.push_str(&format!("<b class=\"err\" title = \"{}\"> !!!</b>", warning));
                 }
             }
         } else {
-            let rpn = self
-                .rpn
-                .borrow()
-                .clone()
-                .unwrap_or_else(|| Rc::new(Vec::new()));
+            let rpn = self.rpn.borrow().clone().unwrap_or_else(|| Rc::new(Vec::new()));
             let (equation, mut has_operators) = self.render_rpn(&rpn, false, writer)?;
             if self.variable_substitution.get() != VariableSubstitutionOptions::SubstitutionsOnly {
                 sb.push_str(&equation);
@@ -249,14 +238,12 @@ impl MathParser {
                 let mut subst = String::new();
                 let mut is_split = false;
                 let len = rpn.len();
-                let solver_assign = len == 3
-                    && rpn[1].borrow().ttype == TokenTypes::Solver
-                    && is_assignment(&rpn[2].borrow().content);
+                let solver_assign =
+                    len == 3 && rpn[1].borrow().ttype == TokenTypes::Solver && is_assignment(&rpn[2].borrow().content);
                 if !(solver_assign || len == 1) {
                     if self.output_has_variables.get() {
                         if settings.substitute
-                            && self.variable_substitution.get()
-                                != VariableSubstitutionOptions::VariablesOnly
+                            && self.variable_substitution.get() != VariableSubstitutionOptions::VariablesOnly
                         {
                             let (s2, ho) = self.render_rpn(&rpn, true, writer)?;
                             subst = s2;
@@ -278,9 +265,7 @@ impl MathParser {
                                 ""
                             };
                             if tail != subst {
-                                if self.variable_substitution.get()
-                                    != VariableSubstitutionOptions::SubstitutionsOnly
-                                {
+                                if self.variable_substitution.get() != VariableSubstitutionOptions::SubstitutionsOnly {
                                     sb.push_str(&assignment);
                                     if self.split.get() && format == OutputFormat::Html {
                                         is_split = true;
@@ -316,12 +301,7 @@ impl MathParser {
         Ok(sb)
     }
 
-    fn render_rpn(
-        &self,
-        rpn: &Rpn,
-        substitute: bool,
-        writer: &dyn OutputWriter,
-    ) -> CResult<(String, bool)> {
+    fn render_rpn(&self, rpn: &Rpn, substitute: bool, writer: &dyn OutputWriter) -> CResult<(String, bool)> {
         let settings = self.settings.borrow().clone();
         let mut r = Renderer {
             p: self,
@@ -342,9 +322,9 @@ impl MathParser {
 
 impl<'a> Renderer<'a> {
     fn pop(&mut self) -> CResult<RenderToken> {
-        self.stack.pop().ok_or_else(|| {
-            crate::math_parser_exception::MathParserException::unexpected("Stack empty.")
-        })
+        self.stack
+            .pop()
+            .ok_or_else(|| crate::math_parser_exception::MathParserException::unexpected("Stack empty."))
     }
 
     fn run(&mut self) -> CResult<()> {
@@ -371,9 +351,7 @@ impl<'a> Renderer<'a> {
                     self.render_operator_token(&mut t, b)?;
                 } else {
                     if tt == TokenTypes::VectorIndex || tt == TokenTypes::MatrixIndex {
-                        return Err(super::input::out_of_scope(
-                            "Vector and matrix element access",
-                        ));
+                        return Err(super::input::out_of_scope("Vector and matrix element access"));
                     } else if matches!(
                         tt,
                         TokenTypes::Function2
@@ -384,9 +362,7 @@ impl<'a> Renderer<'a> {
                         self.render_function2_token(&mut t, b)?;
                     } else if matches!(
                         tt,
-                        TokenTypes::Function3
-                            | TokenTypes::VectorFunction3
-                            | TokenTypes::MatrixFunction3
+                        TokenTypes::Function3 | TokenTypes::VectorFunction3 | TokenTypes::MatrixFunction3
                     ) {
                         self.render_function3_token(&mut t, b)?;
                     } else if tt == TokenTypes::MatrixFunction4 {
@@ -408,8 +384,7 @@ impl<'a> Renderer<'a> {
                     } else if tt == TokenTypes::Vector {
                         let pc = t.parameter_count;
                         let s = self.render_parameters(&mut t, b, pc, false)?;
-                        t.content =
-                            self.add_brackets(&s, t.level, t.min_offset, t.max_offset, '[', ']');
+                        t.content = self.add_brackets(&s, t.level, t.min_offset, t.max_offset, '[', ']');
                         t.min_offset = 0;
                         t.max_offset = 0;
                     } else if tt == TokenTypes::RowDivisor {
@@ -418,21 +393,13 @@ impl<'a> Renderer<'a> {
                     } else if tt == TokenTypes::Matrix {
                         let pc = t.parameter_count;
                         let s = self.render_parameters(&mut t, b, pc, true)?;
-                        t.content =
-                            self.add_brackets(&s, t.level, t.min_offset, t.max_offset, '[', ']');
+                        t.content = self.add_brackets(&s, t.level, t.min_offset, t.max_offset, '[', ']');
                         t.min_offset = 0;
                         t.max_offset = 0;
                     } else if st == "!" {
                         let mut sb = b.content.clone();
                         if is_negative(&b) || b.order > DEFAULT_ORDER {
-                            sb = self.add_brackets(
-                                &sb,
-                                b.level,
-                                b.min_offset,
-                                b.max_offset,
-                                '(',
-                                ')',
-                            );
+                            sb = self.add_brackets(&sb, b.level, b.min_offset, b.max_offset, '(', ')');
                         }
                         t.content = format!("{}{}", sb, self.writer.format_operator('!'));
                         t.level = b.level;
@@ -440,11 +407,7 @@ impl<'a> Renderer<'a> {
                         || st.eq_ignore_ascii_case("sqrt")
                         || st.eq_ignore_ascii_case("cbrt")
                     {
-                        let n = if st.eq_ignore_ascii_case("cbrt") {
-                            "3"
-                        } else {
-                            "2"
-                        };
+                        let n = if st.eq_ignore_ascii_case("cbrt") { "3" } else { "2" };
                         self.render_root_token(&mut t, b, n);
                     } else if st.eq_ignore_ascii_case("abs") {
                         t.content = self.writer.format_abs(&b.content, b.level);
@@ -486,16 +449,10 @@ impl<'a> Renderer<'a> {
     }
 
     fn render_input_token(&mut self, t: &mut RenderToken, i: usize) {
-        let units = self.rpn[i]
-            .borrow()
-            .token_value()
-            .and_then(|v| v.units().clone());
-        t.content = self.writer.format_input(
-            &t.content,
-            &units,
-            self.p.line.get(),
-            self.p.is_calculated.get(),
-        );
+        let units = self.rpn[i].borrow().token_value().and_then(|v| v.units().clone());
+        t.content = self
+            .writer
+            .format_input(&t.content, &units, self.p.line.get(), self.p.is_calculated.get());
     }
 
     fn render_constant_token(&mut self, t: &mut RenderToken, i: usize) -> CResult<()> {
@@ -546,15 +503,8 @@ impl<'a> Renderer<'a> {
                     t.content = self.writer.format_value(&scalar);
                     t.is_composite_value = scalar.is_composite() || t.content.contains('\u{00D7}');
                     t.order = DEFAULT_ORDER;
-                    if self.p.settings.borrow().is_complex
-                        && scalar.is_complex()
-                        && scalar.units().is_none()
-                    {
-                        t.order = if scalar.im() < 0.0 {
-                            minus_order()
-                        } else {
-                            plus_order()
-                        };
+                    if self.p.settings.borrow().is_complex && scalar.is_complex() && scalar.units().is_none() {
+                        t.order = if scalar.im() < 0.0 { minus_order() } else { plus_order() };
                     }
                 } else {
                     let s = if !self.p.settings.borrow().substitute
@@ -566,11 +516,8 @@ impl<'a> Renderer<'a> {
                         String::new()
                     };
                     t.content = self.writer.format_variable(&t.content, &s, false);
-                    let last_is_assignment =
-                        is_assignment(&self.rpn[self.rpn.len() - 1].borrow().content);
-                    self.p
-                        .output_has_variables
-                        .set(i > 0 || !last_is_assignment);
+                    let last_is_assignment = is_assignment(&self.rpn[self.rpn.len() - 1].borrow().content);
+                    self.p.output_has_variables.set(i > 0 || !last_is_assignment);
                 }
             }
             None => {
@@ -613,9 +560,8 @@ impl<'a> Renderer<'a> {
         }
         let content = t.content.clone();
         let is_text = self.writer.format_type() == OutputFormat::Text;
-        let format_equation = !is_text
-            && (self.format_equations && content == "/"
-                || !self.format_equations && content == "\u{00F7}");
+        let format_equation =
+            !is_text && (self.format_equations && content == "/" || !self.format_equations && content == "\u{00F7}");
         let a = match self.stack.pop() {
             Some(a) => a,
             None => RenderToken::simple(
@@ -631,10 +577,7 @@ impl<'a> Renderer<'a> {
         let mut sa = a.content.clone();
         if a.order > t.order && !format_equation {
             sa = self.add_brackets(&sa, a.level, a.min_offset, a.max_offset, '(', ')');
-        } else if a.ttype == TokenTypes::MultiFunction
-            && a.index == SWITCH_INDEX
-            && a.parameter_count > 2
-        {
+        } else if a.ttype == TokenTypes::MultiFunction && a.index == SWITCH_INDEX && a.parameter_count > 2 {
             sa = self.writer.close_curly_brackets(&sa, a.level);
         }
         if content == "^" {
@@ -649,12 +592,7 @@ impl<'a> Renderer<'a> {
                 || a.val_type == ValueTypes::Vector
                 || a.val_type == ValueTypes::Matrix
             {
-                sb = format!(
-                    "{}{}{}",
-                    self.writer.format_operator('\u{2299}'),
-                    THIN_SPACE,
-                    sb
-                );
+                sb = format!("{}{}{}", self.writer.format_operator('\u{2299}'), THIN_SPACE, sb);
             }
             if a.val_type == ValueTypes::Unit {
                 if self.p.settings.borrow().format_string.is_some() {
@@ -714,8 +652,7 @@ impl<'a> Renderer<'a> {
                             t.content = format!("{}{}{}", sa, THIN_SPACE, sb);
                         }
                     } else if a.val_type == ValueTypes::Vector && b.val_type == ValueTypes::Vector {
-                        t.content =
-                            format!("{}{}{}", sa, self.writer.format_operator('\u{2299}'), sb);
+                        t.content = format!("{}{}{}", sa, self.writer.format_operator('\u{2299}'), sb);
                     } else if t.order == 1 && self.writer.format_type() == OutputFormat::Html {
                         t.content = format!("{}{}{}", sa, HtmlWriter::UNIT_PRODUCT, sb);
                     } else {
@@ -741,12 +678,8 @@ impl<'a> Renderer<'a> {
             t.min_offset = a.min_offset.min(b.min_offset).min(t.offset);
             t.max_offset = a.max_offset.max(b.max_offset).max(t.offset);
             if is_assignment(&content) {
-                self.p
-                    .output_assignment_position
-                    .set(t.content.len() - sb.len());
-            } else if t.order != 1
-                && !(a.val_type == ValueTypes::Number && b.val_type == ValueTypes::Unit)
-            {
+                self.p.output_assignment_position.set(t.content.len() - sb.len());
+            } else if t.order != 1 && !(a.val_type == ValueTypes::Number && b.val_type == ValueTypes::Unit) {
                 self.has_operators = true;
             }
         }
@@ -797,9 +730,7 @@ impl<'a> Renderer<'a> {
                 self.add_brackets(&inner, t.level, t.min_offset, t.max_offset, '(', ')')
             );
         }
-        if t.ttype == TokenTypes::Function2
-            && (a.val_type == ValueTypes::Vector || b.val_type == ValueTypes::Vector)
-        {
+        if t.ttype == TokenTypes::Function2 && (a.val_type == ValueTypes::Vector || b.val_type == ValueTypes::Vector) {
             t.val_type = ValueTypes::Vector;
         }
         Ok(())
@@ -811,35 +742,23 @@ impl<'a> Renderer<'a> {
         let a = self.pop()?;
         if self.format_equations && t.ttype == TokenTypes::Function3 && t.index == 0 {
             t.level = a.level.max(b.level) + c.level + 1;
-            t.content = self
-                .writer
-                .format_if(&a.content, &b.content, &c.content, t.level);
+            t.content = self.writer.format_if(&a.content, &b.content, &c.content, t.level);
         } else {
             t.level = a.level.max(b.level.max(c.level));
-            let inner = format!(
-                "{}{}{}{}{}",
-                a.content, self.div, b.content, self.div, c.content
-            );
+            let inner = format!("{}{}{}{}{}", a.content, self.div, b.content, self.div, c.content);
             t.content = format!(
                 "{}{}",
                 self.writer.format_function(&st),
                 self.add_brackets(&inner, t.level, t.min_offset, t.max_offset, '(', ')')
             );
         }
-        if t.ttype == TokenTypes::Function3
-            && (b.val_type == ValueTypes::Vector || c.val_type == ValueTypes::Vector)
-        {
+        if t.ttype == TokenTypes::Function3 && (b.val_type == ValueTypes::Vector || c.val_type == ValueTypes::Vector) {
             t.val_type = ValueTypes::Vector;
         }
         Ok(())
     }
 
-    fn render_function_n_token(
-        &mut self,
-        t: &mut RenderToken,
-        last: RenderToken,
-        n: usize,
-    ) -> CResult<()> {
+    fn render_function_n_token(&mut self, t: &mut RenderToken, last: RenderToken, n: usize) -> CResult<()> {
         let st = t.content.clone();
         let mut args = vec![last];
         for _ in 1..n {
@@ -925,12 +844,7 @@ impl<'a> Renderer<'a> {
         Ok(())
     }
 
-    fn render_keyword_arguments(
-        &mut self,
-        t: &RenderToken,
-        b: RenderToken,
-        map: &[usize],
-    ) -> CResult<RenderToken> {
+    fn render_keyword_arguments(&mut self, t: &RenderToken, b: RenderToken, map: &[usize]) -> CResult<RenderToken> {
         let cf = self
             .p
             .functions
@@ -945,15 +859,10 @@ impl<'a> Renderer<'a> {
             args[k as usize] = self.pop()?;
             k -= 1;
         }
-        for (k, arg) in args
-            .iter_mut()
-            .enumerate()
-            .skip(t.positional_count as usize)
-        {
+        for (k, arg) in args.iter_mut().enumerate().skip(t.positional_count as usize) {
             arg.content = format!(
                 "{}{}{}",
-                self.writer
-                    .format_variable(&cf.parameter_name(map[k]), "", false),
+                self.writer.format_variable(&cf.parameter_name(map[k]), "", false),
                 self.writer.format_operator('='),
                 arg.content
             );
@@ -965,13 +874,7 @@ impl<'a> Renderer<'a> {
         Ok(last)
     }
 
-    fn render_parameters(
-        &mut self,
-        t: &mut RenderToken,
-        b: RenderToken,
-        count: i32,
-        matrix: bool,
-    ) -> CResult<String> {
+    fn render_parameters(&mut self, t: &mut RenderToken, b: RenderToken, count: i32, matrix: bool) -> CResult<String> {
         let mut s = b.content.clone();
         t.level = b.level;
         t.min_offset = b.min_offset;
@@ -1006,21 +909,12 @@ impl<'a> Renderer<'a> {
         t.level = b.level;
     }
 
-    fn add_brackets(
-        &self,
-        s: &str,
-        level: i32,
-        min_offset: i32,
-        max_offset: i32,
-        left: char,
-        right: char,
-    ) -> String {
+    fn add_brackets(&self, s: &str, level: i32, min_offset: i32, max_offset: i32, left: char, right: char) -> String {
         let offset = min_offset + max_offset;
         let level = level + (max_offset - min_offset) / 2;
         if offset == 0 {
             return self.writer.add_brackets(s, level, left, right);
         }
-        self.writer
-            .add_brackets(&fix_offset(s, offset), level, left, right)
+        self.writer.add_brackets(&fix_offset(s, offset), level, left, right)
     }
 }

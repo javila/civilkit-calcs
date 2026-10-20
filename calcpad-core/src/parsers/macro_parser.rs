@@ -102,11 +102,7 @@ impl Macro {
         self.contents.is_none()
     }
 
-    fn resolve_arguments(
-        &self,
-        positional: &[String],
-        keywords: &[(String, String)],
-    ) -> CResult<Vec<String>> {
+    fn resolve_arguments(&self, positional: &[String], keywords: &[(String, String)]) -> CResult<Vec<String>> {
         if positional.len() > self.parameter_count() {
             return Err(exceptions::InvalidNumberOfArguments());
         }
@@ -202,11 +198,7 @@ pub fn try_get_include_path(line: &[char]) -> Option<(usize, usize)> {
         .position(|&c| c == '\'' || c == '"')
         .map(|x| x as isize)
         .unwrap_or(-1);
-    let nf1: isize = line
-        .iter()
-        .rposition(|&c| c == '#')
-        .map(|x| x as isize)
-        .unwrap_or(-1);
+    let nf1: isize = line.iter().rposition(|&c| c == '#').map(|x| x as isize).unwrap_or(-1);
     if n <= path_start as isize || nf1 > 0 && nf1 < n {
         n = nf1;
     }
@@ -283,13 +275,7 @@ impl<'a> MacroParser<'a> {
     }
 
     /// One (possibly nested) Parse call: its own locals, the shared output builder.
-    fn parse_inner(
-        &mut self,
-        source_code: &str,
-        sb: &mut String,
-        include_line: i32,
-        add_line_numbers: bool,
-    ) -> bool {
+    fn parse_inner(&mut self, source_code: &str, sb: &mut String, include_line: i32, add_line_numbers: bool) -> bool {
         let mut st = ParseState {
             sb: std::mem::take(sb),
             macro_builder: String::new(),
@@ -330,9 +316,7 @@ impl<'a> MacroParser<'a> {
                                 self.append_line(&mut st, line, add_line_numbers);
                             }
                         }
-                        Err(ex) => {
-                            self.append_error(&mut st, line_content, &ex.message, add_line_numbers)
-                        }
+                        Err(ex) => self.append_error(&mut st, line_content, &ex.message, add_line_numbers),
                     }
                     continue;
                 }
@@ -386,12 +370,7 @@ impl<'a> MacroParser<'a> {
         }
     }
 
-    fn parse_include(
-        &mut self,
-        st: &mut ParseState,
-        line_content: &str,
-        add_line_numbers: bool,
-    ) -> CResult<()> {
+    fn parse_include(&mut self, st: &mut ParseState, line_content: &str, add_line_numbers: bool) -> CResult<()> {
         let chars: Vec<char> = line_content.chars().collect();
         if chars.len() <= INCLUDE_KEYWORD.len() {
             self.append_error(
@@ -409,12 +388,7 @@ impl<'a> MacroParser<'a> {
             if nf1 > 0 {
                 let nf2 = chars.iter().rposition(|&c| c == '}');
                 match nf2 {
-                    None => self.append_error(
-                        st,
-                        line_content,
-                        messages::Brackets_not_closed,
-                        add_line_numbers,
-                    ),
+                    None => self.append_error(st, line_content, messages::Brackets_not_closed, add_line_numbers),
                     Some(nf2) => {
                         let from = nf1 + FIELDS_MARKER.len();
                         let inner: String = if from <= nf2 {
@@ -468,12 +442,7 @@ impl<'a> MacroParser<'a> {
     }
 
     #[allow(unused_assignments)]
-    fn parse_def(
-        &mut self,
-        st: &mut ParseState,
-        line_content: &str,
-        add_line_numbers: bool,
-    ) -> CResult<()> {
+    fn parse_def(&mut self, st: &mut ParseState, line_content: &str, add_line_numbers: bool) -> CResult<()> {
         let chars: Vec<char> = line_content.chars().collect();
         let len = chars.len();
         let mut ts_start;
@@ -530,8 +499,7 @@ impl<'a> MacroParser<'a> {
                         if validator::is_macro_letter(c, ts_end - ts_start) {
                             ts_end += 1;
                         } else if c != '\n' {
-                            let msg =
-                                fmt(messages::Invalid_symbol_0_in_macro_name, &[&c.to_string()]);
+                            let msg = fmt(messages::Invalid_symbol_0_in_macro_name, &[&c.to_string()]);
                             self.append_error(st, line_content, &msg, add_line_numbers);
                         }
                         i += 1;
@@ -569,11 +537,7 @@ impl<'a> MacroParser<'a> {
             if c == '=' {
                 eat_space(&chars, &mut i);
                 let contents: String = chars[i.min(len)..].iter().collect();
-                let m = Macro::new(
-                    Some(contents),
-                    st.macro_parameters.clone(),
-                    st.macro_defaults.clone(),
-                )?;
+                let m = Macro::new(Some(contents), st.macro_parameters.clone(), st.macro_defaults.clone())?;
                 let name = st.macro_name.clone();
                 self.add_macro(st, line_content, &name, m, add_line_numbers);
                 st.macro_name = String::new();
@@ -599,19 +563,9 @@ impl<'a> MacroParser<'a> {
         Ok(())
     }
 
-    fn parse_end_def(
-        &mut self,
-        st: &mut ParseState,
-        line_content: &str,
-        add_line_numbers: bool,
-    ) -> CResult<()> {
+    fn parse_end_def(&mut self, st: &mut ParseState, line_content: &str, add_line_numbers: bool) -> CResult<()> {
         if st.macro_def_count < 1 {
-            self.append_error(
-                st,
-                line_content,
-                messages::There_is_no_matching_def,
-                add_line_numbers,
-            );
+            self.append_error(st, line_content, messages::There_is_no_matching_def, add_line_numbers);
         } else {
             // RemoveLastLineIfEmpty
             let mb = &mut st.macro_builder;
@@ -622,11 +576,7 @@ impl<'a> MacroParser<'a> {
                 }
             }
             let content = st.macro_builder.clone();
-            let m = Macro::new(
-                Some(content),
-                st.macro_parameters.clone(),
-                st.macro_defaults.clone(),
-            )?;
+            let m = Macro::new(Some(content), st.macro_parameters.clone(), st.macro_defaults.clone())?;
             let name = st.macro_name.clone();
             self.add_macro(st, line_content, &name, m, add_line_numbers);
             st.macro_name = String::new();
@@ -647,13 +597,7 @@ impl<'a> MacroParser<'a> {
         self.parsed_line_number += 1;
     }
 
-    fn append_error(
-        &mut self,
-        st: &mut ParseState,
-        line_content: &str,
-        error_message: &str,
-        add_line_numbers: bool,
-    ) {
+    fn append_error(&mut self, st: &mut ParseState, line_content: &str, error_message: &str, add_line_numbers: bool) {
         let marker = if add_line_numbers {
             format!("\u{000B}{}", st.line_number)
         } else {
@@ -673,14 +617,7 @@ impl<'a> MacroParser<'a> {
         st.has_errors = true;
     }
 
-    fn add_macro(
-        &mut self,
-        st: &mut ParseState,
-        line_content: &str,
-        name: &str,
-        m: Macro,
-        add_line_numbers: bool,
-    ) {
+    fn add_macro(&mut self, st: &mut ParseState, line_content: &str, name: &str, m: Macro, add_line_numbers: bool) {
         if self.macros.contains_key(name) {
             let msg = fmt(messages::Duplicate_macro_name_0, &[name]);
             self.append_error(st, line_content, &msg, add_line_numbers);
@@ -689,11 +626,7 @@ impl<'a> MacroParser<'a> {
         }
     }
 
-    fn apply_macros(
-        &self,
-        line_content: &str,
-        currently_expanding: Option<&mut HashSet<String>>,
-    ) -> CResult<String> {
+    fn apply_macros(&self, line_content: &str, currently_expanding: Option<&mut HashSet<String>>) -> CResult<String> {
         let mut local_set: HashSet<String> = HashSet::new();
         let has_set = currently_expanding.is_some();
         let expanding: &mut HashSet<String> = match currently_expanding {
@@ -751,9 +684,7 @@ impl<'a> MacroParser<'a> {
                         i += 1;
                         continue;
                     }
-                    if let Some((name, value)) =
-                        self.try_parse_keyword_argument(&raw_argument, &mac)
-                    {
+                    if let Some((name, value)) = self.try_parse_keyword_argument(&raw_argument, &mac) {
                         seen_keyword = true;
                         if keyword_arguments.iter().any(|(k, _)| *k == name) {
                             return Err(exceptions::DuplicateArgument(&name));
@@ -765,11 +696,7 @@ impl<'a> MacroParser<'a> {
                             return Err(exceptions::InvalidNumberOfArguments());
                         }
                         let s = self.apply_macros(&raw, Some(&mut *expanding))?;
-                        macro_arguments.push(if s.trim().is_empty() {
-                            String::new()
-                        } else {
-                            s
-                        });
+                        macro_arguments.push(if s.trim().is_empty() { String::new() } else { s });
                     }
                     ts_start = i + 1;
                     ts_end = i + 1;
@@ -918,11 +845,7 @@ fn eat_space(s: &[char], index: &mut usize) -> char {
 /// `MacroParser.HasInputFields`
 pub fn has_input_fields(s: &str) -> bool {
     for item in enumerate_comments(s) {
-        if !item.is_empty()
-            && !item.starts_with('"')
-            && !item.starts_with('\'')
-            && item.contains('?')
-        {
+        if !item.is_empty() && !item.starts_with('"') && !item.starts_with('\'') && item.contains('?') {
             return true;
         }
     }

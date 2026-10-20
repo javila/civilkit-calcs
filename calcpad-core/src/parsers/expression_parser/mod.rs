@@ -11,6 +11,7 @@ use std::rc::Rc;
 use crate::base_types::complex::Complex;
 use crate::base_types::real_value::RealValue;
 use crate::base_types::value::Value;
+use crate::calcpad_error::{CalcpadError, CalcpadErrorSource};
 use crate::extension_methods::{tag_end_index, trim, trim_end};
 use crate::math_parser_exception::{CResult, MathParserException};
 use crate::messages;
@@ -27,7 +28,8 @@ use loops::{Loop, LoopKind, MAX_COUNT};
 const MAX_HTML_LINES: i32 = 200000;
 
 /// Appended to the error of a condition that could not be evaluated (deviation D1).
-pub const UNRESOLVED_CONDITION: &str = "The condition could not be evaluated, so the block is unresolved and none of its branches were run.";
+pub const UNRESOLVED_CONDITION: &str =
+    "The condition could not be evaluated, so the block is unresolved and none of its branches were run.";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
 #[repr(i32)]
@@ -180,11 +182,7 @@ fn get_keyword(s: &[char]) -> Keyword {
 }
 
 fn keyword_name(k: Keyword) -> &'static str {
-    KEYWORDS
-        .iter()
-        .find(|(kk, _)| *kk == k)
-        .map(|(_, n)| *n)
-        .unwrap_or("")
+    KEYWORDS.iter().find(|(kk, _)| *kk == k).map(|(_, n)| *n).unwrap_or("")
 }
 
 /// `KeywordLength(keyword)`: characters including the leading '#'.
@@ -282,6 +280,10 @@ pub struct ExpressionParser {
     mode_suppressed: bool,
     parse_mode_stack: Vec<(ParseMode, bool)>,
     last_expression_failed: Option<(String, String)>,
+    err_index: i32,
+    first_err_index_by_line: std::collections::HashMap<usize, i32>,
+    /// `Errors`: recorded only in Debug mode, like CalcpadCE.
+    pub errors_list: Vec<CalcpadError>,
 }
 
 fn is_line_extension_char(c: char) -> bool {
@@ -289,8 +291,7 @@ fn is_line_extension_char(c: char) -> bool {
 }
 
 fn has_line_extension(s: &str) -> bool {
-    s.ends_with(" _")
-        || s.chars().last().is_some_and(is_line_extension_char) && !validator::is_comment(s)
+    s.ends_with(" _") || s.chars().last().is_some_and(is_line_extension_char) && !validator::is_comment(s)
 }
 
 impl Default for ExpressionParser {
@@ -337,6 +338,9 @@ impl ExpressionParser {
             mode_suppressed: false,
             parse_mode_stack: Vec::new(),
             last_expression_failed: None,
+            err_index: 0,
+            first_err_index_by_line: std::collections::HashMap::new(),
+            errors_list: Vec::new(),
         }
     }
 
@@ -353,7 +357,88 @@ impl ExpressionParser {
     }
 
     fn html_id(&self) -> String {
-        String::new()
+        let source_line = self.parser.as_ref().map(|p| p.line.get()).unwrap_or(0);
+        self.line_attributes(self.cur(), source_line)
+    }
+
+    /// `LineAttributes(currentLine, sourceLine)`
+    fn line_attributes(&self, current_line: usize, source_line: i32) -> String {
+        if !self.debug {
+            return String::new();
+        }
+        let is_first_pass = self.loops.is_empty() || self.loops.last().unwrap().is_first_pass();
+        let id_attribute = if is_first_pass {
+            format!(" id=\"line-{}\"", current_line + 1)
+        } else {
+            String::new()
+        };
+        format!("{} data-source-line=\"{}\" class=\"line\"", id_attribute, source_line)
+    }
+
+    /// `Id(line)`
+    fn err_id(&mut self, line: usize) -> String {
+        if !self.debug {
+            return String::new();
+        }
+        self.err_index += 1;
+        self.first_err_index_by_line.entry(line).or_insert(self.err_index);
+        format!(" id=\"err-{}\" data-source-line=\"{}\"", self.err_index, line + 1)
+    }
+
+    /// `RecordError(line, message, enabled)`
+    fn record_error(&mut self, line: usize, message: &str, enabled: bool) {
+        if !enabled {
+            return;
+        }
+        if self.is_visible {
+            self.errors.push_back(line);
+        }
+        let pl = self.parser.as_ref().map(|p| p.line.get()).unwrap_or(0);
+        let source_line = if pl > 0 { pl } else { line as i32 + 1 };
+        self.errors_list.push(CalcpadError {
+            source_line,
+            output_line: line as i32 + 1,
+            message: message.to_string(),
+            source: CalcpadErrorSource::Expression,
+        });
+    }
+
+    /// `AppendErrors()`
+    fn append_errors(&mut self) {
+        if self.errors.len() == 1 {
+            self.sb.push_str(messages::Error_found_on_line);
+            self.sb.push('\n');
+        } else {
+            self.sb
+                .push_str(&fmt(messages::Errors_found_on_lines, &[&self.errors.len().to_string()]));
+            self.sb.push('\n');
+        }
+        let mut count = 0;
+        let mut prev_line = 0usize;
+        while count < 20 {
+            let src_line = match self.errors.pop_front() {
+                None => break,
+                Some(l) => l,
+            };
+            let err_line = src_line + 1;
+            if err_line != prev_line {
+                count += 1;
+                let attr = match self.first_err_index_by_line.get(&src_line) {
+                    Some(idx) => format!(" data-error=\"err-{}\"", idx),
+                    None => String::new(),
+                };
+                self.sb.push_str(&format!(
+                    " <span class=\"roundBox\" data-line=\"{}\"{}>{}</span>",
+                    err_line, attr, err_line
+                ));
+            }
+            prev_line = err_line;
+        }
+        if !self.errors.is_empty() {
+            self.sb.push_str(" ...");
+        }
+        self.sb.push_str("</div>");
+        self.errors.clear();
     }
 
     fn cur(&self) -> usize {
@@ -361,8 +446,7 @@ impl ExpressionParser {
     }
 
     fn is_enabled(&self) -> bool {
-        self.condition.is_satisfied()
-            && (self.loops.is_empty() || !self.loops.last().unwrap().is_broken())
+        self.condition.is_satisfied() && (self.loops.is_empty() || !self.loops.last().unwrap().is_broken())
             || !self.calculate
     }
 
@@ -399,13 +483,7 @@ impl ExpressionParser {
         self.finalize(line_count);
     }
 
-    fn parse_lines(
-        &mut self,
-        code: &str,
-        lines: &[usize],
-        line_count: usize,
-        text_span: &mut String,
-    ) -> CResult<()> {
+    fn parse_lines(&mut self, code: &str, lines: &[usize], line_count: usize, text_span: &mut String) -> CResult<()> {
         loop {
             self.current_line += 1;
             if self.current_line as usize >= line_count {
@@ -441,10 +519,7 @@ impl ExpressionParser {
             if let Some(eol) = line_span.find('\u{000B}') {
                 let num = trim(&line_span[eol + 1..]);
                 let n: i32 = num.parse().map_err(|_| {
-                    MathParserException::unexpected(format!(
-                        "The input string '{}' was not in a correct format.",
-                        num
-                    ))
+                    MathParserException::unexpected(format!("The input string '{}' was not in a correct format.", num))
                 })?;
                 self.p().line.set(n);
                 line_span = &line_span[..eol];
@@ -487,11 +562,7 @@ impl ExpressionParser {
                     }
                     continue;
                 }
-                if self.is_visible
-                    && self.is_val != 1
-                    && self.html_lines < MAX_HTML_LINES
-                    && self.is_enabled()
-                {
+                if self.is_visible && self.is_val != 1 && self.html_lines < MAX_HTML_LINES && self.is_enabled() {
                     let id = self.html_id();
                     self.sb.push_str(&format!("<p{}>&nbsp;</p>\n", id));
                 }
@@ -568,14 +639,19 @@ impl ExpressionParser {
                 let h = self.err_html(messages::Iteration_block_not_closed_Missing_loop);
                 self.sb.push_str(&h);
             }
+            let msg = if if_not_closed {
+                messages::if_block_not_closed_Missing_end_if
+            } else {
+                messages::Iteration_block_not_closed_Missing_loop
+            };
+            let line = self.cur();
+            self.record_error(line, msg, self.debug && (if_not_closed || loop_not_closed));
         }
         Ok(())
     }
 
     fn parse_plot(&mut self, s: &str) -> bool {
-        if validator::starts_with_ignore_case(s, "$plot")
-            || validator::starts_with_ignore_case(s, "$map")
-        {
+        if validator::starts_with_ignore_case(s, "$plot") || validator::starts_with_ignore_case(s, "$map") {
             if self.is_visible && self.is_enabled() {
                 self.p().note_out_of_scope("plotting");
                 let msg = crate::parsers::math_parser::input::out_of_scope("Plotting").message;
@@ -591,8 +667,7 @@ impl ExpressionParser {
             self.condition.set_condition(-1)?;
             return Ok(keyword == Keyword::None);
         }
-        self.condition
-            .set_condition(keyword as i32 - Keyword::If as i32)?;
+        self.condition.set_condition(keyword as i32 - Keyword::If as i32)?;
         if self.is_enabled() {
             let s_len = s.chars().count();
             if self.condition.keyword_length() == s_len {
@@ -608,11 +683,8 @@ impl ExpressionParser {
                             self.condition.to_html()
                         ));
                     } else {
-                        self.sb.push_str(&format!(
-                            "</div><p{}>{}</p>",
-                            id,
-                            self.condition.to_html()
-                        ));
+                        self.sb
+                            .push_str(&format!("</div><p{}>{}</p>", id, self.condition.to_html()));
                     }
                 }
             } else if self.condition.keyword_length() > 0
@@ -630,9 +702,7 @@ impl ExpressionParser {
 
     fn parse_line(&mut self, tokens: TokenList, keyword: Keyword) -> CResult<()> {
         let kwd_length = self.condition.keyword_length();
-        let is_output = self.is_visible
-            && (!self.calculate || kwd_length == 0)
-            && self.html_lines < MAX_HTML_LINES;
+        let is_output = self.is_visible && (!self.calculate || kwd_length == 0) && self.html_lines < MAX_HTML_LINES;
         self.last_expression_failed = None;
         if is_output {
             self.html_lines += 1;
@@ -645,20 +715,35 @@ impl ExpressionParser {
                 self.append_error(&all, &msg);
             } else {
                 let is_indent = keyword == Keyword::ElseIf || keyword == Keyword::EndIf;
-                let line_type = tokens
-                    .borrow()
-                    .first()
-                    .map(|t| t.ttype)
-                    .unwrap_or(TokenTypes::Text);
+                let line_type = tokens.borrow().first().map(|t| t.ttype).unwrap_or(TokenTypes::Text);
+                let mut html_id: Option<String> = None;
                 if self.is_val != 1 {
                     let id = self.html_id();
                     self.append_html_line_start(line_type, is_indent, &id);
+                    html_id = Some(id);
+                }
+                // In debug mode the line attributes go into the first HTML token.
+                let html_token = match &html_id {
+                    Some(id) if line_type == TokenTypes::Html && !id.is_empty() => Some(tokens.borrow()[0].clone()),
+                    _ => None,
+                };
+                if let Some(ht) = &html_token {
+                    let v = insert_attribute(&ht.value, html_id.as_deref().unwrap());
+                    tokens.borrow_mut()[0] = Token {
+                        value: v,
+                        ttype: TokenTypes::Html,
+                        cache_id: -1,
+                    };
                 }
                 if kwd_length > 0 {
                     let h = self.condition.to_html();
                     self.sb.push_str(&h);
                 }
-                self.parse_tokens(&tokens, true)?;
+                let r = self.parse_tokens(&tokens, true);
+                if let Some(ht) = html_token {
+                    tokens.borrow_mut()[0] = ht;
+                }
+                r?;
                 if self.is_val != 1 {
                     self.append_html_line_end(line_type, keyword == Keyword::If);
                 }
@@ -673,10 +758,7 @@ impl ExpressionParser {
                     // runs neither branch and is reported, instead of silently running #else.
                     self.condition.check_failed();
                     if self.is_visible {
-                        let text = self.format_error(
-                            &html_encode(&expr),
-                            &format!("{} {}", msg, UNRESOLVED_CONDITION),
-                        );
+                        let text = self.format_error(&html_encode(&expr), &format!("{} {}", msg, UNRESOLVED_CONDITION));
                         let h = self.err_html(&text);
                         self.sb.push_str(&h);
                     }
@@ -719,6 +801,9 @@ impl ExpressionParser {
         self.error_count = 0;
         self.calculate = calculate;
         self.errors.clear();
+        self.err_index = 0;
+        self.first_err_index_by_line.clear();
+        self.errors_list.clear();
         if !self.calculate {
             self.start_line = 0;
         }
@@ -762,6 +847,9 @@ impl ExpressionParser {
         if self.start_line > 0 {
             self.sb.push_str(messages::Paused_Press_F5_to_continue);
         }
+        if self.debug && !self.errors.is_empty() {
+            self.append_errors();
+        }
         self.html_result = self.sb.clone();
         if let Some(p) = &self.parser {
             if let Some(o) = p.out_of_scope.borrow().clone() {
@@ -797,8 +885,7 @@ impl ExpressionParser {
                     };
                     let err_text = self.format_error(&err_text, &ex.message);
                     if is_output {
-                        self.sb
-                            .push_str(&format!("<span class=\"err\">{}</span>", err_text));
+                        self.sb.push_str(&format!("<span class=\"err\">{}</span>", err_text));
                     }
                     self.error_count += 1;
                     if self.error_count == 40 {
@@ -843,8 +930,7 @@ impl ExpressionParser {
             } else {
                 let html = p.to_html()?;
                 if !html.is_empty() {
-                    self.sb
-                        .push_str(&format!("<span class=\"eq\">{}</span>", html));
+                    self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
                 }
             }
         }
@@ -858,14 +944,12 @@ impl ExpressionParser {
             let h = self.err_html(&e);
             self.sb.push_str(&h);
         }
+        let line = self.cur();
+        self.record_error(line, text, self.debug);
     }
 
     fn line_html(line: usize) -> String {
-        format!(
-            "[<a href=\"#0\" data-text=\"{}\">{}</a>]",
-            line + 1,
-            line + 1
-        )
+        format!("[<a href=\"#0\" data-text=\"{}\">{}</a>]", line + 1, line + 1)
     }
 
     fn format_error(&self, expr: &str, msg: &str) -> String {
@@ -879,8 +963,10 @@ impl ExpressionParser {
         }
     }
 
-    fn err_html(&self, text: &str) -> String {
-        format!("<p class=\"err\">{}</p>", text)
+    fn err_html(&mut self, text: &str) -> String {
+        let line = self.cur();
+        let id = self.err_id(line);
+        format!("<p class=\"err\"{}>{}</p>", id, text)
     }
 
     // ----- tokens (ExpressionParser.Tokens.cs) ------------------------------------------
@@ -979,7 +1065,14 @@ impl ExpressionParser {
             self.p().note_out_of_scope("markdown");
             return;
         }
-        self.sb.push_str(line);
+        let html_id = self.html_id();
+        let trimmed = line.trim_start();
+        if html_id.is_empty() || trimmed.is_empty() {
+            self.sb.push_str(line);
+        } else {
+            self.sb.push_str(&line[..line.len() - trimmed.len()]);
+            self.sb.push_str(&insert_attribute(trimmed, &html_id));
+        }
         self.sb.push('\n');
     }
 
@@ -1022,10 +1115,7 @@ impl ExpressionParser {
                 self.set_parse_mode(&chars, kw, ParseMode::Markdown)
             }
             Keyword::EndHtml | Keyword::EndCpd | Keyword::EndMarkdown => {
-                let (m, sup) = self
-                    .parse_mode_stack
-                    .pop()
-                    .unwrap_or((ParseMode::Cpd, false));
+                let (m, sup) = self.parse_mode_stack.pop().unwrap_or((ParseMode::Cpd, false));
                 self.parse_mode = m;
                 self.mode_suppressed = sup;
             }
@@ -1053,17 +1143,11 @@ impl ExpressionParser {
             Keyword::EndVal | Keyword::EndEqu | Keyword::EndNoc => {
                 self.is_val = self.output_mode_stack.pop().unwrap_or(0);
             }
-            Keyword::NoSub => {
-                self.set_substitution(&chars, kw, VariableSubstitutionOptions::VariablesOnly)
+            Keyword::NoSub => self.set_substitution(&chars, kw, VariableSubstitutionOptions::VariablesOnly),
+            Keyword::NoVar => self.set_substitution(&chars, kw, VariableSubstitutionOptions::SubstitutionsOnly),
+            Keyword::VarSub => {
+                self.set_substitution(&chars, kw, VariableSubstitutionOptions::VariablesAndSubstitutions)
             }
-            Keyword::NoVar => {
-                self.set_substitution(&chars, kw, VariableSubstitutionOptions::SubstitutionsOnly)
-            }
-            Keyword::VarSub => self.set_substitution(
-                &chars,
-                kw,
-                VariableSubstitutionOptions::VariablesAndSubstitutions,
-            ),
             Keyword::EndNoSub | Keyword::EndNoVar | Keyword::EndVarSub => {
                 let v = self
                     .substitution_stack
@@ -1110,13 +1194,9 @@ impl ExpressionParser {
                 }
             }
             Keyword::Read | Keyword::Write | Keyword::Append => {
-                if self.calculate && self.condition.is_satisfied()
-                    || !self.calculate && self.is_visible
-                {
+                if self.calculate && self.condition.is_satisfied() || !self.calculate && self.is_visible {
                     self.p().note_out_of_scope("#read/#write data exchange");
-                    let msg =
-                        crate::parsers::math_parser::input::out_of_scope("#read/#write/#append")
-                            .message;
+                    let msg = crate::parsers::math_parser::input::out_of_scope("#read/#write/#append").message;
                     self.append_error(s, &msg);
                 }
             }
@@ -1143,8 +1223,7 @@ impl ExpressionParser {
     }
 
     fn set_parse_mode(&mut self, s: &[char], keyword: Keyword, mode: ParseMode) {
-        self.parse_mode_stack
-            .push((self.parse_mode, self.mode_suppressed));
+        self.parse_mode_stack.push((self.parse_mode, self.mode_suppressed));
         self.parse_mode = mode;
         let kl = keyword_length(keyword);
         let has_condition = s.len() > kl && !s[kl..].iter().all(|c| c.is_whitespace());
@@ -1164,14 +1243,8 @@ impl ExpressionParser {
         }
     }
 
-    fn set_substitution(
-        &mut self,
-        s: &[char],
-        keyword: Keyword,
-        value: VariableSubstitutionOptions,
-    ) {
-        self.substitution_stack
-            .push(self.p().variable_substitution.get());
+    fn set_substitution(&mut self, s: &[char], keyword: Keyword, value: VariableSubstitutionOptions) {
+        self.substitution_stack.push(self.p().variable_substitution.get());
         if self.is_directive_condition_met(s, keyword) {
             self.p().variable_substitution.set(value);
         }
@@ -1244,8 +1317,7 @@ impl ExpressionParser {
         }
         if self.is_visible && !self.calculate {
             let id = self.html_id();
-            self.sb
-                .push_str(&format!("<p{} class=\"cond\">#pause</p>", id));
+            self.sb.push_str(&format!("<p{} class=\"cond\">#pause</p>", id));
         }
         KeywordResult::Continue
     }
@@ -1312,10 +1384,7 @@ impl ExpressionParser {
             } else if validator::is_valid_format_string(&expr) {
                 self.math_settings.borrow_mut().format_string = Some(expr);
             } else {
-                self.append_error(
-                    &format!("#format {}", expr),
-                    messages::Invalid_format_string_0,
-                );
+                self.append_error(&format!("#format {}", expr), messages::Invalid_format_string_0);
             }
         } else {
             self.math_settings.borrow_mut().format_string = None;
@@ -1361,10 +1430,8 @@ impl ExpressionParser {
         } else if self.is_visible {
             let id = self.html_id();
             if expression.chars().all(char::is_whitespace) {
-                self.sb.push_str(&format!(
-                    "<p{} class=\"cond\">#repeat</p><div class=\"indent\">",
-                    id
-                ));
+                self.sb
+                    .push_str(&format!("<p{} class=\"cond\">#repeat</p><div class=\"indent\">", id));
             } else {
                 let r = (|| -> CResult<String> {
                     self.p().parse(&expression, true)?;
@@ -1438,16 +1505,8 @@ impl ExpressionParser {
                                 )
                             } else {
                                 (
-                                    Value::Complex(
-                                        crate::base_types::complex_value::ComplexValue::from_c(
-                                            r1, u1,
-                                        ),
-                                    ),
-                                    Value::Complex(
-                                        crate::base_types::complex_value::ComplexValue::from_c(
-                                            r2, u2,
-                                        ),
-                                    ),
+                                    Value::Complex(crate::base_types::complex_value::ComplexValue::from_c(r1, u1)),
+                                    Value::Complex(crate::base_types::complex_value::ComplexValue::from_c(r2, u2)),
                                 )
                             };
                             let count = Value::s_sub(&end, &start)?.re().abs() + 1.0;
@@ -1455,13 +1514,7 @@ impl ExpressionParser {
                                 return Ok(None);
                             }
                             let counter = p.get_variable_ref(&var_name);
-                            let lp = Loop::for_loop(
-                                self.cur(),
-                                &start,
-                                &end,
-                                counter,
-                                self.condition.id,
-                            )?;
+                            let lp = Loop::for_loop(self.cur(), &start, &end, counter, self.condition.id)?;
                             p.set_variable(&var_name, start);
                             Ok(Some(lp))
                         })();
@@ -1485,8 +1538,8 @@ impl ExpressionParser {
                 } else if self.is_visible {
                     let id = self.html_id();
                     let r = (|| -> CResult<(String, String, String)> {
-                        let var_html = HtmlWriter::new(None, self.p().phasor.get())
-                            .format_variable(&var_name, "", false);
+                        let var_html =
+                            HtmlWriter::new(None, self.p().phasor.get()).format_variable(&var_name, "", false);
                         self.p().parse(&start_expr, true)?;
                         let sh = self.p().to_html()?;
                         self.p().parse(&end_expr, true)?;
@@ -1529,8 +1582,7 @@ impl ExpressionParser {
                     self.condition.check(rc)?;
                     if self.condition.is_satisfied() {
                         let id = self.condition.id;
-                        self.loops
-                            .push(Loop::while_loop(self.cur(), expression.clone(), id));
+                        self.loops.push(Loop::while_loop(self.cur(), expression.clone(), id));
                         if let Some(c) = comment_start {
                             let toks = Rc::new(RefCell::new(self.get_tokens(&expression[c..])));
                             self.parse_tokens(&toks, false)?;
@@ -1569,10 +1621,7 @@ impl ExpressionParser {
                 } else {
                     let next_id = self.loops.last().unwrap().id;
                     if next_id != self.condition.id {
-                        self.append_error(
-                            line,
-                            messages::Entangled_if__end_if__and_repeat__loop_blocks,
-                        );
+                        self.append_error(line, messages::Entangled_if__end_if__and_repeat__loop_blocks);
                     } else if !self.iterate(true)? {
                         self.loops.pop();
                     }
@@ -1582,8 +1631,7 @@ impl ExpressionParser {
             }
         } else if self.is_visible {
             let id = self.html_id();
-            self.sb
-                .push_str(&format!("</div><p{} class=\"cond\">#loop</p>", id));
+            self.sb.push_str(&format!("</div><p{} class=\"cond\">#loop</p>", id));
         }
         Ok(())
     }
@@ -1637,8 +1685,7 @@ impl ExpressionParser {
             }
         } else if self.is_visible {
             let id = self.html_id();
-            self.sb
-                .push_str(&format!("<p{} class=\"cond\">#break</p>", id));
+            self.sb.push_str(&format!("<p{} class=\"cond\">#break</p>", id));
         }
         false
     }
@@ -1647,10 +1694,7 @@ impl ExpressionParser {
         if self.calculate {
             if self.condition.is_satisfied() {
                 if self.loops.is_empty() {
-                    self.append_error(
-                        "#continue",
-                        messages::continue_without_a_corresponding_repeat,
-                    );
+                    self.append_error("#continue", messages::continue_without_a_corresponding_repeat);
                 } else {
                     let loop_id = self.loops.last().unwrap().id;
                     if self.iterate(false)? {
@@ -1664,8 +1708,7 @@ impl ExpressionParser {
             }
         } else if self.is_visible {
             let id = self.html_id();
-            self.sb
-                .push_str(&format!("<p{} class=\"cond\">#continue</p>", id));
+            self.sb.push_str(&format!("<p{} class=\"cond\">#continue</p>", id));
         }
         Ok(())
     }
@@ -1700,11 +1743,7 @@ impl ExpressionParser {
                 netfmt::double_to_string(min),
                 netfmt::double_to_string(mx)
             ),
-            None => format!(
-                "'{}' must be at least {}",
-                name,
-                netfmt::double_to_string(min)
-            ),
+            None => format!("'{}' must be at least {}", name, netfmt::double_to_string(min)),
         };
         match (key, v) {
             ("decimals", JsonValue::Num(d)) => {
@@ -1726,19 +1765,12 @@ impl ExpressionParser {
             }
             ("complex", JsonValue::Bool(b)) => self.p().set_complex(*b),
             ("substitute", JsonValue::Bool(b)) => self.math_settings.borrow_mut().substitute = *b,
-            ("formatequations", JsonValue::Bool(b)) => {
-                self.math_settings.borrow_mut().format_equations = *b
-            }
+            ("formatequations", JsonValue::Bool(b)) => self.math_settings.borrow_mut().format_equations = *b,
             ("zerosmallmatrixelements", JsonValue::Bool(b)) => {
                 self.math_settings.borrow_mut().zero_small_matrix_elements = *b
             }
-            ("showhiddenoutput", JsonValue::Bool(b)) => {
-                self.math_settings.borrow_mut().show_hidden_output = *b
-            }
-            ("maxoutputcount", JsonValue::Num(d)) => self
-                .math_settings
-                .borrow_mut()
-                .set_max_output_count(*d as i32),
+            ("showhiddenoutput", JsonValue::Bool(b)) => self.math_settings.borrow_mut().show_hidden_output = *b,
+            ("maxoutputcount", JsonValue::Num(d)) => self.math_settings.borrow_mut().set_max_output_count(*d as i32),
             ("isus", JsonValue::Bool(b)) => {
                 self.is_us = *b;
                 self.p().is_us.set(*b);

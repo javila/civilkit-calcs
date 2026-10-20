@@ -100,16 +100,16 @@ impl MathParser {
         for tr in input {
             let tt = tr.borrow().ttype;
             match tt {
-                TokenTypes::Function2
-                | TokenTypes::VectorFunction2
-                | TokenTypes::MatrixFunction2 => count_of_divisors -= 1,
+                TokenTypes::Function2 | TokenTypes::VectorFunction2 | TokenTypes::MatrixFunction2 => {
+                    count_of_divisors -= 1
+                }
                 TokenTypes::MatrixIterativeFunction => {
                     // IsLastParameterOptional is only relevant for matrix functions (out of scope).
                     count_of_divisors -= 1;
                 }
-                TokenTypes::Function3
-                | TokenTypes::VectorFunction3
-                | TokenTypes::MatrixFunction3 => count_of_divisors -= 2,
+                TokenTypes::Function3 | TokenTypes::VectorFunction3 | TokenTypes::MatrixFunction3 => {
+                    count_of_divisors -= 2
+                }
                 TokenTypes::MatrixFunction4 => count_of_divisors -= 3,
                 TokenTypes::MatrixFunction5 => count_of_divisors -= 4,
                 TokenTypes::MultiFunction
@@ -123,12 +123,7 @@ impl MathParser {
                 TokenTypes::CustomFunction => {
                     let (index, is_ft, content, pc) = {
                         let t = tr.borrow();
-                        (
-                            t.index,
-                            t.is_function_token(),
-                            t.content.clone(),
-                            t.parameter_count(),
-                        )
+                        (t.index, t.is_function_token(), t.content.clone(), t.parameter_count())
                     };
                     if index < 0 {
                         if is_function_definition && content == first_token.borrow().content {
@@ -213,8 +208,7 @@ impl MathParser {
                             count_of_divisors = index.count_of_divisors;
                         }
                     } else if optional_function_stack.last().is_some_and(|m| {
-                        count_of_brackets == m.count_of_brackets
-                            && count_of_divisors == m.count_of_divisors - 1
+                        count_of_brackets == m.count_of_brackets && count_of_divisors == m.count_of_divisors - 1
                     }) {
                         count_of_divisors += 1;
                         let of = optional_function_stack.last().unwrap();
@@ -330,11 +324,7 @@ impl MathParser {
             let f = first_token.borrow();
             (f.ttype, f.index, f.content.clone())
         };
-        if ftt == TokenTypes::CustomFunction
-            && fidx < 0
-            && !is_function_definition
-            && is_calculating
-        {
+        if ftt == TokenTypes::CustomFunction && fidx < 0 && !is_function_definition && is_calculating {
             return Err(exceptions::InvalidFunction(&fcontent));
         }
         if count_of_brackets > 0 {

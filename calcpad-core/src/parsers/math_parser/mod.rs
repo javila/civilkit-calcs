@@ -132,9 +132,7 @@ impl MathParser {
             backup_variable: RefCell::new((None, None)),
             has_input_fields: Cell::new(false),
             line: Cell::new(0),
-            variable_substitution: Cell::new(
-                VariableSubstitutionOptions::VariablesAndSubstitutions,
-            ),
+            variable_substitution: Cell::new(VariableSubstitutionOptions::VariablesAndSubstitutions),
             result_units: RefCell::new(None),
             is_canceled: Cell::new(false),
             is_enabled: Cell::new(true),
@@ -274,9 +272,7 @@ impl MathParser {
             return v.clone();
         }
         let v = Variable::new();
-        self.variables
-            .borrow_mut()
-            .insert(name.to_string(), v.clone());
+        self.variables.borrow_mut().insert(name.to_string(), v.clone());
         self.defined_variables.borrow_mut().insert(name.to_string());
         v
     }
@@ -347,10 +343,7 @@ impl MathParser {
         pv.is_read_only.set(true);
         vars.insert("\u{03C0}".to_string(), pv);
         if self.settings.borrow().is_complex {
-            vars.insert(
-                "i".to_string(),
-                Variable::with_complex(Complex::IMAGINARY_ONE),
-            );
+            vars.insert("i".to_string(), Variable::with_complex(Complex::IMAGINARY_ONE));
             vars.insert(
                 "ei".to_string(),
                 Variable::with_complex(Complex::IMAGINARY_ONE * std::f64::consts::E),
@@ -369,8 +362,7 @@ impl MathParser {
         self.function_definition_index.set(-1);
         let input = self.get_input(expression, allow_assignment)?;
         let input = self.resolve_call_arguments(input)?;
-        let is_function_definition =
-            self.syntax_check(&input, self.is_calculation.get() && self.is_enabled.get())?;
+        let is_function_definition = self.syntax_check(&input, self.is_calculation.get() && self.is_enabled.get())?;
         self.order_operators(
             &input,
             is_function_definition || self.is_solver.get() > 0 || self.is_plotting.get(),
@@ -441,11 +433,7 @@ impl MathParser {
         }
         self.break_if_canceled()?;
         if self.function_definition_index.get() < 0 {
-            let rpn = self
-                .rpn
-                .borrow()
-                .clone()
-                .unwrap_or_else(|| Rc::new(Vec::new()));
+            let rpn = self.rpn.borrow().clone().unwrap_or_else(|| Rc::new(Vec::new()));
             let is_assignment = !rpn.is_empty()
                 && rpn[0].borrow().ttype == TokenTypes::Variable
                 && is_assignment(&rpn[rpn.len() - 1].borrow().content);
@@ -493,10 +481,7 @@ impl MathParser {
             Some(r) => r,
             None => return Ok(()),
         };
-        if rpn.len() > 2
-            && rpn[0].borrow().ttype == TokenTypes::Unit
-            && rpn[rpn.len() - 1].borrow().content == "="
-        {
+        if rpn.len() > 2 && rpn[0].borrow().ttype == TokenTypes::Unit && rpn[rpn.len() - 1].borrow().content == "=" {
             let s = rpn[0].borrow().content.clone();
             let u = Unit::get("", self.is_us.get())?;
             u.set_text(&s);
@@ -507,11 +492,7 @@ impl MathParser {
 
     pub fn calculate_real(&self) -> CResult<f64> {
         self.break_if_canceled()?;
-        let rpn = self
-            .rpn
-            .borrow()
-            .clone()
-            .unwrap_or_else(|| Rc::new(Vec::new()));
+        let rpn = self.rpn.borrow().clone().unwrap_or_else(|| Rc::new(Vec::new()));
         let r = self.evaluate(&rpn, false)?;
         match &r {
             Value::Real(real) => {
@@ -528,10 +509,7 @@ impl MathParser {
 
     pub fn check_real(&self, value: &Value) -> CResult<()> {
         if self.settings.borrow().is_complex && !value.is_real() {
-            let s = crate::output::text_writer::TextWriter::new(
-                Some(&self.decimals_settings()),
-                self.phasor.get(),
-            );
+            let s = crate::output::text_writer::TextWriter::new(Some(&self.decimals_settings()), self.phasor.get());
             use crate::output::OutputWriter;
             return Err(exceptions::ResultNotReal(&s.format_complex(
                 value.re(),
@@ -579,16 +557,13 @@ impl MathParser {
                                     }
                                     d.push(Some(Rc::new(keyword_args::read_default(&mut q))));
                                 } else if defaults.is_some() {
-                                    return Err(exceptions::RequiredParameterAfterOptional(
-                                        &t.borrow().content,
-                                    ));
+                                    return Err(exceptions::RequiredParameterAfterOptional(&t.borrow().content));
                                 }
                             } else if tt != TokenTypes::Divisor {
                                 return Err(exceptions::InvalidFunctionToken(&t.borrow().content));
                             }
                             let ptt = pt.borrow().ttype;
-                            if (ptt == tt
-                                || ptt == TokenTypes::BracketLeft && tt == TokenTypes::Divisor)
+                            if (ptt == tt || ptt == TokenTypes::BracketLeft && tt == TokenTypes::Divisor)
                                 && tt == TokenTypes::Divisor
                             {
                                 return Err(exceptions::MissingFunctionParameter());
@@ -618,11 +593,8 @@ impl MathParser {
                                 cf.add_parameters(&parameters);
                                 let has_defaults = defaults.is_some();
                                 *cf.defaults.borrow_mut() = defaults.clone();
-                                *cf.default_functions.borrow_mut() = if has_defaults {
-                                    Some(vec![None; n])
-                                } else {
-                                    None
-                                };
+                                *cf.default_functions.borrow_mut() =
+                                    if has_defaults { Some(vec![None; n]) } else { None };
                                 *cf.rpn.borrow_mut() = rpn.clone();
                                 let rec = {
                                     let funcs = self.functions.borrow();
@@ -766,11 +738,7 @@ impl MathParser {
         Ok(default_value)
     }
 
-    pub(crate) fn subscribe_on_change(
-        &self,
-        rpn: &Rpn,
-        listener: std::rc::Weak<dyn ChangeListener>,
-    ) {
+    pub(crate) fn subscribe_on_change(&self, rpn: &Rpn, listener: std::rc::Weak<dyn ChangeListener>) {
         let len = rpn.len();
         if len == 0 {
             return;

@@ -53,11 +53,7 @@ pub fn digits(d: f64, sig: usize) -> (Vec<u8>, i32) {
     };
     let (mant, exp) = s.split_once('e').unwrap();
     let exp: i32 = exp.parse().unwrap();
-    let mut ds: Vec<u8> = mant
-        .bytes()
-        .filter(|b| b.is_ascii_digit())
-        .map(|b| b - b'0')
-        .collect();
+    let mut ds: Vec<u8> = mant.bytes().filter(|b| b.is_ascii_digit()).map(|b| b - b'0').collect();
     while ds.len() > 1 && *ds.last().unwrap() == 0 {
         ds.pop();
     }
@@ -204,11 +200,7 @@ pub fn float_to_string(f: f32) -> String {
     let s = format!("{:e}", f.abs());
     let (mant, exp) = s.split_once('e').unwrap();
     let exp: i32 = exp.parse().unwrap();
-    let ds: Vec<u8> = mant
-        .bytes()
-        .filter(|b| b.is_ascii_digit())
-        .map(|b| b - b'0')
-        .collect();
+    let ds: Vec<u8> = mant.bytes().filter(|b| b.is_ascii_digit()).map(|b| b - b'0').collect();
     let scale = exp + 1;
     let mut out = String::new();
     if f < 0.0 {
@@ -443,11 +435,7 @@ pub fn format_custom(d: f64, format: &str) -> String {
     }
     let cf = parse_custom(format);
     let neg = d.is_sign_negative();
-    let (ds, mut scale) = if d == 0.0 {
-        (Vec::new(), 0)
-    } else {
-        digits(d, 15)
-    };
+    let (ds, mut scale) = if d == 0.0 { (Vec::new(), 0) } else { digits(d, 15) };
     let decimal_pos = cf.int_placeholders.len() as i32;
     let digit_count = decimal_pos + cf.frac_placeholders.len() as i32;
     let mut s = String::new();
@@ -597,11 +585,7 @@ pub fn format_standard(d: f64, kind: char, precision: Option<usize>) -> String {
             if d.is_sign_negative() && d != 0.0 {
                 s.push('-');
             }
-            let (ds, scale) = if d == 0.0 {
-                (Vec::new(), 1)
-            } else {
-                digits(d, p + 1)
-            };
+            let (ds, scale) = if d == 0.0 { (Vec::new(), 1) } else { digits(d, p + 1) };
             let first = if ds.is_empty() { 0 } else { ds[0] };
             s.push((b'0' + first) as char);
             if p > 0 {

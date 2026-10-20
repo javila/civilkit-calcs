@@ -51,17 +51,11 @@ pub fn evaluate_function(calc: &Calculator, index: i64, a: &ComplexValue) -> CRe
         }
         3 => {
             check_trig_function_units("csc", &a.units)?;
-            ComplexValue::c(Complex::f_div(
-                1.0,
-                Complex::sin(from_angle_units(calc, a)?)?,
-            ))
+            ComplexValue::c(Complex::f_div(1.0, Complex::sin(from_angle_units(calc, a)?)?))
         }
         4 => {
             check_trig_function_units("sec", &a.units)?;
-            ComplexValue::c(Complex::f_div(
-                1.0,
-                Complex::cos(from_angle_units(calc, a)?)?,
-            ))
+            ComplexValue::c(Complex::f_div(1.0, Complex::cos(from_angle_units(calc, a)?)?))
         }
         5 => {
             check_trig_function_units("cot", &a.units)?;
@@ -199,26 +193,15 @@ pub fn evaluate_function(calc: &Calculator, index: i64, a: &ComplexValue) -> CRe
     Ok(Value::Complex(v))
 }
 
-pub fn evaluate_function2(
-    calc: &Calculator,
-    index: i64,
-    a: &ComplexValue,
-    b: &ComplexValue,
-) -> CResult<Value> {
+pub fn evaluate_function2(calc: &Calculator, index: i64, a: &ComplexValue, b: &ComplexValue) -> CResult<Value> {
     let v = match index {
         0 => to_angle_units(
             calc,
-            Complex::atan2(
-                b.complex() * Unit::convert(&a.units, &b.units, ',')?,
-                a.complex(),
-            ),
+            Complex::atan2(b.complex() * Unit::convert(&a.units, &b.units, ',')?, a.complex()),
         )?,
         1 => root(a, b)?,
         2 => ComplexValue::rem(a, b)?,
-        3 => rc(mandelbrot_set(
-            &Value::Complex(a.clone()),
-            &Value::Complex(b.clone()),
-        )?),
+        3 => rc(mandelbrot_set(&Value::Complex(a.clone()), &Value::Complex(b.clone()))?),
         _ => return Err(index_out_of_range()),
     };
     Ok(Value::Complex(v))
@@ -230,20 +213,14 @@ pub fn evaluate_multi_function(index: i64, values: &[Value]) -> CResult<Value> {
             if are_all_real(values) {
                 min(values)
             } else {
-                Ok(Value::Real(RealValue::new(
-                    f64::NAN,
-                    values[0].units().clone(),
-                )))
+                Ok(Value::Real(RealValue::new(f64::NAN, values[0].units().clone())))
             }
         }
         1 => {
             if are_all_real(values) {
                 max(values)
             } else {
-                Ok(Value::Real(RealValue::new(
-                    f64::NAN,
-                    values[0].units().clone(),
-                )))
+                Ok(Value::Real(RealValue::new(f64::NAN, values[0].units().clone())))
             }
         }
         2 => sum(values),
@@ -260,20 +237,14 @@ pub fn evaluate_multi_function(index: i64, values: &[Value]) -> CResult<Value> {
             if are_all_real(values) {
                 gcd(values)
             } else {
-                Ok(Value::Real(RealValue::new(
-                    f64::NAN,
-                    values[0].units().clone(),
-                )))
+                Ok(Value::Real(RealValue::new(f64::NAN, values[0].units().clone())))
             }
         }
         13 => {
             if are_all_real(values) {
                 lcm(values)
             } else {
-                Ok(Value::Real(RealValue::new(
-                    f64::NAN,
-                    values[0].units().clone(),
-                )))
+                Ok(Value::Real(RealValue::new(f64::NAN, values[0].units().clone())))
             }
         }
         _ => Err(index_out_of_range()),
@@ -345,17 +316,13 @@ pub fn sqrt(value: &ComplexValue) -> ComplexValue {
     let u = &value.units;
     if let Some(uu) = u {
         if uu.is_dimensionless() {
-            return ComplexValue::c(Complex::sqrt(
-                value.complex() * uu.get_dimensionless_factor(),
-            ));
+            return ComplexValue::c(Complex::sqrt(value.complex() * uu.get_dimensionless_factor()));
         }
     }
     let result = Complex::sqrt(value.complex());
     match u {
         None => ComplexValue::c(result),
-        Some(uu) => {
-            ComplexValue::with_flag(result, Unit::root(uu, 2, value.is_unit), value.is_unit)
-        }
+        Some(uu) => ComplexValue::with_flag(result, Unit::root(uu, 2, value.is_unit), value.is_unit),
     }
 }
 
@@ -363,17 +330,13 @@ fn cbrt(value: &ComplexValue) -> ComplexValue {
     let u = &value.units;
     if let Some(uu) = u {
         if uu.is_dimensionless() {
-            return ComplexValue::c(Complex::cbrt(
-                value.complex() * uu.get_dimensionless_factor(),
-            ));
+            return ComplexValue::c(Complex::cbrt(value.complex() * uu.get_dimensionless_factor()));
         }
     }
     let result = Complex::cbrt(value.complex());
     match u {
         None => ComplexValue::c(result),
-        Some(uu) => {
-            ComplexValue::with_flag(result, Unit::root(uu, 3, value.is_unit), value.is_unit)
-        }
+        Some(uu) => ComplexValue::with_flag(result, Unit::root(uu, 3, value.is_unit), value.is_unit),
     }
 }
 
@@ -391,9 +354,7 @@ fn root(value: &ComplexValue, root: &ComplexValue) -> CResult<ComplexValue> {
     let result = Complex::pow_f(value.complex(), 1.0 / n as f64);
     Ok(match u {
         None => ComplexValue::c(result),
-        Some(uu) => {
-            ComplexValue::with_flag(result, Unit::root(uu, n, value.is_unit), value.is_unit)
-        }
+        Some(uu) => ComplexValue::with_flag(result, Unit::root(uu, n, value.is_unit), value.is_unit),
     })
 }
 
@@ -430,10 +391,7 @@ fn srss(values: &[Value]) -> CResult<Value> {
         let b = v.complex() * Unit::convert(&u, v.units(), ',')?;
         result = result + b * b;
     }
-    Ok(Value::Complex(ComplexValue::from_c(
-        Complex::sqrt(result),
-        u,
-    )))
+    Ok(Value::Complex(ComplexValue::from_c(Complex::sqrt(result), u)))
 }
 
 fn average(values: &[Value]) -> CResult<Value> {

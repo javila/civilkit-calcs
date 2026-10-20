@@ -82,16 +82,9 @@ pub fn evaluate_function(calc: &Calculator, index: i64, a: &RealValue) -> CResul
         36 => RealValue::new(a.d.trunc(), a.units.clone()),
         37 => a.clone(),
         38 => RealValue::ZERO,
-        39 => RealValue::num(if a.d >= 0.0 {
-            0.0
-        } else {
-            std::f64::consts::PI
-        }),
+        39 => RealValue::num(if a.d >= 0.0 { 0.0 } else { std::f64::consts::PI }),
         40 => a.clone(),
-        41 => RealValue::new(
-            crate::base_types::complex::Complex::real_random(a.d),
-            a.units.clone(),
-        ),
+        41 => RealValue::new(crate::base_types::complex::Complex::real_random(a.d), a.units.clone()),
         42 => fact_r(a)?,
         43 => a.neg(),
         44 => not(a),
@@ -111,16 +104,9 @@ fn dotnet_atanh(x: f64) -> f64 {
     x.atanh()
 }
 
-pub fn evaluate_function2(
-    calc: &Calculator,
-    index: i64,
-    a: &RealValue,
-    b: &RealValue,
-) -> CResult<Value> {
+pub fn evaluate_function2(calc: &Calculator, index: i64, a: &RealValue, b: &RealValue) -> CResult<Value> {
     let v = match index {
-        0 => {
-            calc.to_angle_units_real((b.d * Unit::convert(&a.units, &b.units, ',')?).atan2(a.d))?
-        }
+        0 => calc.to_angle_units_real((b.d * Unit::convert(&a.units, &b.units, ',')?).atan2(a.d))?,
         1 => root(a, b, a.is_unit)?,
         2 => RealValue::rem(a, b)?,
         3 => mandelbrot_set(&Value::Real(a.clone()), &Value::Real(b.clone()))?,
@@ -173,16 +159,16 @@ fn from_angle_units(calc: &Calculator, value: &RealValue) -> CResult<f64> {
 
 fn sin(calc: &Calculator, value: &RealValue) -> CResult<RealValue> {
     check_trig_function_units("sin", &value.units)?;
-    Ok(RealValue::num(
-        crate::base_types::complex::Complex::real_sin(from_angle_units(calc, value)?)?,
-    ))
+    Ok(RealValue::num(crate::base_types::complex::Complex::real_sin(
+        from_angle_units(calc, value)?,
+    )?))
 }
 
 fn cos(calc: &Calculator, value: &RealValue) -> CResult<RealValue> {
     check_trig_function_units("cos", &value.units)?;
-    Ok(RealValue::num(
-        crate::base_types::complex::Complex::real_cos(from_angle_units(calc, value)?)?,
-    ))
+    Ok(RealValue::num(crate::base_types::complex::Complex::real_cos(
+        from_angle_units(calc, value)?,
+    )?))
 }
 
 fn trig(calc: &Calculator, value: &RealValue, name: &str, f: fn(f64) -> f64) -> CResult<RealValue> {
@@ -190,12 +176,7 @@ fn trig(calc: &Calculator, value: &RealValue, name: &str, f: fn(f64) -> f64) -> 
     Ok(RealValue::num(f(from_angle_units(calc, value)?)))
 }
 
-fn inv_trig(
-    calc: &Calculator,
-    value: &RealValue,
-    name: &str,
-    f: fn(f64) -> f64,
-) -> CResult<RealValue> {
+fn inv_trig(calc: &Calculator, value: &RealValue, name: &str, f: fn(f64) -> f64) -> CResult<RealValue> {
     check_trig_function_units(name, &value.units)?;
     calc.to_angle_units_real(f(value.d))
 }
@@ -208,9 +189,7 @@ fn hyp(value: &RealValue, name: &str, f: fn(f64) -> f64) -> CResult<RealValue> {
 fn pow_impl(value: &RealValue, power: &RealValue, is_unit: bool) -> CResult<RealValue> {
     if let Some(u) = &value.units {
         if u.is_dimensionless() {
-            return Ok(RealValue::num(
-                (value.d * u.get_dimensionless_factor()).powf(power.d),
-            ));
+            return Ok(RealValue::num((value.d * u.get_dimensionless_factor()).powf(power.d)));
         }
     }
     Ok(RealValue::with_flag(

@@ -9,9 +9,7 @@ use crate::base_types::real_value::RealValue;
 use crate::base_types::unit::Unit;
 use crate::base_types::value::Value;
 use crate::base_types::variable::Variable;
-use crate::calculator::{
-    self, out_of_scope_names as oos, NEG_STR, OPERATOR_ORDER, UNIT_MULT_ORDER,
-};
+use crate::calculator::{self, out_of_scope_names as oos, NEG_STR, OPERATOR_ORDER, UNIT_MULT_ORDER};
 use crate::exceptions;
 use crate::extension_methods::{is_letter as char_is_letter, trim};
 use crate::math_parser_exception::{CResult, MathParserException};
@@ -62,8 +60,8 @@ fn char_type(c: char, is_complex: bool) -> TokenTypes {
         };
     }
     match c {
-        '\u{2261}' | '\u{2260}' | '\u{2190}' | '\u{2264}' | '\u{2265}' | '\u{00F7}'
-        | '\u{29BC}' | '\u{2227}' | '\u{2228}' | '\u{2295}' => TokenTypes::Operator,
+        '\u{2261}' | '\u{2260}' | '\u{2190}' | '\u{2264}' | '\u{2265}' | '\u{00F7}' | '\u{29BC}' | '\u{2227}'
+        | '\u{2228}' | '\u{2295}' => TokenTypes::Operator,
         '\u{2220}' if is_complex => TokenTypes::Operator,
         _ => {
             if validator::is_letter(c) {
@@ -89,11 +87,7 @@ impl MathParser {
     }
 
     /// `Input.GetInput`
-    pub(crate) fn get_input(
-        &self,
-        expression: &str,
-        allow_assignment: bool,
-    ) -> CResult<Vec<TokenRef>> {
+    pub(crate) fn get_input(&self, expression: &str, allow_assignment: bool) -> CResult<Vec<TokenRef>> {
         let ex: Vec<char> = expression.chars().collect();
         let is_complex = self.settings.borrow().is_complex;
         let mut tokens: Vec<TokenRef> = Vec::with_capacity(ex.len());
@@ -246,11 +240,7 @@ impl MathParser {
                     } else {
                         token_literal.expand();
                     }
-                } else if c == 'i'
-                    && is_complex
-                    && pt == TokenTypes::Constant
-                    && units_literal.is_empty()
-                {
+                } else if c == 'i' && is_complex && pt == TokenTypes::Constant && units_literal.is_empty() {
                     let j = i + 1;
                     if j < n && ex[j] == 'n' {
                         units_literal.reset(i);
@@ -295,10 +285,7 @@ impl MathParser {
                             token_literal.reset(i);
                             if !units_literal.is_empty() {
                                 let s = units_literal.get(&ex);
-                                tokens.push(
-                                    Token::with_order("*", TokenTypes::Operator, UNIT_MULT_ORDER)
-                                        .into_ref(),
-                                );
+                                tokens.push(Token::with_order("*", TokenTypes::Operator, UNIT_MULT_ORDER).into_ref());
                                 let tok = self.make_unit_token(&s, true)?.into_ref();
                                 tokens.push(tok.clone());
                                 t = Some(tok);
@@ -317,10 +304,7 @@ impl MathParser {
                                 x.ttype == TokenTypes::Input || x.ttype == TokenTypes::Constant
                             });
                             if prev_is_input_or_const {
-                                tokens.push(
-                                    Token::with_order("*", TokenTypes::Operator, UNIT_MULT_ORDER)
-                                        .into_ref(),
-                                );
+                                tokens.push(Token::with_order("*", TokenTypes::Operator, UNIT_MULT_ORDER).into_ref());
                                 if !token_literal.is_empty() {
                                     t = Some(self.make_unit_token(&s, true)?.into_ref());
                                 }
@@ -402,9 +386,7 @@ impl MathParser {
                                         }
                                         let v = token.borrow().variable_ref().unwrap();
                                         if v.is_read_only.get() {
-                                            return Err(exceptions::CannotModifyConstant(
-                                                &token.borrow().content,
-                                            ));
+                                            return Err(exceptions::CannotModifyConstant(&token.borrow().content));
                                         }
                                         v.is_read_only.set(self.is_const.get());
                                     }
@@ -505,11 +487,7 @@ impl MathParser {
             (&oos::VECTOR_FUNCTIONS, TokenTypes::VectorFunction, false),
             (&oos::VECTOR_FUNCTIONS2, TokenTypes::VectorFunction2, false),
             (&oos::VECTOR_FUNCTIONS3, TokenTypes::VectorFunction3, false),
-            (
-                &oos::VECTOR_MULTI_FUNCTIONS,
-                TokenTypes::VectorMultiFunction,
-                true,
-            ),
+            (&oos::VECTOR_MULTI_FUNCTIONS, TokenTypes::VectorMultiFunction, true),
             (&oos::MATRIX_FUNCTIONS, TokenTypes::MatrixFunction, false),
             (&oos::MATRIX_FUNCTIONS2, TokenTypes::MatrixFunction2, false),
             (&oos::MATRIX_FUNCTIONS3, TokenTypes::MatrixFunction3, false),
@@ -520,11 +498,7 @@ impl MathParser {
                 TokenTypes::MatrixIterativeFunction,
                 false,
             ),
-            (
-                &oos::MATRIX_MULTI_FUNCTIONS,
-                TokenTypes::MatrixMultiFunction,
-                true,
-            ),
+            (&oos::MATRIX_MULTI_FUNCTIONS, TokenTypes::MatrixMultiFunction, true),
         ];
         for (names, tt, is_multi) in vm {
             if let Some(i) = oos::find(names, s) {
@@ -591,13 +565,7 @@ impl MathParser {
 
     fn get_variable_for(&self, vt: &TokenRef, must_exist: bool) -> CResult<()> {
         let s = vt.borrow().content.clone();
-        let stack: Vec<VarDict> = self
-            .local_variables
-            .borrow()
-            .iter()
-            .rev()
-            .cloned()
-            .collect();
+        let stack: Vec<VarDict> = self.local_variables.borrow().iter().rev().cloned().collect();
         for vars in stack {
             let found = vars.borrow().get(&s).cloned();
             if let Some(v) = found {
@@ -658,8 +626,7 @@ impl MathParser {
         is_definition: bool,
         assignment_index: usize,
     ) -> CResult<()> {
-        let index_error =
-            || MathParserException::unexpected("Index was outside the bounds of the array.");
+        let index_error = || MathParserException::unexpected("Index was outside the bounds of the array.");
         let mut is_unit = false;
         let mut pt: Option<TokenRef> = None;
         for (i, tr) in input.iter().enumerate() {
@@ -819,8 +786,7 @@ pub fn get_rpn(input: &[TokenRef]) -> Vec<TokenRef> {
                         let brk = {
                             let n = next.borrow();
                             let t = tr.borrow();
-                            n.ttype == TokenTypes::Operator
-                                && (n.order > order || n.order == order && content == "^")
+                            n.ttype == TokenTypes::Operator && (n.order > order || n.order == order && content == "^")
                                 || is_index(&n) && is_index(&t)
                                 || n.ttype == TokenTypes::BracketLeft
                                 || n.ttype == TokenTypes::SquareBracketLeft

@@ -216,11 +216,7 @@ impl SolverBlock {
         ts_end = chars.len();
         items[current].input = Some(chars[ts_start.min(ts_end)..ts_end].iter().collect());
         for i in 0..=n {
-            let blank = items[i]
-                .input
-                .as_deref()
-                .map(|s| s.trim().is_empty())
-                .unwrap_or(true);
+            let blank = items[i].input.as_deref().map(|s| s.trim().is_empty()).unwrap_or(true);
             if blank {
                 let j = if i == 0 { 0 } else { i - 1 };
                 return Err(exceptions::MissingDelimiter(
@@ -271,11 +267,7 @@ impl SolverBlock {
             let s = format!(
                 "{}{}",
                 items[1].input.as_deref().unwrap_or(""),
-                if self.stype == SolverTypes::Sup {
-                    "_sup"
-                } else {
-                    "_inf"
-                }
+                if self.stype == SolverTypes::Sup { "_sup" } else { "_inf" }
             );
             parser.set_variable(&s, Value::nan());
         }
@@ -386,11 +378,7 @@ impl SolverBlock {
         *self.f.borrow_mut() = Some(Rc::new(parser.compile_rpn(&rpn0, allow_assignment)?));
         let len = items.len();
         if allow_assignment {
-            let i0 = if self.stype == SolverTypes::Repeat {
-                4
-            } else {
-                1
-            };
+            let i0 = if self.stype == SolverTypes::Repeat { 4 } else { 1 };
             if len > i0 {
                 let e = parser.rpn_to_expression_tree(&rpn0, allow_assignment)?;
                 let mut expressions = vec![e];
@@ -414,22 +402,14 @@ impl SolverBlock {
         }
         let rpn = items[2].rpn.clone().unwrap_or_else(|| Rc::new(Vec::new()));
         if rpn.len() == 1 && rpn[0].borrow().ttype == TokenTypes::Constant {
-            *self.va.borrow_mut() = rpn[0]
-                .borrow()
-                .token_value()
-                .cloned()
-                .unwrap_or_else(Value::zero);
+            *self.va.borrow_mut() = rpn[0].borrow().token_value().cloned().unwrap_or_else(Value::zero);
         } else {
             *self.a.borrow_mut() = Some(Rc::new(parser.compile_rpn(&rpn, false)?));
         }
         if len > 3 {
             if let Some(rpn) = items[3].rpn.clone() {
                 if rpn.len() == 1 && rpn[0].borrow().ttype == TokenTypes::Constant {
-                    *self.vb.borrow_mut() = rpn[0]
-                        .borrow()
-                        .token_value()
-                        .cloned()
-                        .unwrap_or_else(Value::zero);
+                    *self.vb.borrow_mut() = rpn[0].borrow().token_value().cloned().unwrap_or_else(Value::zero);
                 } else {
                     *self.b.borrow_mut() = Some(Rc::new(parser.compile_rpn(&rpn, false)?));
                 }
@@ -458,12 +438,7 @@ impl SolverBlock {
         }
     }
 
-    fn eval_opt(
-        &self,
-        parser: &MathParser,
-        e: &RefCell<Option<Rc<Expr>>>,
-        v: &RefCell<Value>,
-    ) -> CResult<Value> {
+    fn eval_opt(&self, parser: &MathParser, e: &RefCell<Option<Rc<Expr>>>, v: &RefCell<Value>) -> CResult<Value> {
         let f = e.borrow().clone();
         match f {
             Some(f) => parser.eval_expr(&f),
@@ -628,17 +603,16 @@ impl SolverBlock {
             let s = format!(
                 "{}{}",
                 self.items.borrow()[1].input.as_deref().unwrap_or(""),
-                if self.stype == SolverTypes::Sup {
-                    "_sup"
-                } else {
-                    "_inf"
-                }
+                if self.stype == SolverTypes::Sup { "_sup" } else { "_inf" }
             );
             let v = var.value().unwrap_or_else(Value::nan);
-            let rv = match &v {
-                Value::Real(r) => r.clone(),
-                Value::Complex(_) => return Err(MathParserException::unexpected("Unable to cast object of type 'Calcpad.Core.ComplexValue' to type 'Calcpad.Core.RealValue'.")),
-            };
+            let rv =
+                match &v {
+                    Value::Real(r) => r.clone(),
+                    Value::Complex(_) => return Err(MathParserException::unexpected(
+                        "Unable to cast object of type 'Calcpad.Core.ComplexValue' to type 'Calcpad.Core.RealValue'.",
+                    )),
+                };
             parser.set_variable(&s, Value::Real(rv));
         }
         parser.is_solver.set(parser.is_solver.get() - 1);
@@ -660,13 +634,7 @@ impl SolverBlock {
         Ok(res)
     }
 
-    fn derivative(
-        &self,
-        parser: &MathParser,
-        f: &Rc<Expr>,
-        var: &VarRef,
-        value: &RealValue,
-    ) -> CResult<Value> {
+    fn derivative(&self, parser: &MathParser, f: &Rc<Expr>, var: &VarRef, value: &RealValue) -> CResult<Value> {
         let is_real = !parser.settings.borrow().is_complex;
         let h = 1e-20;
         let x = ComplexValue::new(value.d, h, value.units.clone());
@@ -730,11 +698,7 @@ impl SolverBlock {
                     w.add_brackets(
                         &format!(
                             "{}&nbsp;{}",
-                            w.format_division(
-                                "<em>d</em>",
-                                &format!("<em>d</em>\u{200A}{}", html(1)),
-                                0
-                            ),
+                            w.format_division("<em>d</em>", &format!("<em>d</em>\u{200A}{}", html(1)), 0),
                             html(0)
                         ),
                         1,
@@ -816,11 +780,7 @@ impl SolverBlock {
         }
         if matches!(
             self.stype,
-            SolverTypes::Sum
-                | SolverTypes::Product
-                | SolverTypes::Integral
-                | SolverTypes::Area
-                | SolverTypes::Repeat
+            SolverTypes::Sum | SolverTypes::Product | SolverTypes::Integral | SolverTypes::Area | SolverTypes::Repeat
         ) {
             return w.format_nary(
                 &format!("${}", enum_name(self.stype)),
@@ -876,10 +836,7 @@ fn fix_repeat(rpn: &Rpn) {
 
 impl Unit {
     /// `operator /(Unit, Unit)` (MultiplyOrDivide without the factor).
-    pub fn divide_units(
-        a: &crate::base_types::unit::UnitRef,
-        b: &crate::base_types::unit::UnitRef,
-    ) -> OptUnit {
+    pub fn divide_units(a: &crate::base_types::unit::UnitRef, b: &crate::base_types::unit::UnitRef) -> OptUnit {
         Unit::divide_raw(a, b)
     }
 }

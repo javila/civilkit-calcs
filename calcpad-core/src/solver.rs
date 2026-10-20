@@ -110,13 +110,7 @@ impl<'a> Solver<'a> {
         Ok(result)
     }
 
-    pub fn mod_ab(
-        &mut self,
-        left: f64,
-        right: f64,
-        target: f64,
-        precision: f64,
-    ) -> CResult<(f64, f64)> {
+    pub fn mod_ab(&mut self, left: f64, right: f64, target: f64, precision: f64) -> CResult<(f64, f64)> {
         let mut err = 0.0;
         let mut x1 = left.min(right);
         let mut y1 = self.fd(x1)? - target;
@@ -239,11 +233,7 @@ impl<'a> Solver<'a> {
 
     fn extremum(&mut self, left: f64, right: f64, is_min: bool) -> CResult<f64> {
         const K: f64 = 0.6180339887498948482;
-        let (mut x1, mut x2) = if left < right {
-            (left, right)
-        } else {
-            (right, left)
-        };
+        let (mut x1, mut x2) = if left < right { (left, right) } else { (right, left) };
         let mut d = x2 - x1;
         let d0 = 0.1 * d;
         let mut x3 = x2 - K * d;
@@ -316,9 +306,7 @@ impl<'a> Solver<'a> {
     }
 
     fn adaptive_lobatto(&mut self, left: f64, right: f64) -> CResult<f64> {
-        self.parser
-            .solver_eps
-            .set(self.precision.clamp(1e-14, 1e-4) / 2.0);
+        self.parser.solver_eps.set(self.precision.clamp(1e-14, 1e-4) / 2.0);
         let y1 = self.fd(left)?;
         let y3 = self.fd(right)?;
         self.lobatto(left, right, y1, y3, 1)
@@ -348,9 +336,7 @@ impl<'a> Solver<'a> {
         let a2 = h * K2 * (y13 + 5.0 * y56);
         if depth == 1 {
             if a1.is_finite() && a1 > 1.0 {
-                self.parser
-                    .solver_eps
-                    .set(self.parser.solver_eps.get() * a1);
+                self.parser.solver_eps.set(self.parser.solver_eps.get() * a1);
             }
         } else if (a1 - a2).abs() < self.parser.solver_eps.get() || depth > 15 {
             return Ok(a1);
@@ -493,11 +479,7 @@ impl<'a> Solver<'a> {
             let mut d = self.fd(i as f64)?;
             if !Unit::ptr_eq(&units, &self.units) {
                 self.check_units(&units)?;
-                d *= self
-                    .units
-                    .as_ref()
-                    .unwrap()
-                    .convert_to(units.as_ref().unwrap());
+                d *= self.units.as_ref().unwrap().convert_to(units.as_ref().unwrap());
             }
             let y = d - c;
             let t = sum + y;
@@ -568,11 +550,7 @@ impl<'a> Solver<'a> {
             let mut d = self.fc(Complex::real(i as f64))?;
             if !Unit::ptr_eq(&units, &self.units) {
                 self.check_units(&units)?;
-                d = d * self
-                    .units
-                    .as_ref()
-                    .unwrap()
-                    .convert_to(units.as_ref().unwrap());
+                d = d * self.units.as_ref().unwrap().convert_to(units.as_ref().unwrap());
             }
             let y = d - c;
             let t = sum + y;

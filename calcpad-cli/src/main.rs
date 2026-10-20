@@ -76,8 +76,7 @@ fn get_settings() -> CliSettings {
                 if let Some(v) = b("ShowHiddenOutput") {
                     math.show_hidden_output = v;
                 }
-                if let Some(v) = xml_value(math_xml, "MaxOutputCount").and_then(|s| s.parse().ok())
-                {
+                if let Some(v) = xml_value(math_xml, "MaxOutputCount").and_then(|s| s.parse().ok()) {
                     math.set_max_output_count(v);
                 }
             }
@@ -102,10 +101,7 @@ fn main() -> ExitCode {
     let i = match ext_pos {
         Some(i) => i + 4,
         None => {
-            eprintln!(
-                "Invalid input file extension. Must be .cpd or .txt: {}",
-                joined
-            );
+            eprintln!("Invalid input file extension. Must be .cpd or .txt: {}", joined);
             return ExitCode::from(2);
         }
     };
@@ -182,7 +178,10 @@ fn main() -> ExitCode {
     let content = if is_body_only {
         format!("<div class=\"calcpad-output\">{}</div>", html)
     } else {
-        format!("<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Calcpad</title></head><body>{} </body></html>", html)
+        format!(
+            "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\"><title>Calcpad</title></head><body>{} </body></html>",
+            html
+        )
     };
     if let Err(e) = std::fs::write(&out_path, content) {
         eprintln!("{}", e);

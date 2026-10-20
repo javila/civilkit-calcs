@@ -34,9 +34,7 @@ fn is_keyword_argument(tokens: &[TokenRef], start: usize) -> bool {
     }
     let t = tokens[start].borrow();
     let n = tokens[start + 1].borrow();
-    (t.is_variable_token() || t.ttype == TokenTypes::Unit)
-        && n.ttype == TokenTypes::Operator
-        && n.content == "="
+    (t.is_variable_token() || t.ttype == TokenTypes::Unit) && n.ttype == TokenTypes::Operator && n.content == "="
 }
 
 fn index_of_closing_bracket(tokens: &[TokenRef], open: usize) -> Option<usize> {
@@ -123,9 +121,7 @@ impl MathParser {
                 let t = tokens[i].borrow();
                 (t.ttype, t.index, t.content.clone())
             };
-            if tt != TokenTypes::CustomFunction
-                || index < 0
-                || tokens[i + 1].borrow().ttype != TokenTypes::BracketLeft
+            if tt != TokenTypes::CustomFunction || index < 0 || tokens[i + 1].borrow().ttype != TokenTypes::BracketLeft
             {
                 i += 1;
                 continue;
@@ -134,9 +130,7 @@ impl MathParser {
                 None => break,
                 Some(c) => c,
             };
-            if i == 0 && close + 1 < len && is_assignment(&tokens[close + 1].borrow().content)
-                || close == i + 2
-            {
+            if i == 0 && close + 1 < len && is_assignment(&tokens[close + 1].borrow().content) || close == i + 2 {
                 i += 1;
                 continue;
             }
@@ -182,9 +176,7 @@ impl MathParser {
             {
                 let defaults = cf.defaults.borrow();
                 for p in 0..n {
-                    let has_default = defaults
-                        .as_ref()
-                        .is_some_and(|d| d.get(p).is_some_and(|x| x.is_some()));
+                    let has_default = defaults.as_ref().is_some_and(|d| d.get(p).is_some_and(|x| x.is_some()));
                     if !is_supplied[p] && !has_default {
                         return Err(exceptions::InvalidNumberOfArguments());
                     }

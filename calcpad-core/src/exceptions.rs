@@ -68,23 +68,15 @@ pub fn PowerNotUnitless() -> MathParserException {
 }
 
 pub fn ResultIsNotUnits() -> MathParserException {
-    MathParserException::new(
-        messages::The_expression_on_the_right_does_not_evaluate_to_units.to_string(),
-    )
+    MathParserException::new(messages::The_expression_on_the_right_does_not_evaluate_to_units.to_string())
 }
 
 pub fn CannotEvaluateFunction(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Cannot_evaluate_the_function_f_for_v_equals_0,
-        &[s],
-    ))
+    MathParserException::new(fmt(messages::Cannot_evaluate_the_function_f_for_v_equals_0, &[s]))
 }
 
 pub fn FunctionNotDefined(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::The_function_f_is_not_defined_for_v_equals_0,
-        &[s],
-    ))
+    MathParserException::new(fmt(messages::The_function_f_is_not_defined_for_v_equals_0, &[s]))
 }
 
 pub fn InconsistentUnits(u1: &str, u2: &str) -> MathParserException {
@@ -96,10 +88,7 @@ pub fn IterationLimits(l1: &str, l2: &str) -> MathParserException {
 }
 
 pub fn InvalidUnitsFunction(function: &str, unit: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Invalid_units_for_function_0_1,
-        &[function, unit],
-    ))
+    MathParserException::new(fmt(messages::Invalid_units_for_function_0_1, &[function, unit]))
 }
 
 pub fn RootUnitless() -> MathParserException {
@@ -123,9 +112,7 @@ pub fn FactorialArgumentUnitless() -> MathParserException {
 }
 
 pub fn FactorialArgumentPositiveInteger() -> MathParserException {
-    MathParserException::new(
-        messages::The_argument_of_n_factorial_must_be_a_positive_integer.to_string(),
-    )
+    MathParserException::new(messages::The_argument_of_n_factorial_must_be_a_positive_integer.to_string())
 }
 
 pub fn FactorialArgumentComplex() -> MathParserException {
@@ -200,10 +187,7 @@ pub fn ErrorEvaluatingAsFunction(s: &str) -> MathParserException {
 }
 
 pub fn ErrorEvaluatingAsFunctionOrOperator(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Error_evaluating_0_as_function_or_operator,
-        &[s],
-    ))
+    MathParserException::new(fmt(messages::Error_evaluating_0_as_function_or_operator, &[s]))
 }
 
 pub fn CannotRewriteUnits(s: &str) -> MathParserException {
@@ -218,10 +202,7 @@ pub fn InconsistentTargetUnits(sourceUnits: &str, targetUnits: &str) -> MathPars
 }
 
 pub fn InvalidCharacter(c: char) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Invalid_character_exception,
-        &[&c.to_string()],
-    ))
+    MathParserException::new(fmt(messages::Invalid_character_exception, &[&c.to_string()]))
 }
 
 pub fn ImproperAssignment() -> MathParserException {
@@ -264,24 +245,15 @@ pub fn MultipleAssignments(s: &str) -> MathParserException {
 }
 
 pub fn NotConstantExpression(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::The_expression_on_the_right_side_must_be_constant_0,
-        &[s],
-    ))
+    MathParserException::new(fmt(messages::The_expression_on_the_right_side_must_be_constant_0, &[s]))
 }
 
 pub fn InconsistentUnits1(variable: &str, units: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Inconsistent_units_for_0_equals_1,
-        &[variable, units],
-    ))
+    MathParserException::new(fmt(messages::Inconsistent_units_for_0_equals_1, &[variable, units]))
 }
 
 pub fn InconsistentUnits2(variable: &str, u1: &str, u2: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Inconsistent_units_for_0_equals_1_2,
-        &[variable, u1, u2],
-    ))
+    MathParserException::new(fmt(messages::Inconsistent_units_for_0_equals_1_2, &[variable, u1, u2]))
 }
 
 pub fn NoSolution(s: &str) -> MathParserException {
@@ -289,10 +261,7 @@ pub fn NoSolution(s: &str) -> MathParserException {
 }
 
 pub fn RecursionNotAllowed(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Recursion_is_not_allowed_in_function_definition_0,
-        &[s],
-    ))
+    MathParserException::new(fmt(messages::Recursion_is_not_allowed_in_function_definition_0, &[s]))
 }
 
 pub fn AssignmentPreceded() -> MathParserException {
@@ -302,9 +271,7 @@ pub fn AssignmentPreceded() -> MathParserException {
 }
 
 pub fn AssignmentNotFirst() -> MathParserException {
-    MathParserException::new(
-        messages::Assignment_equals_must_be_the_first_operator_in_the_expression.to_string(),
-    )
+    MathParserException::new(messages::Assignment_equals_must_be_the_first_operator_in_the_expression.to_string())
 }
 
 pub fn InvalidSyntax(s: &str) -> MathParserException {
@@ -336,24 +303,15 @@ pub fn MissingFunctionDelimiter() -> MathParserException {
 }
 
 pub fn InvalidFunctionToken(name: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Invalid_token_in_function_definition_0,
-        &[name],
-    ))
+    MathParserException::new(fmt(messages::Invalid_token_in_function_definition_0, &[name]))
 }
 
 pub fn CircularReference(name: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Circular_reference_detected_for_function_0,
-        &[name],
-    ))
+    MathParserException::new(fmt(messages::Circular_reference_detected_for_function_0, &[name]))
 }
 
 pub fn CircularMacroReference(name: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Circular_reference_detected_for_macro_0,
-        &[name],
-    ))
+    MathParserException::new(fmt(messages::Circular_reference_detected_for_macro_0, &[name]))
 }
 
 pub fn InvalidFunctionDefinition() -> MathParserException {
@@ -377,9 +335,7 @@ pub fn DuplicateElse() -> MathParserException {
 }
 
 pub fn ElseIfAfterElse() -> MathParserException {
-    MathParserException::new(
-        messages::else_if_is_not_allowed_after_else_in_condition_block.to_string(),
-    )
+    MathParserException::new(messages::else_if_is_not_allowed_after_else_in_condition_block.to_string())
 }
 
 pub fn ConditionComplex() -> MathParserException {
@@ -391,10 +347,7 @@ pub fn ConditionResultInvalid(s: &str) -> MathParserException {
 }
 
 pub fn DuplicateMacroParameters(s: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Duplicate_macro_parameter_names_0_and_1,
-        &[s, s],
-    ))
+    MathParserException::new(fmt(messages::Duplicate_macro_parameter_names_0_and_1, &[s, s]))
 }
 
 pub fn UndefinedMacro(s: &str) -> MathParserException {
@@ -434,10 +387,7 @@ pub fn ErrorConvertingPngToBase64() -> MathParserException {
 }
 
 pub fn InconsistentUnitsOperation(ua: &str, op: char, ub: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Inconsistent_units_0_1_2,
-        &[ua, &op.to_string(), ub],
-    ))
+    MathParserException::new(fmt(messages::Inconsistent_units_0_1_2, &[ua, &op.to_string(), ub]))
 }
 
 pub fn UnitsToComplexPower() -> MathParserException {
@@ -472,19 +422,11 @@ pub fn MissingVectorClosingBracket() -> MathParserException {
 }
 
 pub fn MustBeScalar(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::_must_be_scalar
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::_must_be_scalar))
 }
 
 pub fn MustBeReal(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::_must_be_real
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::_must_be_real))
 }
 
 pub fn MustBePositiveInteger(item: Items) -> MathParserException {
@@ -496,19 +438,11 @@ pub fn MustBePositiveInteger(item: Items) -> MathParserException {
 }
 
 pub fn MustBeMatrix(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::_must_be_matrix
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::_must_be_matrix))
 }
 
 pub fn MustBeVector(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::_must_be_vector
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::_must_be_vector))
 }
 
 pub fn StepCannotBeZero() -> MathParserException {
@@ -520,16 +454,11 @@ pub fn VectorSizeLimit() -> MathParserException {
 }
 
 pub fn CrossProductVectorDimensions() -> MathParserException {
-    MathParserException::new(
-        messages::Cross_product_is_definedonly_for_vectors_with_2_and_3_elements.to_string(),
-    )
+    MathParserException::new(messages::Cross_product_is_definedonly_for_vectors_with_2_and_3_elements.to_string())
 }
 
 pub fn FunctionOnlyRealMode(name: &str) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Function_0_is_not_defined_in_complex_mode,
-        &[name],
-    ))
+    MathParserException::new(fmt(messages::Function_0_is_not_defined_in_complex_mode, &[name]))
 }
 
 pub fn MatrixDimensions() -> MathParserException {
@@ -561,9 +490,7 @@ pub fn MatrixCloseToSingular() -> MathParserException {
 }
 
 pub fn ComplexVectorsAndMatricesNotSupported() -> MathParserException {
-    MathParserException::new(
-        messages::Vectors_and_matrices_are_not_supported_in_complex_mode.to_string(),
-    )
+    MathParserException::new(messages::Vectors_and_matrices_are_not_supported_in_complex_mode.to_string())
 }
 
 pub fn CannotInterpolateWithNonScalarValue() -> MathParserException {
@@ -599,16 +526,12 @@ pub fn EmbeddedDataSizeLimit() -> MathParserException {
 }
 
 pub fn DatagridSizeLimit() -> MathParserException {
-    MathParserException::new(fmt(
-        messages::Datagrid_size_cannot_exceed_0_cells,
-        &["100000"],
-    ))
+    MathParserException::new(fmt(messages::Datagrid_size_cannot_exceed_0_cells, &["100000"]))
 }
 
 pub fn MatrixNotHigh() -> MathParserException {
     MathParserException::new(
-        messages::The_number_of_matrix_rows_must_be_greater_than_or_equal_to_the_number_of_columns
-            .to_string(),
+        messages::The_number_of_matrix_rows_must_be_greater_than_or_equal_to_the_number_of_columns.to_string(),
     )
 }
 
@@ -645,25 +568,15 @@ pub fn FileFormatNotSupported(ext: &str) -> MathParserException {
 }
 
 pub fn MustBeHpMatrix(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::MustBeHpMatrix
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::MustBeHpMatrix))
 }
 
 pub fn MustBeHpVector(item: Items) -> MathParserException {
-    MathParserException::new(format!(
-        "{}{}",
-        item_to_string(item),
-        messages::MustBeHpVector
-    ))
+    MathParserException::new(format!("{}{}", item_to_string(item), messages::MustBeHpVector))
 }
 
 pub fn MatrixOneOrTwoRows() -> MathParserException {
-    MathParserException::new(
-        messages::TheInputMatrixForFFTMustHaveOneRowForRealAndTwoRowsForComplexData.to_string(),
-    )
+    MathParserException::new(messages::TheInputMatrixForFFTMustHaveOneRowForRealAndTwoRowsForComplexData.to_string())
 }
 
 pub fn MissingMatrixIndex(matrix: &str) -> MathParserException {
@@ -679,10 +592,7 @@ pub fn InvalidNumberOfIndexes() -> MathParserException {
 }
 
 pub fn InfiniteLoop(maxCount: i32) -> MathParserException {
-    MathParserException::new(fmt(
-        messages::PossiblyInfiniteLoopDetected,
-        &[&maxCount.to_string()],
-    ))
+    MathParserException::new(fmt(messages::PossiblyInfiniteLoopDetected, &[&maxCount.to_string()]))
 }
 
 pub fn CannotModifyConstant(name: &str) -> MathParserException {

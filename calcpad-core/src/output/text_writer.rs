@@ -39,13 +39,7 @@ impl OutputWriter for TextWriter {
         units.text().replace('\u{2031}', "\u{2031} ")
     }
 
-    fn format_input(
-        &self,
-        s: &str,
-        units: &Option<UnitRef>,
-        _line: i32,
-        _is_calculated: bool,
-    ) -> String {
+    fn format_input(&self, s: &str, units: &Option<UnitRef>, _line: i32, _is_calculated: bool) -> String {
         match units {
             None => s.to_string(),
             Some(u) => format!("{} {}", s, u.text()),

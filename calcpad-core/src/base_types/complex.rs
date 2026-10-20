@@ -66,10 +66,7 @@ impl Complex {
     pub const ZERO: Complex = Complex { a: 0.0, b: 0.0 };
     pub const ONE: Complex = Complex { a: 1.0, b: 0.0 };
     pub const IMAGINARY_ONE: Complex = Complex { a: 0.0, b: 1.0 };
-    pub const NAN: Complex = Complex {
-        a: f64::NAN,
-        b: 0.0,
-    };
+    pub const NAN: Complex = Complex { a: f64::NAN, b: 0.0 };
     pub const POSITIVE_INFINITY: Complex = Complex {
         a: f64::INFINITY,
         b: 0.0,
@@ -85,10 +82,7 @@ impl Complex {
 
     #[inline]
     pub const fn new(real: f64, imaginary: f64) -> Complex {
-        Complex {
-            a: real,
-            b: imaginary,
-        }
+        Complex { a: real, b: imaginary }
     }
 
     #[inline]
@@ -138,11 +132,7 @@ impl Complex {
 
     pub fn phase(&self) -> f64 {
         if self.b == 0.0 {
-            return if self.a >= 0.0 {
-                0.0
-            } else {
-                std::f64::consts::PI
-            };
+            return if self.a >= 0.0 { 0.0 } else { std::f64::consts::PI };
         }
         self.b.atan2(self.a)
     }
@@ -455,9 +445,7 @@ impl Complex {
     }
 
     pub fn acosh(value: Complex) -> Complex {
-        Complex::log(
-            value + Complex::sqrt(value - Complex::ONE) * Complex::sqrt(value + Complex::ONE),
-        )
+        Complex::log(value + Complex::sqrt(value - Complex::ONE) * Complex::sqrt(value + Complex::ONE))
     }
 
     pub fn atanh(value: Complex) -> Complex {
@@ -520,18 +508,12 @@ impl Complex {
 
     pub fn log10(value: Complex) -> Complex {
         let inv = 1.0 / 10f64.ln();
-        Complex::new(
-            Complex::abs(value.a, value.b).ln() * inv,
-            value.phase() * inv,
-        )
+        Complex::new(Complex::abs(value.a, value.b).ln() * inv, value.phase() * inv)
     }
 
     pub fn log2(value: Complex) -> Complex {
         let inv = 1.0 / 2f64.ln();
-        Complex::new(
-            Complex::abs(value.a, value.b).ln() * inv,
-            value.phase() * inv,
-        )
+        Complex::new(Complex::abs(value.a, value.b).ln() * inv, value.phase() * inv)
     }
 
     pub fn exp(value: Complex) -> Complex {

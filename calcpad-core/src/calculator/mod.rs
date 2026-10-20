@@ -25,8 +25,8 @@ pub const NEG_STR: &str = "\u{2010}";
 /// `Calculator.OperatorOrder`: ^ ÷ \ ⦼ * - + < > ≤ ≥ ≡ ≠ ∧ ∨ ⊕ ∠ = ←
 pub const OPERATOR_ORDER: [i8; 19] = [0, 4, 4, 4, 4, 5, 6, 7, 7, 7, 7, 7, 7, 8, 9, 9, 3, 10, 10];
 pub const OPERATORS: [char; 18] = [
-    '^', '/', '\\', '\u{29BC}', '*', '-', '+', '<', '>', '\u{2264}', '\u{2265}', '\u{2261}',
-    '\u{2260}', '\u{2227}', '\u{2228}', '\u{2295}', '=', '\u{2220}',
+    '^', '/', '\\', '\u{29BC}', '*', '-', '+', '<', '>', '\u{2264}', '\u{2265}', '\u{2261}', '\u{2260}', '\u{2227}',
+    '\u{2228}', '\u{2295}', '=', '\u{2220}',
 ];
 
 pub fn operator_index(c: char) -> Option<usize> {
@@ -59,8 +59,8 @@ pub fn is_operator(c: char) -> bool {
 }
 
 const IS_ZERO_PRESERVING_OPERATOR: [bool; 19] = [
-    false, false, false, false, true, true, true, true, true, false, false, false, true, true,
-    true, true, true, true, true,
+    false, false, false, false, true, true, true, true, true, false, false, false, true, true, true, true, true, true,
+    true,
 ];
 
 pub fn is_zero_preserving_operator(index: i64) -> bool {
@@ -84,16 +84,15 @@ pub fn operator_require_consistent_units(index: i64) -> bool {
 }
 
 pub const FUNCTION_NAMES: [&str; 46] = [
-    "sin", "cos", "tan", "csc", "sec", "cot", "asin", "acos", "atan", "acsc", "asec", "acot",
-    "sinh", "cosh", "tanh", "csch", "sech", "coth", "asinh", "acosh", "atanh", "acsch", "asech",
-    "acoth", "log", "ln", "log_2", "exp", "abs", "sign", "sqr", "sqrt", "cbrt", "round", "floor",
-    "ceiling", "trunc", "re", "im", "phase", "conj", "random", "fact", NEG_STR, "not", "timer",
+    "sin", "cos", "tan", "csc", "sec", "cot", "asin", "acos", "atan", "acsc", "asec", "acot", "sinh", "cosh", "tanh",
+    "csch", "sech", "coth", "asinh", "acosh", "atanh", "acsch", "asech", "acoth", "log", "ln", "log_2", "exp", "abs",
+    "sign", "sqr", "sqrt", "cbrt", "round", "floor", "ceiling", "trunc", "re", "im", "phase", "conj", "random", "fact",
+    NEG_STR, "not", "timer",
 ];
 pub const FUNCTION2_NAMES: [&str; 4] = ["atan2", "root", "mod", "mandelbrot"];
 pub const FUNCTION3_NAMES: [&str; 1] = ["if"];
 pub const MULTI_FUNCTION_NAMES: [&str; 14] = [
-    "min", "max", "sum", "sumsq", "srss", "average", "product", "mean", "switch", "and", "or",
-    "xor", "gcd", "lcm",
+    "min", "max", "sum", "sumsq", "srss", "average", "product", "mean", "switch", "and", "or", "xor", "gcd", "lcm",
 ];
 pub const INTERPOLATION_NAMES: [&str; 3] = ["take", "line", "spline"];
 
@@ -135,16 +134,8 @@ pub const NEG_FUNCTION_INDEX: i64 = 43;
 /// `Calculator.UnitMultOrder` = OperatorOrder['*'] - 2
 pub const UNIT_MULT_ORDER: i8 = 2;
 
-pub const FROM_RAD: [f64; 3] = [
-    180.0 / std::f64::consts::PI,
-    1.0,
-    200.0 / std::f64::consts::PI,
-];
-pub const TO_RAD: [f64; 3] = [
-    std::f64::consts::PI / 180.0,
-    1.0,
-    std::f64::consts::PI / 200.0,
-];
+pub const FROM_RAD: [f64; 3] = [180.0 / std::f64::consts::PI, 1.0, 200.0 / std::f64::consts::PI];
+pub const TO_RAD: [f64; 3] = [std::f64::consts::PI / 180.0, 1.0, std::f64::consts::PI / 200.0];
 
 pub fn angle_unit(i: usize) -> UnitRef {
     Unit::get(["deg", "rad", "grad"][i], false).unwrap()
@@ -220,13 +211,7 @@ impl Calculator {
     }
 
     /// `EvaluateFunction3` (only `if`)
-    pub fn evaluate_function3(
-        &self,
-        index: i64,
-        a: &Value,
-        b: &Value,
-        c: &Value,
-    ) -> CResult<Value> {
+    pub fn evaluate_function3(&self, index: i64, a: &Value, b: &Value, c: &Value) -> CResult<Value> {
         if index != 0 {
             return Err(index_out_of_range());
         }
@@ -270,10 +255,7 @@ impl Calculator {
 pub fn check_trig_function_units(func: &str, unit: &OptUnit) -> CResult<()> {
     if let Some(u) = unit {
         if !u.is_angle() {
-            return Err(exceptions::InvalidUnitsFunction(
-                func,
-                &Unit::get_text_of(unit),
-            ));
+            return Err(exceptions::InvalidUnitsFunction(func, &Unit::get_text_of(unit)));
         }
     }
     Ok(())
@@ -281,10 +263,7 @@ pub fn check_trig_function_units(func: &str, unit: &OptUnit) -> CResult<()> {
 
 pub fn check_function_units(func: &str, unit: &OptUnit) -> CResult<()> {
     if unit.is_some() {
-        return Err(exceptions::InvalidUnitsFunction(
-            func,
-            &Unit::get_text_of(unit),
-        ));
+        return Err(exceptions::InvalidUnitsFunction(func, &Unit::get_text_of(unit)));
     }
     Ok(())
 }
@@ -303,11 +282,7 @@ pub fn get_root(root: &Value) -> CResult<i32> {
     Ok(n)
 }
 
-pub fn if_function(
-    condition: &Value,
-    value_if_true: &Value,
-    value_if_false: &Value,
-) -> CResult<Value> {
+pub fn if_function(condition: &Value, value_if_true: &Value, value_if_false: &Value) -> CResult<Value> {
     Ok(if condition.re().abs() < LOGICAL_ZERO {
         value_if_false.clone()
     } else {
@@ -433,22 +408,12 @@ pub fn spline(values: &[Value]) -> CResult<Value> {
     if i > 0 {
         let v2 = &y[iu - 1];
         let y2 = v2.re() * Unit::convert(&u, v2.units(), ',')?;
-        a = (y1 - y2)
-            * if math_sign(y0 - y2)? as f64 == dy {
-                0.5
-            } else {
-                0.25
-            };
+        a = (y1 - y2) * if math_sign(y0 - y2)? as f64 == dy { 0.5 } else { 0.25 };
     }
     if i < y.len() as i64 - 2 {
         let v2 = &y[iu + 2];
         let y2 = v2.re() * Unit::convert(&u, v2.units(), ',')?;
-        b = (y2 - y0)
-            * if math_sign(y2 - y1)? as f64 == dy {
-                0.5
-            } else {
-                0.25
-            };
+        b = (y2 - y0) * if math_sign(y2 - y1)? as f64 == dy { 0.5 } else { 0.25 };
     }
     if i == 0 {
         a += (a - b) / 2.0;

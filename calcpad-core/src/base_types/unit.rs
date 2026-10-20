@@ -120,9 +120,7 @@ impl Unit {
         };
         let mut factors = vec![1f64; n];
         factors[0] = 1000.0;
-        let all = [
-            mass, length, time, current, temp, substance, luminosity, angle,
-        ];
+        let all = [mass, length, time, current, temp, substance, luminosity, angle];
         let powers: Vec<f32> = all[..n].to_vec();
         let u = Unit::from_parts(powers, factors, 'C');
         *u.text.borrow_mut() = Some(text.to_string());
@@ -270,9 +268,7 @@ impl Unit {
         if t == "\u{00B0}" {
             return "\u{00B0}".to_string();
         }
-        HtmlWriter::new(None, false)
-            .format_units_text(&t)
-            .unwrap_or_default()
+        HtmlWriter::new(None, false).format_units_text(&t).unwrap_or_default()
     }
 
     pub fn format_string(&self) -> Option<String> {
@@ -305,10 +301,7 @@ impl Unit {
 
     pub fn get(text: &str, is_us: bool) -> CResult<UnitRef> {
         Unit::try_get(text, is_us).ok_or_else(|| {
-            MathParserException::unexpected(format!(
-                "The given key '{}' was not present in the dictionary.",
-                text
-            ))
+            MathParserException::unexpected(format!("The given key '{}' was not present in the dictionary.", text))
         })
     }
 
@@ -749,12 +742,7 @@ impl Unit {
         if update_text && !ua.is_multiple(ub) {
             uc.scale_in_place(d);
             d = 1.0;
-            *uc.text.borrow_mut() = Some(format!(
-                "{}{}{}",
-                ua.text(),
-                TextWriter::UNIT_PRODUCT,
-                ub.text()
-            ));
+            *uc.text.borrow_mut() = Some(format!("{}{}{}", ua.text(), TextWriter::UNIT_PRODUCT, ub.text()));
         }
         (Some(uc), d)
     }
@@ -1227,11 +1215,7 @@ fn get_dim_text(writer: &dyn OutputWriter, name: &str, factor: f64, power: f32) 
         factor /= get_scale(n);
         if (factor - 1.0).abs() > 1e-12 {
             name = writer.add_brackets(
-                &format!(
-                    "{}\u{00B7}{}",
-                    writer.format_real(factor, None, false),
-                    name
-                ),
+                &format!("{}\u{00B7}{}", writer.format_real(factor, None, false), name),
                 0,
                 '(',
                 ')',
@@ -1423,9 +1407,7 @@ impl UnitTable {
             fct[8] = 1.0;
             add("", r(Unit::from_parts(p, fct, 'C')));
         }
-        for t in [
-            "%", "\u{2030}", "\u{2031}", "pcm", "ppm", "ppb", "ppt", "ppq",
-        ] {
+        for t in ["%", "\u{2030}", "\u{2031}", "pcm", "ppm", "ppb", "ppt", "ppq"] {
             add(t, dimless(t));
         }
         add("g", g.clone());
@@ -1569,10 +1551,7 @@ impl UnitTable {
         add("\u{0394}\u{00B0}C", r(deg.scale("\u{0394}\u{00B0}C", 1.0)));
         add("K", r(deg.scale("K", 1.0)));
         add("\u{00B0}F", r(deg.scale("\u{00B0}F", 5.0 / 9.0)));
-        add(
-            "\u{0394}\u{00B0}F",
-            r(deg.scale("\u{0394}\u{00B0}F", 5.0 / 9.0)),
-        );
+        add("\u{0394}\u{00B0}F", r(deg.scale("\u{0394}\u{00B0}F", 5.0 / 9.0)));
         add("\u{00B0}R", r(deg.scale("\u{00B0}R", 5.0 / 9.0)));
 
         add("mol", nd("mol", 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0));
@@ -1718,10 +1697,7 @@ impl UnitTable {
             add(k, r(w.scale(k, f)));
         }
 
-        let prefixed = |add: &mut dyn FnMut(&str, UnitRef),
-                        base: &Unit,
-                        sym: &str,
-                        include_base: Option<UnitRef>| {
+        let prefixed = |add: &mut dyn FnMut(&str, UnitRef), base: &Unit, sym: &str, include_base: Option<UnitRef>| {
             add(sym, include_base.unwrap_or_else(|| r(Unit::copy(base))));
             for (p, n) in [
                 ("k", 3),
