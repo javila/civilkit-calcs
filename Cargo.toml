@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["calcpad-core", "calcpad-cli"]
+members = ["calcpad-core", "calcpad-cli", "calcpad-wasm"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,3 +14,12 @@ debug = false
 # optimized so that `cargo test` stays fast.
 [profile.test]
 opt-level = 3
+
+# The browser build of calcpad-wasm (tools/build_wasm.sh): optimized for size.
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
