@@ -235,7 +235,23 @@ impl MathParser {
 
     /// `Result`
     pub fn result_complex(&self) -> Complex {
-        self.result.borrow().complex()
+        match &*self.result.borrow() {
+            Value::Vector(v) => {
+                if v.len() >= 1 {
+                    Complex::real(v.get(0).d)
+                } else {
+                    Complex::real(0.0)
+                }
+            }
+            Value::Matrix(m) => {
+                if m.row_count() >= 1 && m.col_count() >= 1 {
+                    Complex::real(m.get(0, 0).d)
+                } else {
+                    Complex::real(0.0)
+                }
+            }
+            r => r.complex(),
+        }
     }
 
     pub fn real(&self) -> f64 {
@@ -682,22 +698,57 @@ impl MathParser {
     pub fn result_as_string(&self) -> String {
         let r = self.result.borrow().clone();
         let decimals = self.settings.borrow().decimals();
-        let s = crate::output::text_writer::TextWriter::new(
+        let w = crate::output::text_writer::TextWriter::new(
             Some(&MathSettings::default().with_decimals(decimals)),
             self.phasor.get(),
         );
-        use crate::output::OutputWriter;
-        let s = s.format_complex(r.re(), r.im(), None);
-        match self.units() {
-            None => s,
-            Some(u) => {
-                if r.is_complex() {
-                    format!("({}){}", s, u.text())
-                } else {
-                    format!("{}{}", s, u.text())
+        let units = self.units();
+        let format_result_value = |value: &Value| -> String {
+            use crate::output::OutputWriter;
+            let s = w.format_complex(value.re(), value.im(), None);
+            match &units {
+                None => s,
+                Some(u) => {
+                    if value.is_complex() {
+                        format!("({}){}", s, u.text())
+                    } else {
+                        format!("{}{}", s, u.text())
+                    }
                 }
             }
+        };
+        if r.is_scalar() {
+            return format_result_value(&r);
         }
+        let spacing = VECTOR_SPACING.chars().next().unwrap();
+        let mut sb = String::from("[");
+        match &r {
+            Value::Vector(vector) => {
+                let len = vector.len();
+                for i in 0..len {
+                    sb.push_str(&format_result_value(&Value::Real(vector.get(i))));
+                    if i + 1 < len {
+                        sb.push(spacing);
+                    }
+                }
+            }
+            Value::Matrix(matrix) => {
+                let (m, n) = (matrix.row_count(), matrix.col_count());
+                for i in 0..m {
+                    for j in 0..n {
+                        sb.push_str(&format_result_value(&Value::Real(matrix.get(i, j))));
+                        if j + 1 < n {
+                            sb.push(spacing);
+                        } else if i + 1 < m {
+                            sb.push('|');
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        sb.push(']');
+        sb
     }
 
     /// `ResultAsVal`
@@ -705,23 +756,59 @@ impl MathParser {
         let r = self.result.borrow().clone();
         let decimals = self.settings.borrow().decimals();
         let convert = |d: f64| netfmt::double_to_string(netfmt::round_even_digits(d, decimals));
-        if let Value::Real(real) = &r {
-            return convert(real.d);
+        let format_result_value = |value: &Value| -> String {
+            if let Value::Real(real) = value {
+                return convert(real.d);
+            }
+            let c = value.complex();
+            if c.is_real() {
+                return convert(c.re());
+            }
+            if c.is_imaginary() {
+                return format!("{}i", convert(c.im()));
+            }
+            let sa = convert(c.re());
+            let sb = convert(c.im().abs());
+            if c.im() < 0.0 {
+                format!("{} \u{2013} {}i", sa, sb)
+            } else {
+                format!("{} + {}i", sa, sb)
+            }
+        };
+        if r.is_scalar() {
+            return format_result_value(&r);
         }
-        let c = r.complex();
-        if c.is_real() {
-            return convert(c.re());
+        let mut sb = String::from("[");
+        match &r {
+            Value::Vector(vector) => {
+                let len = vector.len();
+                for i in 0..len {
+                    sb.push_str(&format_result_value(&Value::Real(vector.get(i))));
+                    if i + 1 < len {
+                        sb.push_str(", ");
+                    }
+                }
+            }
+            Value::Matrix(matrix) => {
+                let (m, n) = (matrix.row_count(), matrix.col_count());
+                for i in 0..m {
+                    sb.push('[');
+                    for j in 0..n {
+                        sb.push_str(&format_result_value(&Value::Real(matrix.get(i, j))));
+                        if j + 1 < n {
+                            sb.push_str(", ");
+                        }
+                    }
+                    sb.push(']');
+                    if i + 1 < m {
+                        sb.push_str(", ");
+                    }
+                }
+            }
+            _ => {}
         }
-        if c.is_imaginary() {
-            return format!("{}i", convert(c.im()));
-        }
-        let sa = convert(c.re());
-        let sb = convert(c.im().abs());
-        if c.im() < 0.0 {
-            format!("{} \u{2013} {}i", sa, sb)
-        } else {
-            format!("{} + {}i", sa, sb)
-        }
+        sb.push(']');
+        sb
     }
 
     pub fn to_text(&self) -> CResult<String> {
@@ -736,7 +823,10 @@ impl MathParser {
         let v = self.variables.borrow().get(name).cloned();
         if let Some(v) = v {
             if let Some(val) = v.value() {
-                return Ok(val.re());
+                if val.is_scalar() {
+                    return Ok(val.re());
+                }
+                return Err(exceptions::MustBeScalar(Items::Variable));
             }
         }
         Ok(default_value)

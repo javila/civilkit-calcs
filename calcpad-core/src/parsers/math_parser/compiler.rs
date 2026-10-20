@@ -8,7 +8,6 @@
 use std::rc::Rc;
 
 use super::custom_function::CustomFunctionRef;
-use super::input::out_of_scope;
 use super::solve_block::SolverBlock;
 use super::tokens::{Rpn, TokenKind, TokenRef, TokenTypes};
 use super::MathParser;
@@ -16,9 +15,11 @@ use crate::base_types::real_value::{RealValue, LOGICAL_ZERO};
 use crate::base_types::unit::Unit;
 use crate::base_types::value::Value;
 use crate::base_types::variable::VarRef;
+use crate::calculator::{matrix_calculator as mc, vector_calculator as vc};
 use crate::calculator::{IF_FUNCTION_INDEX, NEG_STR, SWITCH_INDEX};
 use crate::exceptions;
 use crate::math_parser_exception::{CResult, MathParserException};
+use crate::vector::Vector;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinOp {
@@ -61,6 +62,23 @@ pub enum Expr {
     Solver(Rc<SolverBlock>),
     Block(Vec<Expr>),
     While(Box<Expr>, Vec<Expr>),
+    /// `VectorCalculator.GetFunction(index)` and the other vector and matrix delegates;
+    /// the token type selects the table.
+    VmFunc(TokenTypes, i64, Vec<Expr>),
+    /// `ParseLuDecomposition`: the `ind` vector is captured at compile time.
+    Lu(Box<Expr>, Vector),
+    /// `new Vector(IValue.ExpandRealValues(values))`
+    VecLit(Vec<Expr>),
+    /// `MatrixCalculator.JoinRows(values)`
+    MatLit(Vec<Expr>),
+    /// `VectorCalculator.GetElement(vector, i)`
+    GetVecElem(Box<Expr>, Box<Expr>),
+    /// `MatrixCalculator.GetElement(matrix, i, j)`
+    GetMatElem(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `VectorCalculator.SetElement(vector, i, value)`
+    SetVecElem(Box<Expr>, Box<Expr>, Box<Expr>),
+    /// `MatrixCalculator.SetElement(matrix, i, j, value)`
+    SetMatElem(Box<Expr>, Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 impl Expr {
@@ -132,39 +150,43 @@ impl MathParser {
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token1(t, a)?);
                 }
-                TokenTypes::Function => {
+                TokenTypes::Function
+                | TokenTypes::VectorFunction
+                | TokenTypes::MatrixFunction
+                | TokenTypes::MatrixOptionalFunction => {
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token1(t, a)?);
                 }
-                TokenTypes::VectorFunction | TokenTypes::MatrixFunction | TokenTypes::MatrixOptionalFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
-                }
-                TokenTypes::Operator | TokenTypes::Function2 => {
+                TokenTypes::Operator
+                | TokenTypes::Function2
+                | TokenTypes::VectorFunction2
+                | TokenTypes::MatrixFunction2
+                | TokenTypes::MatrixIterativeFunction => {
                     let b = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     let a = stack.pop().ok_or_else(exceptions::MissingOperand)?;
                     stack.push(self.compile_token2(t, a, b)?);
                 }
-                TokenTypes::VectorFunction2 | TokenTypes::MatrixFunction2 | TokenTypes::MatrixIterativeFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
-                }
-                TokenTypes::Function3 => {
+                TokenTypes::Function3 | TokenTypes::VectorFunction3 | TokenTypes::MatrixFunction3 => {
                     let c = stack.pop().ok_or_else(stack_empty)?;
                     let b = stack.pop().ok_or_else(stack_empty)?;
                     let a = stack.pop().ok_or_else(stack_empty)?;
-                    if index == IF_FUNCTION_INDEX {
-                        stack.push(Expr::Cond(Box::new(a), Box::new(c), Box::new(b)));
+                    if tt == TokenTypes::Function3 {
+                        if index == IF_FUNCTION_INDEX {
+                            stack.push(Expr::Cond(Box::new(a), Box::new(c), Box::new(b)));
+                        } else {
+                            return Err(crate::calculator::index_out_of_range());
+                        }
                     } else {
-                        return Err(crate::calculator::index_out_of_range());
+                        stack.push(Expr::VmFunc(tt, index, vec![a, b, c]));
                     }
                 }
-                TokenTypes::VectorFunction3
-                | TokenTypes::MatrixFunction3
-                | TokenTypes::MatrixFunction4
-                | TokenTypes::MatrixFunction5 => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
+                TokenTypes::MatrixFunction4 => {
+                    let args = pop_values(&mut stack, 4)?;
+                    stack.push(Expr::VmFunc(tt, index, args));
+                }
+                TokenTypes::MatrixFunction5 => {
+                    let args = pop_values(&mut stack, 5)?;
+                    stack.push(Expr::VmFunc(tt, index, args));
                 }
                 TokenTypes::Interpolation => {
                     let n = t.borrow().parameter_count().max(0) as usize;
@@ -176,25 +198,24 @@ impl MathParser {
                         stack.push(Expr::Interp(index, args));
                     }
                 }
-                TokenTypes::MultiFunction => {
+                TokenTypes::MultiFunction | TokenTypes::VectorMultiFunction | TokenTypes::MatrixMultiFunction => {
                     let n = t.borrow().parameter_count().max(0) as usize;
                     let args = pop_values(&mut stack, n)?;
                     if args.iter().all(Expr::is_const) {
                         let values: Vec<Value> = args.iter().map(Expr::const_value).collect();
-                        stack.push(Expr::Const(Value::evaluate_multi_function(
-                            self.calc(),
-                            index,
-                            &values,
-                        )?));
+                        let v = match tt {
+                            TokenTypes::MultiFunction => Value::evaluate_multi_function(self.calc(), index, &values)?,
+                            TokenTypes::VectorMultiFunction => vc::evaluate_vector_multi_function(index, &values)?,
+                            _ => mc::evaluate_matrix_multi_function(index, &values)?,
+                        };
+                        stack.push(Expr::Const(v));
                     } else if index == SWITCH_INDEX {
                         stack.push(parse_switch(args));
-                    } else {
+                    } else if tt == TokenTypes::MultiFunction {
                         stack.push(Expr::Multi(index, args));
+                    } else {
+                        stack.push(Expr::VmFunc(tt, index, args));
                     }
-                }
-                TokenTypes::VectorMultiFunction | TokenTypes::MatrixMultiFunction => {
-                    self.note_out_of_scope(&format!("vector/matrix function {}", content));
-                    return Err(out_of_scope("Vector and matrix functions"));
                 }
                 TokenTypes::CustomFunction => {
                     if index < 0 {
@@ -213,13 +234,35 @@ impl MathParser {
                         stack.push(Expr::Custom { cf, args, map });
                     }
                 }
-                TokenTypes::Vector
-                | TokenTypes::RowDivisor
-                | TokenTypes::Matrix
-                | TokenTypes::VectorIndex
-                | TokenTypes::MatrixIndex => {
-                    self.note_out_of_scope("vectors and matrices");
-                    return Err(out_of_scope("Vectors and matrices"));
+                TokenTypes::Vector | TokenTypes::RowDivisor => {
+                    let is_literal = matches!(t.borrow().kind, TokenKind::Vector(_));
+                    if is_literal {
+                        let args = pop_values(&mut stack, index.max(0) as usize)?;
+                        stack.push(Expr::VecLit(args));
+                    } else {
+                        stack.push(self.compile_token0(t)?);
+                    }
+                }
+                TokenTypes::Matrix => {
+                    let is_literal = matches!(t.borrow().kind, TokenKind::Matrix(_));
+                    if is_literal {
+                        let count = (index / crate::vector::MAX_LENGTH) as usize;
+                        let args = pop_values(&mut stack, count)?;
+                        stack.push(Expr::MatLit(args));
+                    } else {
+                        stack.push(self.compile_token0(t)?);
+                    }
+                }
+                TokenTypes::VectorIndex => {
+                    let i = stack.pop().ok_or_else(stack_empty)?;
+                    let target = stack.pop().ok_or_else(stack_empty)?;
+                    stack.push(Expr::GetVecElem(Box::new(target), Box::new(i)));
+                }
+                TokenTypes::MatrixIndex => {
+                    let j = stack.pop().ok_or_else(stack_empty)?;
+                    let i = stack.pop().ok_or_else(stack_empty)?;
+                    let target = stack.pop().ok_or_else(stack_empty)?;
+                    stack.push(Expr::GetMatElem(Box::new(target), Box::new(i), Box::new(j)));
                 }
                 TokenTypes::Solver => {
                     let sb = self.solve_blocks.borrow()[index as usize].clone();
@@ -249,6 +292,17 @@ impl MathParser {
                 }
             }
             TokenTypes::Variable => self.compile_variable_token(t),
+            TokenTypes::Vector | TokenTypes::Matrix => {
+                let lit = match &t.borrow().kind {
+                    TokenKind::Vector(Some(v)) => Some(Value::Vector(v.clone())),
+                    TokenKind::Matrix(Some(m)) => Some(Value::Matrix(m.clone())),
+                    _ => None,
+                };
+                match lit {
+                    Some(v) => Ok(Expr::Const(v)),
+                    None => self.compile_variable_token(t),
+                }
+            }
             TokenTypes::Input if t.borrow().content == "?" => Err(exceptions::UndefinedInputField()),
             _ => Ok(Expr::Const(
                 t.borrow().token_value().cloned().unwrap_or_else(Value::zero),
@@ -297,14 +351,29 @@ impl MathParser {
                 if content == NEG_STR {
                     return Ok(Expr::Const(va.neg()?));
                 }
-                let mut vb = Value::evaluate_function(self.calc(), index, &va)?;
+                let mut vb = match tt {
+                    TokenTypes::Function => Value::evaluate_function(self.calc(), index, &va)?,
+                    TokenTypes::VectorFunction => vc::evaluate_vector_function(index, &va)?,
+                    TokenTypes::MatrixOptionalFunction => {
+                        mc::evaluate_matrix_iterative_function(index, &va, &Value::zero(), self.tol()?)?
+                    }
+                    _ => {
+                        if index == mc::LU_INDEX {
+                            mc::lu_decomposition(&va, &self.lu_index_vector())?
+                        } else {
+                            mc::evaluate_matrix_function(index, &va)?
+                        }
+                    }
+                };
                 self.normalize_units(&mut vb);
                 return Ok(Expr::Const(vb));
             }
         }
         Ok(match tt {
             TokenTypes::Operator => Expr::Neg(Box::new(a)),
-            _ => Expr::Func(index, Box::new(a)),
+            TokenTypes::Function => Expr::Func(index, Box::new(a)),
+            TokenTypes::MatrixFunction if index == mc::LU_INDEX => Expr::Lu(Box::new(a), self.lu_index_vector()),
+            _ => Expr::VmFunc(tt, index, vec![a]),
         })
     }
 
@@ -318,17 +387,25 @@ impl MathParser {
             if !(s.starts_with("matrix") || s.starts_with("diagonal") || s.starts_with("column")) {
                 let va = a.const_value();
                 let vb = b.const_value();
-                let mut vc = if tt == TokenTypes::Operator {
-                    Value::evaluate_operator(self.calc(), index, &va, &vb)?
-                } else {
-                    Value::evaluate_function2(self.calc(), index, &va, &vb)?
+                let mut vc = match tt {
+                    TokenTypes::Operator => Value::evaluate_operator(self.calc(), index, &va, &vb)?,
+                    TokenTypes::Function2 => Value::evaluate_function2(self.calc(), index, &va, &vb)?,
+                    TokenTypes::VectorFunction2 => vc::evaluate_vector_function2(index, &va, &vb)?,
+                    TokenTypes::MatrixIterativeFunction => {
+                        mc::evaluate_matrix_iterative_function(index, &va, &vb, self.tol()?)?
+                    }
+                    _ => mc::evaluate_matrix_function2(index, &va, &vb)?,
                 };
                 self.normalize_units(&mut vc);
                 return Ok(Expr::Const(vc));
             }
         }
-        if tt == TokenTypes::Function2 {
-            return Ok(Expr::Func2(index, Box::new(a), Box::new(b)));
+        match tt {
+            TokenTypes::Function2 => return Ok(Expr::Func2(index, Box::new(a), Box::new(b))),
+            TokenTypes::VectorFunction2 | TokenTypes::MatrixIterativeFunction | TokenTypes::MatrixFunction2 => {
+                return Ok(Expr::VmFunc(tt, index, vec![a, b]))
+            }
+            _ => {}
         }
         self.compile_operator(&content, index, a, b)
     }
@@ -337,6 +414,8 @@ impl MathParser {
         let c0 = content.chars().next().unwrap_or('\0');
         if c0 == '=' || c0 == '\u{2190}' {
             return match a {
+                Expr::GetVecElem(v, i) => Ok(Expr::SetVecElem(v, i, Box::new(b))),
+                Expr::GetMatElem(m, i, j) => Ok(Expr::SetMatElem(m, i, j, Box::new(b))),
                 Expr::Var(v) => Ok(Expr::Assign(v, Box::new(b))),
                 _ => Err(MathParserException::unexpected(
                     "Expression must be writeable (Parameter 'left')",
@@ -446,6 +525,66 @@ impl MathParser {
                     last = self.eval_expr(it)?;
                 }
                 Ok(last)
+            }
+            Expr::VmFunc(tt, index, args) => {
+                let v = self.eval_all(args)?;
+                let index = *index;
+                match tt {
+                    TokenTypes::VectorFunction => vc::evaluate_vector_function(index, &v[0]),
+                    TokenTypes::MatrixFunction => mc::evaluate_matrix_function(index, &v[0]),
+                    TokenTypes::MatrixOptionalFunction => {
+                        mc::evaluate_matrix_iterative_function(index, &v[0], &Value::zero(), self.tol()?)
+                    }
+                    TokenTypes::VectorFunction2 => vc::evaluate_vector_function2(index, &v[0], &v[1]),
+                    TokenTypes::MatrixFunction2 => mc::evaluate_matrix_function2(index, &v[0], &v[1]),
+                    TokenTypes::MatrixIterativeFunction => {
+                        mc::evaluate_matrix_iterative_function(index, &v[0], &v[1], self.tol()?)
+                    }
+                    TokenTypes::VectorFunction3 => vc::evaluate_vector_function3(index, &v[0], &v[1], &v[2]),
+                    TokenTypes::MatrixFunction3 => mc::evaluate_matrix_function3(index, &v[0], &v[1], &v[2]),
+                    TokenTypes::MatrixFunction4 => mc::evaluate_matrix_function4(index, &v[0], &v[1], &v[2], &v[3]),
+                    TokenTypes::MatrixFunction5 => {
+                        mc::evaluate_matrix_function5(index, &v[0], &v[1], &v[2], &v[3], &v[4])
+                    }
+                    TokenTypes::VectorMultiFunction => vc::evaluate_vector_multi_function(index, &v),
+                    _ => mc::evaluate_matrix_multi_function(index, &v),
+                }
+            }
+            Expr::Lu(a, ind) => {
+                let va = self.eval_expr(a)?;
+                mc::lu_decomposition(&va, ind)
+            }
+            Expr::VecLit(args) => {
+                let v = self.eval_all(args)?;
+                Ok(Value::Vector(Vector::from_values(Value::expand_real_values(&v)?)?))
+            }
+            Expr::MatLit(args) => {
+                let v = self.eval_all(args)?;
+                Ok(Value::Matrix(mc::join_rows(&v)?))
+            }
+            Expr::GetVecElem(a, i) => {
+                let va = self.eval_expr(a)?;
+                let vi = self.eval_expr(i)?;
+                vc::get_element(&va, &vi)
+            }
+            Expr::GetMatElem(a, i, j) => {
+                let va = self.eval_expr(a)?;
+                let vi = self.eval_expr(i)?;
+                let vj = self.eval_expr(j)?;
+                mc::get_element(&va, &vi, &vj)
+            }
+            Expr::SetVecElem(a, i, b) => {
+                let va = self.eval_expr(a)?;
+                let vi = self.eval_expr(i)?;
+                let vb = self.eval_expr(b)?;
+                vc::set_element(&va, &vi, &vb)
+            }
+            Expr::SetMatElem(a, i, j, b) => {
+                let va = self.eval_expr(a)?;
+                let vi = self.eval_expr(i)?;
+                let vj = self.eval_expr(j)?;
+                let vb = self.eval_expr(b)?;
+                mc::set_element(&va, &vi, &vj, &vb)
             }
             Expr::While(cond, body) => {
                 let mut result = Value::zero();

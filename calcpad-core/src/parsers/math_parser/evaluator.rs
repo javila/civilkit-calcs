@@ -288,8 +288,14 @@ impl MathParser {
 
     /// `EvaluateLuDecomposition(a, variables)`: stores the permutation in the variable `ind`.
     fn evaluate_lu_decomposition(&self, a: &Value) -> CResult<Value> {
+        mc::lu_decomposition(a, &self.lu_index_vector())
+    }
+
+    /// The HpVector of the variable `ind` that receives the LU permutation (created when
+    /// missing or not an HpVector), as `EvaluateLuDecomposition` and `ParseLuDecomposition` do.
+    pub(crate) fn lu_index_vector(&self) -> Vector {
         let existing = self.variables.borrow().get("ind").cloned();
-        let hp_vector = match existing.as_ref().and_then(|v| v.value()) {
+        match existing.as_ref().and_then(|v| v.value()) {
             Some(Value::Vector(v)) if v.is_hp() => v,
             _ => {
                 let v = crate::vector::hp_vector::new_ls(0, 0, None);
@@ -299,8 +305,7 @@ impl MathParser {
                 );
                 v
             }
-        };
-        mc::lu_decomposition(a, &hp_vector)
+        }
     }
 
     /// `EvaluateInterpolationToken(t)`
