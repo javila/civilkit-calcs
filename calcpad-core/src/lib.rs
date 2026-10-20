@@ -31,6 +31,7 @@ pub mod calcpad_error;
 pub mod calculator;
 pub mod exceptions;
 pub mod extension_methods;
+pub mod markdig;
 pub mod math_parser_exception;
 pub mod messages;
 pub mod netfmt;
