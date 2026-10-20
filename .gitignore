@@ -1,0 +1,5 @@
+/target
+/.venv
+/tools/out
+*.pyc
+__pycache__/

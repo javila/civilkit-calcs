@@ -1,0 +1,13 @@
+[package]
+name = "calcpad-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Command line front end for calcpad-core, compatible with Calcpad.Cli batch conversion"
+
+[[bin]]
+name = "Cli"
+path = "src/main.rs"
+
+[dependencies]
+calcpad-core = { path = "../calcpad-core" }

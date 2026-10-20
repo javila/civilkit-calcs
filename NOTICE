@@ -1,0 +1,11 @@
+calcpad-rs is a Rust port of the CalcpadCE calculation engine
+(https://github.com/imartincei/CalcpadCE, ported from commit 0cf438f).
+
+The original C# code is distributed under the MIT License:
+
+  Copyright (c) 2026 CalcpadCE Contributors
+  Copyright (c) 2014-2026 Nedelcho Ganchovski
+
+This port keeps the module structure of Calcpad.Core so that upstream changes
+can be followed file by file. The port is distributed under the same MIT
+License (see LICENSE).
