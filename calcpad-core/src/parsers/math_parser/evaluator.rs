@@ -652,11 +652,38 @@ impl MathParser {
     /// `Evaluator.EvaluateFunction(cf, x...)`
     pub(crate) fn evaluate_custom_function(&self, cf: &CustomFunctionRef, args: Vec<Value>) -> CResult<Value> {
         let f = self.ensure_compiled(cf)?;
-        let parameters = cf.parameters();
-        for (p, a) in parameters.iter().zip(args) {
-            p.set_value(a);
-        }
-        let mut result = self.eval_expr(&f)?;
+        let mut result = if cf.has_cache() {
+            // CustomFunction1/2.Calculate: a result cache per scalar argument value.
+            if cf.cache().borrow().len() >= super::custom_function::MAX_CACHE_SIZE {
+                cf.cache().borrow_mut().clear();
+            }
+            if args.iter().all(Value::is_scalar) {
+                let cached = cf.cache().borrow().get(&args);
+                match cached {
+                    Some(Some(v)) => v,
+                    Some(None) => return Err(crate::vector::null_reference()),
+                    None => {
+                        cf.set_parameter_values(&args);
+                        match self.eval_expr(&f) {
+                            Ok(v) => {
+                                cf.cache().borrow_mut().insert(args, Some(v.clone()));
+                                v
+                            }
+                            Err(e) => {
+                                cf.cache().borrow_mut().insert(args, None);
+                                return Err(e);
+                            }
+                        }
+                    }
+                }
+            } else {
+                cf.set_parameter_values(&args);
+                self.eval_expr(&f)?
+            }
+        } else {
+            cf.set_parameter_values(&args);
+            self.eval_expr(&f)?
+        };
         let cu = cf.units.borrow().clone();
         let u = apply_units(&mut result, &cu)?;
         self.set_result_units(u);

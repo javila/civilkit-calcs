@@ -487,6 +487,10 @@ impl MathParser {
                     }
                 }
             }
+            // PurgeCache()
+            for f in self.functions.borrow().all() {
+                f.purge_cache();
+            }
         }
         self.is_calculated.set(true);
         Ok(())
