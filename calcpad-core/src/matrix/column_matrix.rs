@@ -52,7 +52,7 @@ pub(super) fn resize(m: &Matrix, n: usize) -> CResult<Matrix> {
 }
 
 /// `operator *(Matrix a, ColumnMatrix b)`
-pub(super) fn mul(a: &Matrix, b: &Matrix) -> CResult<Matrix> {
+pub(crate) fn mul(a: &Matrix, b: &Matrix) -> CResult<Matrix> {
     if a.mtype() == MatrixType::Column && !a.is_hp() {
         if a.row_count() != b.row_count() {
             return Err(exceptions::MatrixDimensions());

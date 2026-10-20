@@ -843,11 +843,12 @@ impl Value {
                         Value::Real(rb) => return Ok(Value::Matrix(hp_matrix::ops::op_mr(op, ma, rb)?)),
                         Value::Vector(vb) if vb.is_hp() => {
                             let cm = Matrix::from_vector(vb)?;
-                            let c = hp_matrix::ops::op_mm(op, ma, &cm)?;
                             if op == BinOp::Mul {
+                                // C# binds `hp_ma * hp_cm` to operator *(HpMatrix, HpColumnMatrix).
+                                let c = hp_matrix::hp_column_matrix::mul(ma, &cm)?;
                                 return Ok(column_result(c));
                             }
-                            return Ok(Value::Matrix(c));
+                            return Ok(Value::Matrix(hp_matrix::ops::op_mm(op, ma, &cm)?));
                         }
                         Value::Matrix(mb) if mb.is_hp() => {
                             return Ok(Value::Matrix(hp_matrix::ops::op_mm(op, ma, mb)?))
@@ -859,8 +860,9 @@ impl Value {
                     Value::Real(rb) => return Ok(Value::Matrix(matrix_op_mr(op, ma, rb)?)),
                     Value::Vector(vb) => {
                         if op == BinOp::Mul {
+                            // C# binds `ma * cm` to operator *(Matrix, ColumnMatrix).
                             let cm = crate::matrix::column_matrix::from_vector(vb)?;
-                            return Ok(column_result(Matrix::mul(ma, &cm)?));
+                            return Ok(column_result(crate::matrix::column_matrix::mul(ma, &cm)?));
                         }
                         let mb = Matrix::from_vector(vb)?;
                         return Ok(Value::Matrix(matrix_op_mm(op, ma, &mb)?));
