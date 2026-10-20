@@ -3,3 +3,4 @@
 /tools/out
 *.pyc
 __pycache__/
+/tools/scratch

@@ -475,6 +475,8 @@ impl ExpressionParser {
                     let h = self.err_html(&msg);
                     self.sb.push_str(&h);
                 }
+                let line = self.cur();
+                self.record_error(line, &msg, self.debug);
             } else {
                 let t = text_span.clone();
                 self.append_error(&t, &ex.message);
@@ -885,8 +887,13 @@ impl ExpressionParser {
                     };
                     let err_text = self.format_error(&err_text, &ex.message);
                     if is_output {
-                        self.sb.push_str(&format!("<span class=\"err\">{}</span>", err_text));
+                        let line = self.cur();
+                        let id = self.err_id(line);
+                        self.sb
+                            .push_str(&format!("<span class=\"err\"{}>{}</span>", id, err_text));
                     }
+                    let line = self.cur();
+                    self.record_error(line, &ex.message, self.debug);
                     self.error_count += 1;
                     if self.error_count == 40 {
                         return Err(MathParserException::new(messages::Too_many_errors));
