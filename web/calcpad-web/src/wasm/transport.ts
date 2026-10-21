@@ -43,6 +43,18 @@ const NEEDS_SERVER: Record<string, string> = {
     'log-level': 'Server logging',
 };
 
+/**
+ * In the dark theme, $Plot/$Map SVGs (transparent, with dark grey text and grid) sit on a white
+ * "paper" card, as they print and as upstream's PNG plots look. Screen only: print is unchanged,
+ * and the light theme has no rule.
+ */
+const PLOT_PAPER = '<style>@media screen{.dark-theme svg.plot,.dark-theme img.plot{background:#fff;padding:6pt;border-radius:6px;box-sizing:content-box}}</style>';
+
+function addPlotPaper(html: string): string {
+    const i = html.toLowerCase().lastIndexOf('</head>');
+    return i < 0 ? html : html.slice(0, i) + PLOT_PAPER + html.slice(i);
+}
+
 /** A file the engine can read (#include, #read): an absolute path and its bytes. */
 export type EngineFile = { path: string; data: Uint8Array };
 
@@ -234,6 +246,7 @@ export function installWasmTransport(): WasmTransport {
             let html = out.html ?? '';
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
+            html = addPlotPaper(html);
             // Worksheet scripts: only listed library files, checked by hash; no network access.
             html = applyScriptPolicy(html, libraries(), window.location.origin);
             if (out.files?.length && transport.onFilesWritten) {
