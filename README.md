@@ -80,7 +80,11 @@ What works in the browser:
 * the editor, preview, unwrapped view, report view, Variables and TOC panels;
 * `#UI` input forms (entries, dropdowns, radio buttons, checkboxes and datagrids): enter
   values in the Input view, the report uses them, Save values writes them into the document;
-* File menu (status bar, right): new, open (picker or drag and drop), save and save as (in
+* Samples (File > Samples, or the link on an empty editor): 100 of CalcpadCE's structural and
+  maths examples (`tools/gen_samples.mjs`, attribution in `public/samples/NOTICE.md`) with
+  groups, search, a design code filter and a preview; Open makes an untitled copy and puts the
+  sample's images and data files into the library;
+* File menu (menu bar, top): new, open (picker or drag and drop), save and save as (in
   place where the browser has the File System Access API, otherwise a download), recent
   worksheets, Ctrl+O / Ctrl+S / Ctrl+Shift+S;
 * a file library for `#include` and `#read`: every opened worksheet and every added or
