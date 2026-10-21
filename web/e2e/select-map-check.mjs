@@ -38,11 +38,14 @@ async function openInput(title) {
     const dontSave = page.locator('.modal-backdrop button', { hasText: /^Don't Save$/ });
     if (await dontSave.waitFor({ timeout: 1000 }).then(() => true, () => false)) await dontSave.click();
 }
-async function formFrame(selector, timeout = 30000) {
+// The frame of the form that has the control (and, when given, an option with that text): a closed
+// tab's frame can linger for a moment.
+async function formFrame(selector, timeout = 30000, optionText = null) {
     for (let t = 0; t < timeout; t += 250) {
         for (const f of page.frames()) {
             if (f === page.mainFrame()) continue;
-            if (await f.$(selector).catch(() => null)) return f;
+            if (!(await f.$(selector).catch(() => null))) continue;
+            if (optionText === null || (await f.$$eval(`${selector} option`, (os, t) => os.some((o) => o.text.trim() === t), optionText).catch(() => false))) return f;
         }
         await page.waitForTimeout(250);
     }
@@ -68,6 +71,23 @@ const allText = async (selector) => {
     return texts;
 };
 const textMatches = (selector, re) => until(async () => (await allText(selector)).find((t) => re.test(t)) ?? null);
+
+
+// What a select shows in the frame that has it (the newest render wins: both buffered frames are asked).
+async function shownOption(selector) {
+    for (const f of page.frames()) {
+        if (f === page.mainFrame()) continue;
+        const t = await f.$eval(selector, (s) => s.options[s.selectedIndex]?.text ?? null).catch(() => null);
+        if (t !== null) return t;
+    }
+    return null;
+}
+async function toReport() {
+    await page.locator('.preview-mode-group .toolbar-btn', { hasText: /^Report$/ }).click({ timeout: 10000 });
+    // Leaving the form asks whether to keep the entered values.
+    const keep = page.locator('.modal-backdrop button', { hasText: /^Save$/ });
+    if (await keep.waitFor({ timeout: 2000 }).then(() => true, () => false)) await keep.click();
+}
 
 // ---- I-Section Properties: a select with eight values per option -------------------------------
 await openInput('I-Section Properties');
@@ -97,13 +117,39 @@ if (f) {
         });
         check(!!rolled, 'a second select (Rolled/Welded, one box) maps the same way');
         check(!!(await until(async () => (await (await formFrame('select[data-target="section"]', 1000)).$eval('select[data-target="section"]', (s) => s.options[s.selectedIndex].text)) === 'IPN 100')), 'both selections survive the next render');
+        // The Report is rendered from the stored values, so it shows the choices too.
+        await toReport();
+        check(!!(await until(async () => (await shownOption('select[data-target="section"]')) === 'IPN 100')), 'Report: "Select section" shows IPN 100, not the first option');
+        check(!!(await until(async () => (await shownOption('select[data-target="rolled"]')) === 'Welded')), 'Report: "Section type" shows Welded');
+        await page.waitForTimeout(2500);
+        await page.screenshot({ path: join(out, 'i-section-report-after.png') });
     }
+}
+await page.evaluate(() => window.calcpadTabs.close(window.calcpadTabs.activeId));
+
+// ---- the catalogue sheet with the drawing: IPE 200 R, as the user chose it -------------------------
+await openInput('I-Section Properties from a Catalogue');
+f = await formFrame('select[data-target="section"]', 30000, 'IPE 200 R');
+check(f != null, 'catalogue sheet, Input tab: the select is shown');
+if (f) {
+    await f.selectOption('select[data-target="section"]', { label: 'IPE 200 R' });
+    const ok = await until(async () => {
+        const live = await formFrame('select[data-target="section"]', 2000);
+        return live && (await boxes(live, 'section'))[0] === '204';
+    });
+    check(!!ok, 'choosing IPE 200 R fills the boxes (h = 204)');
+    check(!!(await until(async () => (await shownOption('select[data-target="section"]')) === 'IPE 200 R')), 'the Input form still shows IPE 200 R');
+    await page.screenshot({ path: join(out, 'catalogue-input-ipe200r.png') });
+    await toReport();
+    check(!!(await until(async () => (await shownOption('select[data-target="section"]')) === 'IPE 200 R')), 'Report: the select reads IPE 200 R, not IPE 100');
+    await page.waitForTimeout(2500);
+    await page.screenshot({ path: join(out, 'catalogue-report-ipe200r.png') });
 }
 await page.evaluate(() => window.calcpadTabs.close(window.calcpadTabs.activeId));
 
 // ---- the Excel variant: one box holding the row number the sheet reads from the workbook ------------
 await openInput('I-Section Properties from an Excel');
-f = await formFrame('select[data-target="section"]');
+f = await formFrame('select[data-target="section"]', 30000, 'IPE 120');
 check(f != null, 'Excel catalogue sheet, Input tab: the select is shown');
 if (f) {
     await f.selectOption('select[data-target="section"]', { label: 'IPE 120' });
@@ -119,6 +165,7 @@ if (f) {
     const keep = page.locator('.modal-backdrop button', { hasText: /^Save$/ });
     if (await keep.waitFor({ timeout: 2000 }).then(() => true, () => false)) await keep.click();
     check(!!(await textMatches('body', /h\s*=\s*120\s*mm/)), 'the Report shows the dimensions read from the workbook for IPE 120 (h = 120 mm)');
+    check(!!(await until(async () => (await shownOption('select[data-target="section"]')) === 'IPE 120')), 'Report: the select reads IPE 120');
     await page.screenshot({ path: join(out, 'i-section-excel-report-after.png') });
 }
 await page.evaluate(() => window.calcpadTabs.close(window.calcpadTabs.activeId));
@@ -137,6 +184,23 @@ if (f) {
         return live && (await boxes(live, 'C'))[0] === other[0];
     });
     check(!!ok, `choosing "${other[1]}" sets the hidden box of #C to ${other[0]} (was ${before[0]})`);
+    await toReport();
+    check(!!(await until(async () => (await shownOption('select[data-target="C"]'))?.trim() === other[1].trim())), `Report: the terrain select reads "${other[1].trim()}"`);
+}
+await page.evaluate(() => window.calcpadTabs.close(window.calcpadTabs.activeId));
+
+// ---- the seismic detailing sheet: a steel class select, hidden box #C ------------------------------
+await openInput('Seismic Detailing (DCM): Beam');
+f = await formFrame('select[data-target="C"]', 120000);
+check(f != null, 'Seismic Detailing (DCM): Beam, Input tab: the select is shown');
+if (f) {
+    const before = await boxes(f, 'C');
+    const options = await f.$$eval('select[data-target="C"] option', (os) => os.map((o) => [o.value, o.text]));
+    const other = options.find(([v]) => v !== before[0]);
+    await f.selectOption('select[data-target="C"]', other[0]);
+    check(!!(await until(async () => { const l = await formFrame('select[data-target="C"]', 2000); return l && (await boxes(l, 'C'))[0] === other[0]; })), `choosing "${other[1].trim()}" sets #C to ${other[0]}`);
+    await toReport();
+    check(!!(await until(async () => (await shownOption('select[data-target="C"]'))?.trim() === other[1].trim())), `Report: the steel class select reads "${other[1].trim()}"`);
 }
 await page.evaluate(() => window.calcpadTabs.close(window.calcpadTabs.activeId));
 

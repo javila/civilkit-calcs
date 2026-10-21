@@ -58,15 +58,11 @@
             state.cell = [sheet.selectedCell[0], sheet.selectedCell[1], sheet.selectedCell[2], sheet.selectedCell[3]];
             state.scroll = [sheet.content.scrollLeft, sheet.content.scrollTop];
         }
-        // The selections of mapped select/radio/checkbox elements are plain HTML, which the
-        // next render would reset, so they ride along with the position.
-        state.maps = maps;
         postState(state);
     }
 
     function restoreState() {
         if (!pending) return;
-        if (pending.maps) restoreMaps();
         if (pending.key && pending.cell)
             restoreCell(sheetsByKey[pending.key], pending.cell, pending.scroll);
         else if (pending.key)
@@ -109,7 +105,13 @@
     // value, in order. Nothing in upstream's pages does this for us, so it is done here; and,
     // as an addition, the change recalculates at once like any other input (one batch, so
     // the page renders once).
-    var maps = (pending && pending.maps) || {};
+    //
+    // The choice itself is stored with the values, as a "map:" entry next to them (the engine
+    // marks the matching option, radio button or tick in every render that applies the entered
+    // values: this form, the Report, the PDF, the Word export):
+    //   map:<target>|select           the chosen option's value
+    //   map:<target>|radio            the checked radio button's value
+    //   map:<target>|checkbox|<n>     "true" or "false" for the n-th checkbox of that target
     var MAP_SOURCES = 'select[name], select[data-target], input[type="radio"][name], input[type="radio"][data-target], ' +
         'input[type="checkbox"][name], input[type="checkbox"][data-target]';
 
@@ -117,55 +119,35 @@
         return el.getAttribute('data-target') || el.getAttribute('name');
     }
 
-    // Stable across renders: the target, the kind, and the position among its siblings.
     var mapSources = [];
     document.querySelectorAll(MAP_SOURCES).forEach(function (el) {
         if (el.classList.contains('calcpad-ui-dropdown') || !targetOf(el)) return;
         var kind = el.tagName === 'SELECT' ? 'select' : el.type;
         var n = 0;
         mapSources.forEach(function (o) { if (o.target === targetOf(el) && o.kind === kind) n++; });
-        mapSources.push({ el: el, target: targetOf(el), kind: kind, key: targetOf(el) + '|' + kind + '|' + n });
+        mapSources.push({ el: el, target: targetOf(el), kind: kind, n: n });
     });
 
-    function mapValue(source) {
-        var el = source.el;
-        if (source.kind === 'select') return el.value;
-        if (source.kind === 'checkbox') return el.checked ? el.value : '0';
+    // The value the text boxes take, and the entry that records the choice.
+    function mapChoice(source) {
+        var el = source.el, t = source.target;
+        if (source.kind === 'select') return { value: el.value, key: 'map:' + t + '|select', record: el.value };
+        if (source.kind === 'checkbox')
+            return { value: el.checked ? el.value : '0', key: 'map:' + t + '|checkbox|' + source.n, record: el.checked ? 'true' : 'false' };
         // A radio group: the checked one speaks.
         var checked = null;
-        mapSources.forEach(function (o) { if (o.kind === 'radio' && o.target === source.target && o.el.checked) checked = o.el; });
-        return checked ? checked.value : null;
-    }
-
-    function mapRemember(source) {
-        if (source.kind === 'select') maps[source.key] = source.el.value;
-        else if (source.kind === 'checkbox') maps[source.key] = source.el.checked;
-        else maps[source.target + '|radio'] = mapValue(source);
-    }
-
-    function restoreMaps() {
-        mapSources.forEach(function (source) {
-            var el = source.el, saved = maps[source.key];
-            if (source.kind === 'select') {
-                if (saved === undefined) return;
-                for (var i = 0; i < el.options.length; i++)
-                    if (el.options[i].value === saved) { el.selectedIndex = i; break; }
-            } else if (source.kind === 'checkbox') {
-                if (typeof saved === 'boolean') el.checked = saved;
-            } else {
-                var chosen = maps[source.target + '|radio'];
-                if (chosen !== undefined && chosen !== null) el.checked = el.value === chosen;
-            }
-        });
+        mapSources.forEach(function (o) { if (o.kind === 'radio' && o.target === t && o.el.checked) checked = o.el; });
+        return { value: checked ? checked.value : null, key: 'map:' + t + '|radio', record: checked ? checked.value : null };
     }
 
     function fillMapTarget(source) {
-        var value = mapValue(source);
-        mapRemember(source);
+        var choice = mapChoice(source);
         var container = document.getElementById(source.target);
         var changes = [];
-        if (value !== null && container) {
-            var parts = value.split(';');
+        if (choice.record !== null)
+            changes.push({ varName: choice.key, newValue: choice.record, sourceLine: 0 });
+        if (choice.value !== null && container) {
+            var parts = choice.value.split(';');
             var boxes = container.querySelectorAll('input.calcpad-ui-input');
             for (var i = 0; i < boxes.length && i < parts.length; i++) {
                 var box = boxes[i], part = parts[i].trim();
@@ -272,8 +254,6 @@
 
     hydrateGrids(document.querySelectorAll('.calcpad-ui-datagrid'));
     restoreState();
-    // The host hands a position back once; keep the mapped selections alive for the next render.
-    if (Object.keys(maps).length) saveState();
 
     function hydrateGrids(grids) {
         if (!grids.length) return;

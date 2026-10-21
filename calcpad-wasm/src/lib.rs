@@ -32,6 +32,8 @@ use calcpad_core::CResult;
 use serde_json::Value as Json;
 use wasm_bindgen::prelude::*;
 
+pub mod mapped_choices;
+
 const TEMPLATE: &str = include_str!("../assets/template.html");
 /// `UiPreviewScript.GetScriptTag()` (Calcpad.Web/backend, MIT): wires the input form.
 const UI_PREVIEW_SCRIPT: &str = include_str!("../assets/ui-preview-script.html");
@@ -215,6 +217,11 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             f.remove(key);
         }
     });
+    // A choice made in a select, radio button or checkbox of the input form shows in every render
+    // that applies the entered values (mapped_choices.rs).
+    if let Some(ov) = &r.ui_overrides {
+        html = mapped_choices::mark_mapped_choices(&html, ov);
+    }
     if unwrap {
         html = process_data_text_links(&html);
     }
@@ -905,6 +912,18 @@ mod tests {
             ),
             "x <a href=\"#line-12\" data-text=\"12\">12</a> <a class=\"n\" href=\"#0\" data-text=\"3\">"
         );
+    }
+
+    #[test]
+    fn a_stored_choice_marks_the_option_in_the_rendered_page() {
+        let content = "'<select data-target=\"s\"><option value=\"1\">one</option><option value=\"2\">two</option></select>\n#UI '<p id=\"s\">'a = 1'</p>";
+        let req = serde_json::json!({ "content": content, "uiOverrides": { "a:1": "2", "map:s|select": "2" } });
+        let v: Json = serde_json::from_str(&convert(&req.to_string(), false)).unwrap();
+        assert!(v["html"].as_str().unwrap().contains("<option value=\"2\" selected>"));
+        // Without the stored choice (the Preview ignores entered values) nothing is marked.
+        let req = serde_json::json!({ "content": content });
+        let v: Json = serde_json::from_str(&convert(&req.to_string(), false)).unwrap();
+        assert!(!v["html"].as_str().unwrap().contains(" selected"));
     }
 
     #[test]

@@ -235,11 +235,15 @@ these sheets), and as an addition the change recalculates at once: the new value
 host in one `uiValuesChange` message (one render), through the existing postMessage channel, so
 the sandbox and CSP are unchanged. A part that is not a number (the field's own rule) is
 skipped. A checkbox gives its `value` when ticked and `0` when not (the documentation does not
-say what unticked means). The chosen option, radio button and tick are plain HTML that a
-render would reset, so they ride along in the frame state the host already hands back
-(`__calcpadUiPosition`). Only the Input view maps (the Preview is static, and the Report shows
-the values the form saved); `e2e/select-map-check.mjs` clicks through it on the I-section,
-catalogue, Wind Load, radio and checkbox cases.
+say what unticked means). The choice itself is stored with the entered values as a `map:` entry
+(`map:<target>|select` the chosen option's value, `map:<target>|radio`, `map:<target>|checkbox|<n>`
+true or false), so it is saved in the document's `uiOverrides` comment like them, and the engine
+(`calcpad-wasm/src/mapped_choices.rs`) marks the matching `selected` / `checked` in every render
+that applies the entered values: the input form, the Report, the PDF and the Word export's HTML.
+The Preview ignores entered values by design, so it shows the defaults unless Settings > Apply
+#UI Values in Preview is on. Only the Input view maps; `e2e/select-map-check.mjs` clicks
+through it on the I-section, catalogue (IPE 200 R in the Report), Excel catalogue, Wind Load,
+seismic detailing, radio and checkbox cases.
 
 ## Not deviations (scope and known differences)
 
