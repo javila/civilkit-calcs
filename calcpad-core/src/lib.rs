@@ -37,6 +37,7 @@ pub mod markdig;
 pub mod math_parser_exception;
 pub mod matrix;
 pub mod messages;
+pub mod model_bindings;
 pub mod netfmt;
 pub mod openxml;
 pub mod output;

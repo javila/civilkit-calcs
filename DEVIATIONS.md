@@ -92,6 +92,15 @@ The print frame has no scripts at all: the page is stripped of script, frame, ob
 embed elements, `on*` attributes and `javascript:` URLs, and the frame is sandboxed with
 `allow-same-origin allow-modals` (`print.ts`).
 
+## D4. Model binding comments are marked in the browser output (addition)
+
+A comment line `'<!--civilkit: bind <variable> = <path> [@ <selector>] -->` before an input
+is a model binding (docs/model-bindings.md). The browser build (calcpad-wasm) adds a "model"
+tag with the binding path at the end of the bound input's line, or the error for a malformed
+binding (`calcpad_core::model_bindings`). Upstream passes the comment through unseen, and so
+does the CLI here, so CLI output and the stub comparison are unchanged. No model is connected
+yet: the typed values are used.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

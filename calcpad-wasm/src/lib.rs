@@ -351,7 +351,12 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
         parser.allow_data_write = r.write;
         parser.parse(&output_text, true);
         errors.extend(parser.errors_list.iter().cloned());
-        parser.html_result.clone()
+        // Model bindings (docs/model-bindings.md): mark each bound input. No model is connected
+        // in the browser yet, so the typed values are used.
+        calcpad_core::model_bindings::annotate_html(
+            &parser.html_result,
+            &calcpad_core::model_bindings::parse(&output_text),
+        )
     };
     (wrap_html_result(&html_result, &r.theme, enable_ui), errors)
 }
@@ -723,6 +728,17 @@ mod tests {
         assert!(html.contains("<var>b</var>"));
         assert!(!html.contains("{{CONTENT}}"));
         assert_eq!(v["errors"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn marks_model_bound_inputs() {
+        let req = serde_json::json!({
+            "content": "'<!--civilkit: bind N_d = member.N_c @ ULS envelope -->\n'Axial -'N_d = ? {150}kN\n"
+        });
+        let out = convert(&req.to_string(), false);
+        let v: Json = serde_json::from_str(&out).unwrap();
+        let html = v["html"].as_str().unwrap();
+        assert!(html.contains("data-bind-path=\"member.N_c\""), "{html}");
     }
 
     #[test]
