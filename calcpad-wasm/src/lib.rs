@@ -3,20 +3,25 @@
 //! [`convert`] does what `POST /api/calcpad/convert` of Calcpad.Server does
 //! (Calcpad.Web/backend: CalcpadController.ConvertToHtml and CalcpadService.Convert):
 //! macro expansion, the expression pass, the error list and the HTML template. `#include`
-//! files come from an in-memory map that the page fills with [`set_file`].
+//! and `#read` files come from an in-memory map that the page fills with [`set_file`] and
+//! [`set_file_bytes`]; files that `#write`/`#append` produce go into the same map and are
+//! returned with the result, for the page to save.
 //!
-//! Differences from the server, all because a piece is not ported:
+//! Differences from the server:
 //! * the code view (`unwrap` / macro errors) is not syntax highlighted (the server's
-//!   fallback when Calcpad.Highlighter fails);
-//! * the bundled fonts (`BundledFonts.GetFontFaceStyleTag`) are not compiled in: the page
-//!   passes the same `<style>` markup as `headMarkup`, and it is inserted before `</head>`;
-//! * `#UI`, `#read`/`#write` report "not supported" (as in calcpad-core).
+//!   fallback when Calcpad.Highlighter fails), since Calcpad.Highlighter is not ported;
+//! * the bundled fonts (`BundledFonts`) are not compiled in: the page passes the same
+//!   `<style>`/`<script>` markup once with [`set_report_head`];
+//! * the datagrid libraries (`BundledUiAssets`) are left as the marker [`UI_ASSETS_MARKER`],
+//!   which the page replaces with the libraries, so they load only when a grid is shown.
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::rc::Rc;
 
 use calcpad_core::calcpad_error::{CalcpadError, CalcpadErrorSource};
+use calcpad_core::data_files::{normalize_join, posix_directory_name, DataFiles};
 use calcpad_core::netfmt::html_encode;
-use calcpad_core::parsers::expression_parser::ExpressionParser;
+use calcpad_core::parsers::expression_parser::{base64_encode, ExpressionParser};
 use calcpad_core::parsers::macro_parser::{FileProvider, MacroParser};
 use calcpad_core::settings::{ColorScales, LightDirections, MathSettings, PlotSettings};
 use calcpad_core::validator::is_keyword;
@@ -25,9 +30,15 @@ use serde_json::Value as Json;
 use wasm_bindgen::prelude::*;
 
 const TEMPLATE: &str = include_str!("../assets/template.html");
+/// `UiPreviewScript.GetScriptTag()` (Calcpad.Web/backend, MIT): wires the input form.
+const UI_PREVIEW_SCRIPT: &str = include_str!("../assets/ui-preview-script.html");
+/// Stands where `BundledUiAssets.GetHeadMarkup()` goes; the page swaps the libraries in.
+pub const UI_ASSETS_MARKER: &str = "<!--calcpad-ui-assets-->";
 
 thread_local! {
-    static FILES: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+    static FILES: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
+    static WRITTEN: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
+    static REPORT_HEAD: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 #[wasm_bindgen]
@@ -47,10 +58,22 @@ pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Adds or replaces a file that `#include` can read (forward slashes, absolute paths).
+/// Adds or replaces a text file that `#include` and `#read` can read (forward slashes).
 #[wasm_bindgen]
 pub fn set_file(path: &str, content: &str) {
-    FILES.with(|f| f.borrow_mut().insert(normalize(path), content.to_string()));
+    FILES.with(|f| f.borrow_mut().insert(normalize(path), content.as_bytes().to_vec()));
+}
+
+/// Adds or replaces a binary file (an Excel workbook for `#read`).
+#[wasm_bindgen]
+pub fn set_file_bytes(path: &str, content: &[u8]) {
+    FILES.with(|f| f.borrow_mut().insert(normalize(path), content.to_vec()));
+}
+
+/// The markup every page carries before `</head>`: the report fonts (`BundledFonts`).
+#[wasm_bindgen]
+pub fn set_report_head(markup: &str) {
+    REPORT_HEAD.with(|h| *h.borrow_mut() = markup.to_string());
 }
 
 #[wasm_bindgen]
@@ -76,10 +99,17 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
     if r.content.trim().is_empty() {
         return status_json(400, "Content is required");
     }
+    WRITTEN.with(|w| w.borrow_mut().clear());
     let (mut html, errors) = convert_inner(&r, unwrap || r.force_unwrapped_code);
     if unwrap {
         html = process_data_text_links(&html);
     }
+    let files: Vec<Json> = WRITTEN.with(|w| {
+        w.borrow_mut()
+            .drain(..)
+            .map(|(path, data)| serde_json::json!({ "path": path, "data": base64_encode(&data) }))
+            .collect()
+    });
     let errors_json: Vec<Json> = errors
         .iter()
         .map(|e| {
@@ -94,7 +124,7 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             })
         })
         .collect();
-    serde_json::json!({ "html": html, "errors": errors_json }).to_string()
+    serde_json::json!({ "html": html, "errors": errors_json, "files": files }).to_string()
 }
 
 fn status_json(status: u16, error: &str) -> String {
@@ -113,7 +143,8 @@ struct ConvertRequest {
     enable_ui: bool,
     include_line_anchors: Option<bool>,
     hide_error_lines: Option<bool>,
-    head_markup: String,
+    ui_overrides: Option<HashMap<String, String>>,
+    write: bool,
 }
 
 /// Case insensitive property lookup, as ASP.NET Core binds JSON.
@@ -247,7 +278,12 @@ impl ConvertRequest {
             enable_ui: prop_bool(req, "enableUi").unwrap_or(false),
             include_line_anchors: prop_bool(req, "includeLineAnchors"),
             hide_error_lines: prop_bool(req, "hideErrorLines"),
-            head_markup: prop_str(req, "headMarkup").unwrap_or_default(),
+            ui_overrides: prop(req, "uiOverrides").and_then(Json::as_object).map(|o| {
+                o.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                    .collect()
+            }),
+            write: prop_bool(req, "write").unwrap_or(false),
         }
     }
 }
@@ -267,11 +303,15 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
         parser.is_us = r.is_us;
         parser.plot_settings = r.plot.clone();
         parser.debug = debug;
+        parser.source_file_path = r.source_file_path.clone();
+        parser.data_files = Rc::new(MemDataFiles);
         parser
     };
     let html_result = if has_macro_errors || force_unwrapped_code {
         if force_unwrapped_code && !has_macro_errors {
+            // This pass only collects error lines, so it must never repeat the writes.
             let mut silent = make_parser(true);
+            silent.allow_data_write = false;
             silent.parse(&output_text, true);
             errors.extend(silent.errors_list.iter().cloned());
         }
@@ -280,12 +320,14 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
         let mut parser = make_parser(r.include_line_anchors.unwrap_or(!r.for_print));
         parser.for_print = r.for_print;
         parser.enable_ui = enable_ui;
+        parser.ui_overrides = r.ui_overrides.clone();
         parser.show_error_lines = show_error_lines;
+        parser.allow_data_write = r.write;
         parser.parse(&output_text, true);
         errors.extend(parser.errors_list.iter().cloned());
         parser.html_result.clone()
     };
-    (wrap_html_result(&html_result, &r.theme, &r.head_markup), errors)
+    (wrap_html_result(&html_result, &r.theme, enable_ui), errors)
 }
 
 /// `HttpUtility.HtmlAttributeEncode`
@@ -444,16 +486,27 @@ fn convert_code_to_html(code: &str, error_list: &[CalcpadError]) -> String {
 }
 
 /// `CalcpadService.WrapHtmlResult`
-fn wrap_html_result(html_content: &str, theme: &str, head_markup: &str) -> String {
+fn wrap_html_result(html_content: &str, theme: &str, enable_ui: bool) -> String {
     let theme_class = if theme.eq_ignore_ascii_case("dark") {
         " class=\"dark-theme\""
     } else {
         ""
     };
     let mut template = TEMPLATE.replace("<body>", &format!("<body{}>", theme_class));
+    let mut head_markup = REPORT_HEAD.with(|h| h.borrow().clone());
+    // The datagrid libraries are large, so they only go in when a grid is present.
+    if enable_ui && html_content.contains("calcpad-ui-datagrid") {
+        head_markup.push_str(UI_ASSETS_MARKER);
+    }
     if !head_markup.is_empty() {
         if let Some(i) = template.to_ascii_lowercase().find("</head>") {
-            template.insert_str(i, head_markup);
+            template.insert_str(i, &head_markup);
+        }
+    }
+    // Report and print output carry no controls, so they get no event script.
+    if enable_ui {
+        if let Some(i) = template.to_ascii_lowercase().rfind("</body>") {
+            template.insert_str(i, UI_PREVIEW_SCRIPT);
         }
     }
     template.replace("{{CONTENT}}", html_content)
@@ -582,9 +635,50 @@ impl FileProvider for MemFiles {
     fn include(&self, path: &str, _fields: Option<VecDeque<String>>) -> CResult<String> {
         let content = FILES.with(|f| f.borrow().get(&normalize(path)).cloned());
         Ok(match content {
-            Some(c) => process_included_content(&c),
+            Some(c) => {
+                let text = String::from_utf8_lossy(&c);
+                process_included_content(text.strip_prefix('\u{FEFF}').unwrap_or(&text))
+            }
             None => format!("' Error reading file: {} - file not found", path),
         })
+    }
+}
+
+/// `#read`/`#write`/`#append` over the in-memory files; writes are also kept in WRITTEN.
+struct MemDataFiles;
+
+impl DataFiles for MemDataFiles {
+    fn full_path(&self, path: &str, base_dir: Option<&str>) -> String {
+        normalize_join(path, base_dir)
+    }
+
+    fn directory_name(&self, path: &str) -> Option<String> {
+        posix_directory_name(path)
+    }
+
+    fn read(&self, full_path: &str) -> Option<Vec<u8>> {
+        FILES.with(|f| f.borrow().get(&normalize(full_path)).cloned())
+    }
+
+    /// The root always exists; a folder exists while it holds a file.
+    fn dir_exists(&self, dir: &str) -> bool {
+        let dir = normalize(dir);
+        if dir == "/" {
+            return true;
+        }
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        FILES.with(|f| f.borrow().keys().any(|k| k.starts_with(&prefix)))
+    }
+
+    fn write(&self, full_path: &str, data: &[u8]) -> Result<(), String> {
+        let path = normalize(full_path);
+        FILES.with(|f| f.borrow_mut().insert(path.clone(), data.to_vec()));
+        WRITTEN.with(|w| {
+            let mut w = w.borrow_mut();
+            w.retain(|(p, _)| *p != path);
+            w.push((path, data.to_vec()));
+        });
+        Ok(())
     }
 }
 
@@ -645,5 +739,50 @@ mod tests {
     fn empty_content_is_a_bad_request() {
         let v: Json = serde_json::from_str(&convert(r#"{"content":"  "}"#, false)).unwrap();
         assert_eq!(v["status"], 400);
+    }
+
+    #[test]
+    fn reads_and_writes_data_files_in_memory() {
+        set_file("/data.csv", "1,2\n3,4\n");
+        let out = convert(
+            r##"{"content":"#read M from data.csv\nM\n#write M to out.csv","write":true}"##,
+            false,
+        );
+        let v: Json = serde_json::from_str(&out).unwrap();
+        let html = v["html"].as_str().unwrap();
+        assert!(html.contains("was successfully read from"), "{}", html);
+        assert!(html.contains("was successfully written to"), "{}", html);
+        assert_eq!(v["files"][0]["path"], "/out.csv");
+        assert_eq!(v["files"][0]["data"], base64_encode(b"1,2\n3,4\n"));
+        // Without `write` the file is reported but not produced.
+        let out = convert(r##"{"content":"M = [1; 2]\n#write M to b.csv"}"##, false);
+        let v: Json = serde_json::from_str(&out).unwrap();
+        assert!(v["html"].as_str().unwrap().contains("will be written to"));
+        assert_eq!(v["files"].as_array().unwrap().len(), 0);
+        clear_files();
+    }
+
+    #[test]
+    fn input_mode_gets_the_script_and_the_grid_marker() {
+        let out = convert(
+            r##"{"content":"#UI v = [1; 2]\n#UI L = 3m","enableUi":true,"uiOverrides":{"L":"5"}}"##,
+            false,
+        );
+        let v: Json = serde_json::from_str(&out).unwrap();
+        let html = v["html"].as_str().unwrap();
+        assert!(html.contains("calcpad-ui-datagrid"));
+        assert!(html.contains("value=\"5\""));
+        assert!(html.contains(UI_ASSETS_MARKER));
+        assert!(html.contains("uiValueChange"));
+        // A report never carries controls, the event script or the libraries.
+        let out = convert(
+            r##"{"content":"#UI v = [1; 2]","enableUi":true,"forPrint":true}"##,
+            false,
+        );
+        let html = serde_json::from_str::<Json>(&out).unwrap()["html"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(!html.contains(UI_ASSETS_MARKER) && !html.contains("uiValueChange"));
     }
 }
