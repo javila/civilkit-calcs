@@ -126,6 +126,11 @@ class EngineWorker {
             }
             signal?.addEventListener('abort', () => {
                 const reason = signal.reason ?? new DOMException('Aborted', 'AbortError');
+                // The API client gives each request a 60 s timeout, meant for a server. A render in
+                // the page has no network to wait on, and a heavy sheet (Soil Stress and
+                // Deformations takes about a minute) must be allowed to finish; a newer request or
+                // an edit still supersedes it.
+                if ((reason as { name?: string })?.name === 'TimeoutError') return;
                 if (this.running === job) {
                     this.running = null;
                     this.replaceWorker();
