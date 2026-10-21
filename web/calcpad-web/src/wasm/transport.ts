@@ -10,12 +10,15 @@
 //   symbol-at-position, prettify            editor runs without diagnostics, semantic
 //                                           highlighting, go-to-definition and prettify
 //   snippets                                an empty list (the library is in the Highlighter)
-//   pdf, docx, cpdz, portable, log-level    501: these need the server (Chromium for PDF,
-//                                           OpenXml for Word, the file system)
+//   docx, cpdz, portable, log-level, pdf    501: these need Calcpad.Server. PDF is printed by
+//                                           the browser instead (message-bridge.ts)
 
 import { reportHeadMarkup } from './report-fonts';
+import { uiAssetsMarkup } from './ui-assets';
 
 const API_PREFIX = '/api/calcpad/';
+/** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
+const UI_ASSETS_MARKER = '<!--calcpad-ui-assets-->';
 
 const NOT_PORTED: Record<string, string> = {
     lint: 'Linting',
@@ -26,10 +29,10 @@ const NOT_PORTED: Record<string, string> = {
 };
 
 const NEEDS_SERVER: Record<string, string> = {
-    pdf: 'PDF export',
-    'pdf/health': 'PDF export',
-    'pdf/browser': 'PDF export',
-    'pdf/browser/install': 'PDF export',
+    pdf: 'Server PDF export',
+    'pdf/health': 'Server PDF export',
+    'pdf/browser': 'Server PDF export',
+    'pdf/browser/install': 'Server PDF export',
     docx: 'Word export',
     'cpdz/decode': 'Compiled .cpdz worksheets',
     'cpdz/encode': 'Compiled .cpdz worksheets',
@@ -37,6 +40,9 @@ const NEEDS_SERVER: Record<string, string> = {
     'portable/package': 'Portable worksheets',
     'log-level': 'Server logging',
 };
+
+/** A file the engine can read (#include, #read): an absolute path and its bytes. */
+export type EngineFile = { path: string; data: Uint8Array };
 
 type Job = {
     id: number;
@@ -55,7 +61,8 @@ class EngineWorker {
     private seq = 0;
     private queue: Job[] = [];
     private running: Job | null = null;
-    private files: Record<string, string> = {};
+    private files: EngineFile[] = [];
+    private head = '';
 
     constructor(private readonly base: string) {}
 
@@ -78,7 +85,8 @@ class EngineWorker {
             this.pump();
         };
         this.worker = w;
-        // A fresh worker has no #include files yet.
+        // A fresh worker has neither the report head nor the library yet (id 0: no reply wanted).
+        w.postMessage({ id: 0, base: this.base, kind: 'head', markup: this.head });
         w.postMessage({ id: 0, base: this.base, kind: 'files', files: this.files });
         return w;
     }
@@ -126,9 +134,15 @@ class EngineWorker {
         return this.post({ kind: 'convert', body, unwrap }, signal);
     }
 
-    setFiles(files: Record<string, string>): Promise<string> {
-        this.files = { ...files };
-        return this.post({ kind: 'files', files: this.files });
+    setHead(markup: string): void {
+        if (markup === this.head) return;
+        this.head = markup;
+        if (this.worker) void this.post({ kind: 'head', markup }).catch(() => {});
+    }
+
+    setFiles(files: EngineFile[]): Promise<string> {
+        this.files = files;
+        return this.post({ kind: 'files', files });
     }
 }
 
@@ -139,11 +153,34 @@ function notAvailable(what: string, reason: string): Response {
     });
 }
 
+function fromBase64(s: string): Uint8Array {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+export interface WasmTransport {
+    /** Replaces the files #include and #read can see. */
+    setFiles(files: EngineFile[]): Promise<void>;
+    /** Called with the files a render's #write/#append produced. */
+    onFilesWritten: ((files: EngineFile[]) => void) | null;
+}
+
 /** Installs the adapter. Call once, before the editor makes its first request. */
-export function installWasmTransport(): { setIncludeFiles(files: Record<string, string>): Promise<void> } {
-    const base = import.meta.env.BASE_URL || '/';
+export function installWasmTransport(): WasmTransport {
+    // Absolute, so the worker (whose own URL is under assets/) resolves the engine correctly
+    // when the app is served from a sub folder.
+    const base = new URL(import.meta.env.BASE_URL || './', document.baseURI).href;
     const engine = new EngineWorker(base);
     const nativeFetch = window.fetch.bind(window);
+    const head = reportHeadMarkup(base).then(m => engine.setHead(m));
+    const transport: WasmTransport = {
+        async setFiles(files) {
+            await engine.setFiles(files);
+        },
+        onFilesWritten: null,
+    };
 
     const handle = async (url: URL, method: string, body: string | null, signal?: AbortSignal | null): Promise<Response> => {
         const endpoint = url.pathname.slice(API_PREFIX.length).replace(/\/+$/, '');
@@ -152,19 +189,20 @@ export function installWasmTransport(): { setIncludeFiles(files: Record<string, 
         // error, so the Insert panel does not poll for it every few seconds.
         if (endpoint === 'snippets') return Response.json({ count: 0, snippets: [] });
         if (endpoint === 'convert' && method === 'POST') {
-            let request: Record<string, unknown>;
-            try {
-                request = body ? JSON.parse(body) : {};
-            } catch {
-                return new Response('Invalid JSON', { status: 400 });
-            }
-            request.headMarkup = await reportHeadMarkup(base);
+            if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
+            await head;
             const unwrap = url.searchParams.get('unwrap') === 'true';
-            const out = JSON.parse(await engine.convert(JSON.stringify(request), unwrap, signal)) as {
+            const out = JSON.parse(await engine.convert(body, unwrap, signal)) as {
                 html?: string; errors?: unknown[]; status?: number; error?: string;
+                files?: { path: string; data: string }[];
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
-            return new Response(out.html ?? '', {
+            let html = out.html ?? '';
+            if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
+            if (out.files?.length && transport.onFilesWritten) {
+                transport.onFilesWritten(out.files.map(f => ({ path: f.path, data: fromBase64(f.data) })));
+            }
+            return new Response(html, {
                 status: 200,
                 headers: {
                     'Content-Type': 'text/html; charset=utf-8',
@@ -190,9 +228,5 @@ export function installWasmTransport(): { setIncludeFiles(files: Record<string, 
         return handle(url, method, body, init?.signal ?? req?.signal);
     };
 
-    return {
-        async setIncludeFiles(files) {
-            await engine.setFiles(files);
-        },
-    };
+    return transport;
 }

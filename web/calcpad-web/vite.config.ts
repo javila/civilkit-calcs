@@ -8,6 +8,8 @@ import path from 'path';
 // still overrides the dev proxy target when developers point at an already-
 // running Calcpad.Server.
 export default defineConfig(() => ({
+    // calcpad-rs: relative asset URLs, so the static build runs from any folder of any host.
+    base: './',
     plugins: [vue()],
     define: {
     'import.meta.env.VITE_APP_VERSION': JSON.stringify(resolveVersion()),

@@ -2,9 +2,10 @@ import { BaseMessageBridge, type ExportRequest } from 'calcpad-frontend/services
 import { getDefaultSettings } from 'calcpad-frontend/types/settings';
 import type { CalcpadSettings } from 'calcpad-frontend/types/settings';
 import type { ExportVariant } from 'calcpad-frontend/types/api';
-import { mimeFromExtension, bytesToBase64, pdfResponseError } from 'calcpad-frontend';
+import { mimeFromExtension, bytesToBase64 } from 'calcpad-frontend';
 import { setAppTheme, coerceAppTheme } from '../editor/app-theme';
 import { serverOnlyMessage } from '../wasm/server-only';
+import { printHtml } from '../wasm/print';
 
 const SETTINGS_KEY = 'calcpad-settings';
 
@@ -122,9 +123,9 @@ export class MessageBridge extends BaseMessageBridge {
     }
 
     /**
-     * Render, then hand the HTML to the server's PDF endpoint. `/convert` has no PDF output
-     * of its own - it ignores `outputFormat` and always answers with HTML - so asking it for
-     * one produced a `.pdf` full of markup.
+     * calcpad-rs: render, then print the HTML from the browser, whose print dialog saves it
+     * as a PDF (wasm/print.ts). There is no server PDF endpoint, and nothing is returned to
+     * save, since the dialog does that.
      */
     protected async generatePdfBytes(
         content: string,
@@ -135,14 +136,8 @@ export class MessageBridge extends BaseMessageBridge {
         const html = await this.renderForExport(content, apiSettings, sourceFilePath, variant);
         if (html == null) return null;
 
-        const response = await fetch(`${this.apiClient.getBaseUrl()}/api/calcpad/pdf`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...this.apiClient.authHeaders() },
-            body: JSON.stringify({ html, options: this.getEffectivePdfOptions(content) }),
-            signal: AbortSignal.timeout(60000),
-        });
-        if (!response.ok) throw await pdfResponseError(response);
-        return await response.arrayBuffer();
+        await printHtml(html, this.getEffectivePdfOptions(content));
+        return null;
     }
 
     private loadSettings(): CalcpadSettings {
