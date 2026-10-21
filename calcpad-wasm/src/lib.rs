@@ -172,6 +172,7 @@ impl ConvertRequest {
     fn from_json(req: &Json) -> ConvertRequest {
         let mut math = MathSettings::default();
         let mut plot = PlotSettings::default();
+        plot.vector_graphics = true;
         // Calcpad.Core Settings: IsUs defaults to true.
         let mut is_us = true;
         if let Some(settings) = prop(req, "settings") {
@@ -223,9 +224,8 @@ impl ConvertRequest {
                 if let Some(v) = prop_str(p, "imageUri") {
                     plot.image_uri = v;
                 }
-                if let Some(v) = prop_bool(p, "vectorGraphics") {
-                    plot.vector_graphics = v;
-                }
+                // Raster $Plot output needs SkiaSharp, which is not ported, so the browser always
+                // draws vector (SVG) plots and ignores the editor's "Vector graphics" setting.
                 if let Some(v) = prop(p, "colorScale") {
                     let parsed = match v {
                         Json::Number(n) => n.as_u64().and_then(|i| ColorScales::ALL.get(i as usize).copied()),
