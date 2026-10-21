@@ -146,3 +146,42 @@ Result: the 30 worksheet sample (24 Examples, 6 Tests) renders through the UI in
 5 s each (`eigen functions.cpd` is the slow one); 28 match the stubs, 2 differ by one
 trailing empty paragraph (server versus CLI input, see DEVIATIONS.md). Network capture:
 only GETs of static files from the page's own origin, no `/api/` request.
+
+## Phase 4: input forms, data files and the standalone browser app
+
+| Upstream | C# lines | calcpad-rs | Rust/TS lines |
+|---|---:|---|---:|
+| Parsers/ExpressionParser/ExpressionParser.UI.cs | 854 | parsers/expression_parser/ui.rs | 1041 |
+| UiDto.cs, DirectiveDto.cs | 242 | ui_dto.rs (System.Text.Json rules emulated with serde_json) | 325 |
+| UiSyntax.cs | 202 | ui_syntax.rs | 235 |
+| Parsers/MathParser/MathParser.UI.cs | 71 | parsers/math_parser/ui.rs | 86 |
+| ExpressionParser.ReadWriteOptions.cs, .DataExchange.cs, .Portable.cs, the #read/#write keywords | 580 | parsers/expression_parser/data_exchange.rs | 848 |
+| MathParser.cs GetMatrix, SetMatrix, SetVector, ParseValue | 260 | parsers/math_parser/data.rs | 295 |
+| Calcpad.OpenXml/ExcelData.cs (on the DocumentFormat.OpenXml SDK) | 311 | openxml/excel_data.rs, xml.rs, zip.rs (deflate by miniz_oxide) | 1085 |
+| System.IO | n/a | data_files.rs (DataFiles: disk natively, the page's files in wasm) | 180 |
+| Calcpad.Web/backend UiPreviewScript.cs, BundledUiAssets.cs, UiAssets/ | 546 + js/css | calcpad-wasm/assets/ui-preview-script.html (extracted), web/.../wasm/ui-assets.ts, public/ui-assets (copied, MIT) | 41 |
+| (none: upstream's web build has no file handling) | | web/.../wasm/web-files.ts, library.ts, print.ts, setup.ts | 644 |
+
+Tests: `calcpad-core/tests/ui_directive.rs` transcribes UiDirectiveTests.cs (91 cases) and
+`calcpad-core/tests/data_exchange.rs` WriteDirectiveTests.cs, DataExchangeNameTests.cs and
+ReadDirectiveEmbeddingTests.cs (28 cases); both passed first time and were checked by
+mutation (a broken checkbox rule and a broken separator each fail a test). Two expectations
+in my own unit tests were wrong and were corrected to upstream's behaviour: a whole-sheet
+Excel read starts at A1, and a sheet name with a space is an "Invalid syntax" line.
+
+Browser findings:
+
+* The preview is double buffered, so a test reading the first frame with the marker can
+  read the stale one; the e2e check now looks for the expected value in every frame.
+* Leaving the Input view after entering values asks whether to save them (upstream's
+  prompt); the check answers it.
+* Under the default write mode (Report Only) the report renders with `write`, often, so a
+  written file downloads only when its content changed.
+* Vite's default base ("/") only works at a site root; the build uses "./" and the worker
+  gets an absolute base URL, and the e2e check serves the build from "/calcs/" as well.
+
+Machine load: the HP comparison classes take about 13 s of CPU per test (the same before and
+after this phase, measured on the old and new binaries), and with other projects building
+the load average reached 285 on 8 cores, so one run took about two hours.
+`tools/run_tests.py` now puts a time limit on the suite and stops every test process when it
+passes.

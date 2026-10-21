@@ -62,10 +62,24 @@ so the output is unchanged for every terminating case.
 
 These are not deliberate behaviour changes, but they can make output differ:
 
-* **Out of scope after phase 2** (`#UI` forms, `#read`/`#write`/`#append`, Word/OpenXml,
-  raster `$Plot` output with `VectorGraphics=false` or `ImagePath` set): the engine reports
-  `... is not supported by calcpad-rs yet ...` as an ordinary expression error and records
-  the feature so the harness classifies the worksheet as OUT-OF-SCOPE.
+* **Out of scope** (Word/OpenXml export, raster `$Plot` output with `VectorGraphics=false`
+  or `ImagePath` set): the engine reports `... is not supported by calcpad-rs yet ...` as an
+  ordinary expression error and records the feature so the harness classifies the worksheet
+  as OUT-OF-SCOPE. `#ProjectPath`/`#LibraryPath` roots are accepted and ignored.
+* **`#write` line endings:** CSV rows end with `\n` (.NET on Linux and macOS); Calcpad on
+  Windows writes `\r\n`.
+* **Excel workbooks written by `#write`** are built by `calcpad-core/src/openxml` rather than
+  the DocumentFormat.OpenXml SDK. They hold the same cells (numbers as numbers, other text as
+  inline strings) and read back the same, but the package parts are laid out differently;
+  writing over a cell also drops what it held before (the SDK keeps an old value element
+  beside a new inline string).
+* **Browser build, `#write`:** a written file is kept in the page's file library and
+  downloaded when its content differs from the library copy, rather than overwritten on disk
+  on every render. Writes run only where upstream's write mode allows them (by default, the
+  report).
+* **Browser build, PDF:** printed by the browser (`@page` size, orientation and margins from
+  the PDF settings); Calcpad.Server's header and footer (title, date, page numbers) are
+  replaced by the browser's own print header and footer.
 * **`$Map` PNG encoding:** CalcpadCE encodes the colour map with SkiaSharp (libpng and
   Chromium's zlib, level 4). calcpad-rs computes identical pixels and writes the same chunk
   layout, but its deflate stream differs, so the base64 text differs. `tools/compare_png.py`

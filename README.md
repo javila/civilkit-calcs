@@ -4,16 +4,20 @@ A Rust port of the [CalcpadCE](https://github.com/imartincei/CalcpadCE) calculat
 (Calcpad.Core), ported from commit `0cf438f`. It covers the scalar engine (real and complex
 values, units, operators, functions, custom functions, solve blocks, the directives and
 settings), vectors and matrices including the high performance (HP) types and their
-solvers, `$Plot`/`$Map` SVG plots and charts, and the markdown modes (a port of the Markdig
-subset that CalcpadCE uses).
+solvers, `$Plot`/`$Map` SVG plots and charts, the markdown modes (a port of the Markdig
+subset that CalcpadCE uses), `#UI` input forms, and `#read`/`#write`/`#append` with CSV,
+text and Excel (.xlsx/.xlsm) files.
 
-Not ported: `#UI` forms, `#read`/`#write`/`#append`, Word/OpenXml export and raster
-(SkiaSharp) plot output. These report "not supported" errors.
+Not ported: Word/OpenXml export, raster (SkiaSharp) plot output, `#ProjectPath` and
+`#LibraryPath` path roots, and compiled `.cpdz` worksheets. Word and raster plots report
+"not supported" errors.
 
 ## Layout
 
-* `calcpad-core`: the engine. No I/O, no threads; `#include` goes through the
-  `parsers::macro_parser::FileProvider` trait. Module names follow the Calcpad.Core folders
+* `calcpad-core`: the engine. No threads; `#include` goes through the
+  `parsers::macro_parser::FileProvider` trait and `#read`/`#write` through
+  `data_files::DataFiles` (the disk natively, the page's files in the browser).
+  `openxml` reads and writes the cell ranges of Excel workbooks (zip and XML, no SDK). Module names follow the Calcpad.Core folders
   (`base_types`, `calculator`, `output`, `parsers::math_parser`, `parsers::expression_parser`,
   ...), so a C# file can be found next to its port.
 * `calcpad-cli`: the `Cli` binary, compatible with the batch mode of Calcpad.Cli
@@ -34,7 +38,10 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 `cargo test` runs the transcribed CalcpadCE xunit tests (`calcpad-core/tests/xunit_*.rs`,
-regenerated with `tools/transcribe_all.sh`) and the deviation tests.
+regenerated with `tools/transcribe_all.sh`; `ui_directive.rs` and `data_exchange.rs` are
+transcribed by hand) and the deviation tests. The HP comparison classes are heavy, so on a
+busy machine run the suite through `python3 -I tools/run_tests.py [--minutes N]`, which
+stops every test process when the time limit passes and reports a run that ended early.
 
 Conformance against the committed `*.html.stub` files (uses the upstream
 `compare_renderings.py` for discovery, the denylist and number reconciliation):
@@ -65,23 +72,41 @@ cd web && npx playwright install chromium && node e2e/browser-check.mjs
 cd .. && .venv/bin/python -I tools/compare_browser.py --ref ../calcpad-ref
 ```
 
-In the browser: the editor, preview, unwrapped view, input form and report views, the
-Variables and TOC panels, Save HTML. Not available, with a message saying so: PDF and Word
-export, compiled `.cpdz` and portable packages (they need Calcpad.Server). Not ported, so
-the editor runs without them: linting, semantic highlighting, go-to-definition/rename,
-prettify and the snippet library (all from Calcpad.Highlighter). `#UI` forms and
-`#read`/`#write` report "not supported" as in the CLI.
+The production build (`web/calcpad-web/dist`) is static files only and runs from any
+folder of any static host; nothing it calculates goes over the network.
+
+What works in the browser:
+
+* the editor, preview, unwrapped view, report view, Variables and TOC panels;
+* `#UI` input forms (entries, dropdowns, radio buttons, checkboxes and datagrids): enter
+  values in the Input view, the report uses them, Save values writes them into the document;
+* File menu (status bar, right): new, open (picker or drag and drop), save and save as (in
+  place where the browser has the File System Access API, otherwise a download), recent
+  worksheets, Ctrl+O / Ctrl+S / Ctrl+Shift+S;
+* a file library for `#include` and `#read`: every opened worksheet and every added or
+  dropped file (CSV, text, .xlsx/.xlsm) is kept in the browser (IndexedDB) and resolved at
+  "/<name>";
+* `#read` from CSV, text and Excel files, `#write`/`#append` to CSV and Excel: the written
+  file joins the library and downloads whenever its content changes;
+* PDF by printing: Print PDF and Export > Save PDF print the report through the browser's
+  print dialog, with the paper size, orientation and margins of the PDF settings;
+* Save HTML.
+
+What does not: Word export, compiled `.cpdz` worksheets and portable packages need
+Calcpad.Server and say so. Linting, semantic highlighting, go-to-definition/rename, prettify
+and the snippet library come from Calcpad.Highlighter, which is not ported, so the editor
+runs without them. The PDF has the browser's header and footer, not Calcpad.Server's.
 
 ## Status
 
-* xunit: 4692 transcribed tests pass (Scalars, Vectors, Matrices incl. HP, MathParser,
-  Macros, ExpressionParser and the others); 2 raster plot tests are ignored.
-* Stubs (369 worksheets): 343 PASS, 16 PNG-PIXEL (`$Map` rasters with equal pixels but a
-  different deflate stream), 1 NOISE, 1 FAIL (libm last digit), 8 OUT-OF-SCOPE (`#UI`,
-  `#read`). See `tools/classify_failures.py`, PORT_LOG.md and DEVIATIONS.md.
+* Tests: 4828 pass (the transcribed xunit classes, UiDirectiveTests and the Data tests, the
+  deviation and unit tests); 2 raster plot tests are ignored.
+* Stubs (369 worksheets): 351 PASS, 16 PNG-PIXEL (`$Map` rasters with equal pixels but a
+  different deflate stream), 1 NOISE, 1 FAIL (libm last digit), none out of scope. See
+  `tools/classify_failures.py`, PORT_LOG.md and DEVIATIONS.md.
 * Browser: 30 worksheets through the UI, 28 match the stubs; the other two differ only by
   one trailing empty paragraph, a Calcpad.Server versus Calcpad.Cli input difference (see
-  DEVIATIONS.md). The `.wasm` is 1.16 MB (458 KB gzipped).
+  DEVIATIONS.md). The `.wasm` is 1.30 MB (517 KB gzipped).
 
 ## Licence
 
