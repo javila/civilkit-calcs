@@ -1,0 +1,18 @@
+[package]
+name = "calcpad-docx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Word (.docx) export of CalcpadCE worksheets (port of Calcpad.OpenXml's Word path)"
+
+[features]
+default = ["svg"]
+# SVG images (plots, drawings) rasterised to PNG for the document with resvg, the SVG kept
+# beside it for Word versions that show SVG.
+svg = ["dep:resvg"]
+# The CLI draws SVG text with the fonts installed on the machine.
+system-fonts = ["svg", "resvg/system-fonts"]
+
+[dependencies]
+calcpad-core = { path = "../calcpad-core" }
+resvg = { version = "0.45", default-features = false, features = ["text"], optional = true }

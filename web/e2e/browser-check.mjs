@@ -646,7 +646,7 @@ examplePageErrors = null;
 check(sampleFailures.length === 0, `all ${sampleFilter ? `"${sampleFilter}"` : SAMPLES.length} samples open from the browser and render with no errors (${sampleFailures.slice(0, 5).join(' | ')})`);
 for (const f of sampleFailures) console.log(`       ${f}`);
 
-// ---- server-only exports say so ----------------------------------------------------------
+// ---- Word export (calcpad-docx-wasm) -------------------------------------------------------
 const reportGroup = page.locator('.export-group').filter({ has: page.locator('.export-group-title', { hasText: /^Report$/ }) });
 // A persistent handler: with only waitForEvent('dialog') the alert stayed open and the click hung.
 const dialogs = [];
@@ -654,14 +654,30 @@ page.on('dialog', (d) => {
     dialogs.push(d.message());
     void d.dismiss();
 });
+await page.evaluate(() => (window).calcpadActiveEditor.setValue("'Word export check\na = 2\nb = a^2/3 + sqr(a)\nL = 2.5m\n$Plot{x^2 @ x = 0 : 2}"));
+await page.waitForTimeout(1500);
 await openExportTab();
-for (const [button, what] of [[/Save Word/, 'Word export']]) {
-    dialogs.length = 0;
-    await reportGroup.getByRole('button', { name: button }).click({ timeout: 10000 });
-    for (let i = 0; i < 50 && dialogs.length === 0; i++) await page.waitForTimeout(100);
-    const message = dialogs[0] ?? '';
-    check(message.startsWith(`${what} is not available in the browser build`), `${what} explains it needs the server (${JSON.stringify(message.slice(0, 80))})`);
-}
+dialogs.length = 0;
+const [download] = await Promise.all([
+    page.waitForEvent('download', { timeout: 120000 }),
+    reportGroup.getByRole('button', { name: /Save Word/ }).click({ timeout: 10000 }),
+]);
+const tmp = join(web, '..', 'target', 'tmp');
+mkdirSync(tmp, { recursive: true });
+const docxPath = join(tmp, 'word-check.docx');
+await download.saveAs(docxPath);
+const unzip = (part) => {
+    try { return execFileSync('unzip', ['-p', docxPath, part], { encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { return ''; }
+};
+const listing = (() => { try { return execFileSync('unzip', ['-l', docxPath], { encoding: 'utf8' }); } catch { return ''; } })();
+const documentXml = unzip('word/document.xml');
+check(dialogs.length === 0, `Save Word shows no "not available" message (${JSON.stringify(dialogs[0] ?? '')})`);
+check(documentXml.includes('<w:body>') && documentXml.includes('Word export check'), 'Save Word downloads a .docx whose document holds the worksheet text');
+const maths = (documentXml.match(/<m:oMath>/g) ?? []).length;
+check(maths === 3, `each of the 3 equations is Office Math in the document (${maths})`);
+check(/<m:f>/.test(documentXml) && /<m:rad>/.test(documentXml), 'the division and the square root are OMML fractions and radicals');
+check(/word\/media\/image\d+\.png/.test(listing) && /word\/media\/image\d+\.svg/.test(listing), 'the plot is in the document as a PNG with its SVG beside it');
+check(/asvg:svgBlip/.test(documentXml), 'the picture refers to the SVG for Word versions that show it');
 
 // ---- 6. the same build from a sub folder ---------------------------------------------------
 const sub = await context.newPage();

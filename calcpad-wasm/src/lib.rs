@@ -128,7 +128,7 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             });
         }
     }
-    let (mut html, errors) = convert_inner(&r, unwrap || r.force_unwrapped_code);
+    let (mut html, errors, expressions) = convert_inner(&r, unwrap || r.force_unwrapped_code);
     FILES.with(|f| {
         let mut f = f.borrow_mut();
         for key in &borrowed {
@@ -158,7 +158,11 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             })
         })
         .collect();
-    serde_json::json!({ "html": html, "errors": errors_json, "files": files }).to_string()
+    let mut out = serde_json::json!({ "html": html, "errors": errors_json, "files": files });
+    if r.capture_open_xml {
+        out["openXmlExpressions"] = serde_json::json!(expressions);
+    }
+    out.to_string()
 }
 
 fn status_json(status: u16, error: &str) -> String {
@@ -179,6 +183,8 @@ struct ConvertRequest {
     hide_error_lines: Option<bool>,
     ui_overrides: Option<HashMap<String, String>>,
     write: bool,
+    /// Also render each equation as Office Math, for the Word export (`captureOpenXml`).
+    capture_open_xml: bool,
 }
 
 /// Case insensitive property lookup, as ASP.NET Core binds JSON.
@@ -318,12 +324,15 @@ impl ConvertRequest {
                     .collect()
             }),
             write: prop_bool(req, "write").unwrap_or(false),
+            capture_open_xml: prop_bool(req, "captureOpenXml").unwrap_or(false),
         }
     }
 }
 
 /// `CalcpadService.Convert`
-fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec<CalcpadError>) {
+type Converted = (String, Vec<CalcpadError>, Vec<String>);
+
+fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
     let enable_ui = r.enable_ui && !r.for_print;
     let show_error_lines = !(r.hide_error_lines.unwrap_or(enable_ui));
     let files = MemFiles;
@@ -341,6 +350,7 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
         parser.data_files = Rc::new(MemDataFiles);
         parser
     };
+    let mut expressions = Vec::new();
     let html_result = if has_macro_errors || force_unwrapped_code {
         if force_unwrapped_code && !has_macro_errors {
             // This pass only collects error lines, so it must never repeat the writes.
@@ -357,8 +367,10 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
         parser.ui_overrides = r.ui_overrides.clone();
         parser.show_error_lines = show_error_lines;
         parser.allow_data_write = r.write;
+        parser.capture_open_xml = r.capture_open_xml;
         parser.parse(&output_text, true);
         errors.extend(parser.errors_list.iter().cloned());
+        expressions = std::mem::take(&mut parser.open_xml_expressions);
         // Model bindings (docs/model-bindings.md): mark each bound input. No model is connected
         // in the browser yet, so the typed values are used.
         calcpad_core::model_bindings::annotate_html(
@@ -366,7 +378,7 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> (String, Vec
             &calcpad_core::model_bindings::parse(&output_text),
         )
     };
-    (wrap_html_result(&html_result, &r.theme, enable_ui), errors)
+    (wrap_html_result(&html_result, &r.theme, enable_ui), errors, expressions)
 }
 
 /// `HttpUtility.HtmlAttributeEncode`

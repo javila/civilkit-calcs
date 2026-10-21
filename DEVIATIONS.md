@@ -114,11 +114,55 @@ does. Included files are not converted, as in the CLI. The conversion is
 TypeScript copy in the browser (`c-style.ts`); `web/e2e/c-style-check.mjs` holds the two equal
 over every line of the upstream repository.
 
+## D6. Word export: no upstream oracle, and the differences from Calcpad.OpenXml
+
+`calcpad-docx` ports the Word path of Calcpad.OpenXml (OpenXmlWriter, TableBuilder,
+StyleDefinitionsWriter, ImageWriter/ImageProcessor, CssParser) and calcpad-core ports
+Output/XmlWriter.cs for the equations (`ExpressionParser::capture_open_xml`). The package is
+written with calcpad-core's own zip and XML code, not the OpenXml SDK.
+
+There is no upstream oracle. The live API at api.calcpad-ce.org answers `/convert` but has no
+`/docx` (404) and ignores an `outputFormat`; .NET is not available here. The port is checked by:
+tests that follow the C# rules (`calcpad-core/tests/open_xml.rs`, `calcpad-docx/tests/docx.rs`,
+mutation-checked); `tools/docx_check.py`, which writes every sample as .docx, checks the XML,
+counts the equations against the HTML and has LibreOffice open each document; and the browser
+check (Save Word).
+
+Differences from upstream's writer, each deliberate:
+
+* **SVG images** (plots, drawings) are rasterised to PNG with resvg at twice their size and the
+  SVG is kept beside the PNG as an `svgBlip`, so Word versions without SVG support show the
+  PNG. Upstream embeds the SVG alone. A plot's label alignment, which Calcpad sets with
+  `.plot text.end` style rules that SVG renderers in word processors ignore, is written as
+  `text-anchor` attributes. The browser draws SVG text with DejaVu Sans; the CLI uses the
+  installed fonts.
+* **Ordered lists are numbered.** Upstream gives each list the highest numbering instance + 1
+  without creating it, so Word shows no numbers; each ordered list gets its own instance here.
+* **A unit power with a format** (`#format F2`, then `m^2`): upstream's FixPowerFormatting for
+  Office Math keeps the number's first character in front of the reformatted number ("22");
+  the number is replaced whole.
+* **Valid nesting.** A paragraph that the HTML puts inside another (an image in a text line)
+  goes into it inline instead of as a nested `<w:p>`, and a table cell always ends with a
+  paragraph.
+* **Unknown elements keep their content.** Upstream drops any element it has no case for
+  together with everything in it, so a `<blockquote>` (Numerical Differentiation puts its
+  error lines in one) or an `<abbr>` vanished from the document; here such an element passes
+  its content on. Scripts, styles, form buttons and other non-content elements are still left
+  out. The HTML is read as browsers read it in one more respect: a `<select>` closes a
+  `<select>` left open (the I-Section Properties samples do this), where HtmlAgilityPack would
+  take the rest of the form into the first list.
+* **Images** come from data: URLs (the browser turns library images into these) or, in the
+  CLI, files next to the worksheet. Web addresses are not fetched (upstream downloads them
+  with a 2 s timeout); a missing image is reported in the document as upstream does.
+* **No validation pass.** Upstream runs the SDK's validator and returns its messages; the
+  checks above stand in for it.
+* The Office Math is written without the indentation upstream's verbatim strings carry.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:
 
-* **Out of scope** (Word/OpenXml export, raster `$Plot` output with `VectorGraphics=false`
+* **Out of scope** (raster `$Plot` output with `VectorGraphics=false`
   or `ImagePath` set): the engine reports `... is not supported by calcpad-rs yet ...` as an
   ordinary expression error and records the feature so the harness classifies the worksheet
   as OUT-OF-SCOPE. `#ProjectPath`/`#LibraryPath` roots are accepted and ignored.

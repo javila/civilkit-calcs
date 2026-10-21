@@ -10,7 +10,8 @@
 //   symbol-at-position, prettify            editor runs without diagnostics, semantic
 //                                           highlighting, go-to-definition and prettify
 //   snippets                                an empty list (the library is in the Highlighter)
-//   docx, cpdz, portable, log-level, pdf    501: these need Calcpad.Server. PDF is printed by
+//   docx                                    calcpad-docx-wasm (Word export, loaded on demand)
+//   cpdz, portable, log-level, pdf          501: these need Calcpad.Server. PDF is printed by
 //                                           the browser instead (message-bridge.ts)
 
 import { reportHeadMarkup } from './report-fonts';
@@ -35,7 +36,6 @@ const NEEDS_SERVER: Record<string, string> = {
     'pdf/health': 'Server PDF export',
     'pdf/browser': 'Server PDF export',
     'pdf/browser/install': 'Server PDF export',
-    docx: 'Word export',
     'cpdz/decode': 'Compiled .cpdz worksheets',
     'cpdz/encode': 'Compiled .cpdz worksheets',
     'portable/bundle': 'Portable worksheets',
@@ -61,7 +61,7 @@ export type EngineFile = { path: string; data: Uint8Array };
 type Job = {
     id: number;
     msg: Record<string, unknown>;
-    resolve: (v: string) => void;
+    resolve: (v: any) => void;
     reject: (e: unknown) => void;
 };
 
@@ -83,7 +83,7 @@ class EngineWorker {
     private start(): Worker {
         if (this.worker) return this.worker;
         const w = new Worker(new URL('./engine-worker.ts', import.meta.url), { type: 'module' });
-        w.onmessage = (e: MessageEvent<{ id: number; result?: string; error?: string }>) => {
+        w.onmessage = (e: MessageEvent<{ id: number; result?: string | Uint8Array; error?: string }>) => {
             const job = this.running;
             if (!job || job.id !== e.data.id) return;
             this.running = null;
@@ -117,8 +117,8 @@ class EngineWorker {
         this.start().postMessage({ id: job.id, base: this.base, ...job.msg });
     }
 
-    private post(msg: Record<string, unknown>, signal?: AbortSignal | null): Promise<string> {
-        return new Promise<string>((resolve, reject) => {
+    private post<T = string>(msg: Record<string, unknown>, signal?: AbortSignal | null): Promise<T> {
+        return new Promise<T>((resolve, reject) => {
             const job: Job = { id: ++this.seq, msg, resolve, reject };
             if (signal?.aborted) {
                 reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
@@ -151,6 +151,11 @@ class EngineWorker {
 
     convert(body: string, unwrap: boolean, signal?: AbortSignal | null): Promise<string> {
         return this.post({ kind: 'convert', body, unwrap }, signal);
+    }
+
+    /** The Word document of a rendered page (calcpad-docx-wasm, loaded on first use). */
+    docx(html: string, expressions: string[], signal?: AbortSignal | null): Promise<Uint8Array> {
+        return this.post<Uint8Array>({ kind: 'docx', html, expressions: JSON.stringify(expressions) }, signal);
     }
 
     setHead(markup: string): void {
@@ -263,6 +268,31 @@ export function installWasmTransport(): WasmTransport {
                     'Content-Type': 'text/html; charset=utf-8',
                     'X-Calcpad-Errors': encodeURIComponent(JSON.stringify(out.errors ?? [])),
                 },
+            });
+        }
+        if (endpoint === 'docx' && method === 'POST') {
+            // Calcpad.Server's /docx: the page rendered with its equations as Office Math, then
+            // the Word writer (calcpad-docx). Images from the library go in as data: URLs.
+            if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
+            await head;
+            const request = JSON.parse(body) as Record<string, unknown>;
+            request.captureOpenXml = true;
+            request.enableUi = false;
+            request.includeLineAnchors = false;
+            const out = JSON.parse(await engine.convert(JSON.stringify(request), false, signal)) as {
+                html?: string; status?: number; error?: string; openXmlExpressions?: string[];
+                files?: { path: string; data: string }[];
+            };
+            if (out.status) return new Response(out.error ?? '', { status: out.status });
+            let html = out.html ?? '';
+            if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
+            if (out.files?.length && transport.onFilesWritten) {
+                transport.onFilesWritten(out.files.map(f => ({ path: f.path, data: fromBase64(f.data) })));
+            }
+            const bytes = await engine.docx(html, out.openXmlExpressions ?? [], signal);
+            return new Response(new Uint8Array(bytes), {
+                status: 200,
+                headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
             });
         }
         if (endpoint in NOT_PORTED) return notAvailable(NOT_PORTED[endpoint], 'Calcpad.Highlighter is not ported yet');

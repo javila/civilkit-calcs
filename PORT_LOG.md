@@ -185,3 +185,25 @@ after this phase, measured on the old and new binaries), and with other projects
 the load average reached 285 on 8 cores, so one run took about two hours.
 `tools/run_tests.py` now puts a time limit on the suite and stops every test process when it
 passes.
+
+## Word export
+
+| C# | lines | Rust | notes |
+|---|---|---|---|
+| Calcpad.Core/Output/XmlWriter.cs | 611 | calcpad-core/src/output/xml_writer.rs | plus the Xml branches of MathParser.Output, SolveBlock.ToXml, Unit.Xml, OutputWriter.FormatUnitsText |
+| Calcpad.OpenXml/OpenXmlWriter.cs | 905 | calcpad-docx/src/writer.rs | the SDK element tree replaced by a small enum written in schema order |
+| Calcpad.OpenXml/TableBuilder.cs | 146 | calcpad-docx/src/writer.rs | continued cells travel with the next cell instead of a held row reference |
+| Calcpad.OpenXml/StyleDefinitionsWriter.cs | 143 | calcpad-docx/src/package.rs | with numbering, content types and relationships |
+| Calcpad.OpenXml/ImageWriter.cs, ImageProcessor.cs | 434 | calcpad-docx/src/image.rs | SkiaSharp sizes read from the image headers; SVG through resvg |
+| Calcpad.OpenXml/CssParser.cs, CssColors.cs | 274 | calcpad-docx/src/css.rs | |
+| (HtmlAgilityPack) | | calcpad-docx/src/html.rs | the forgiving parse the writer needs |
+
+`ExpressionParser::capture_open_xml` collects the equations (`OpenXmlExpressions`); the CLI
+writes `.docx`, and the browser answers `/api/calcpad/docx` with calcpad-docx-wasm, a second
+module loaded on the first export. The engine module grew by 9 KB gzipped (519 KB).
+
+No oracle (DEVIATIONS D6): the live API has no Word endpoint. Found while checking with
+LibreOffice: Calcpad's plots align labels with style rules that neither resvg nor LibreOffice
+apply, and the SVG had `viewbox` in lower case (upstream renames it to `viewBox`; so does the
+port). Upstream bugs not carried over: FixPowerFormatting doubled a unit power's first digit,
+and ordered lists referred to numbering instances that do not exist.

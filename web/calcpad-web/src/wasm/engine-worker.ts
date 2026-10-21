@@ -5,13 +5,38 @@
 //   { id, kind: 'convert', body, unwrap }    with the JSON string calcpad-wasm's convert() returns
 //   { id, kind: 'files', files }             replacing the in-memory files #include and #read see
 //   { id, kind: 'head', markup }             setting the report head (the bundled fonts)
+//   { id, kind: 'docx', html, expressions }  the .docx bytes of a rendered page (calcpad-docx-wasm,
+//                                            loaded on first use with DejaVu Sans for drawing text)
 
 type FileEntry = { path: string; data: Uint8Array };
 
 type Req =
     | { id: number; base: string; kind: 'convert'; body: string; unwrap: boolean }
     | { id: number; base: string; kind: 'files'; files: FileEntry[] }
-    | { id: number; base: string; kind: 'head'; markup: string };
+    | { id: number; base: string; kind: 'head'; markup: string }
+    | { id: number; base: string; kind: 'docx'; html: string; expressions: string };
+
+interface DocxModule {
+    default: (input?: unknown) => Promise<unknown>;
+    docx: (html: string, expressions: string) => Uint8Array;
+    add_font: (data: Uint8Array) => void;
+}
+
+let docxModule: Promise<DocxModule> | null = null;
+
+function loadDocx(base: string): Promise<DocxModule> {
+    if (!docxModule) {
+        docxModule = (async () => {
+            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_docx_wasm.js`)) as DocxModule;
+            await mod.default({ module_or_path: `${base}wasm/calcpad_docx_wasm_bg.wasm` });
+            const font = await fetch(`${base}report-fonts/DejaVuSans.ttf`);
+            if (font.ok) mod.add_font(new Uint8Array(await font.arrayBuffer()));
+            return mod;
+        })();
+        docxModule.catch(() => { docxModule = null; });
+    }
+    return docxModule;
+}
 
 interface Engine {
     default: (input?: unknown) => Promise<unknown>;
@@ -38,6 +63,12 @@ function load(base: string): Promise<Engine> {
 self.onmessage = async (e: MessageEvent<Req>) => {
     const req = e.data;
     try {
+        if (req.kind === 'docx') {
+            const docx = await loadDocx(req.base);
+            const bytes = docx.docx(req.html, req.expressions);
+            self.postMessage({ id: req.id, result: bytes }, [bytes.buffer]);
+            return;
+        }
         const mod = await load(req.base);
         switch (req.kind) {
             case 'files':

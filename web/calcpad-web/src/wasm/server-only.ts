@@ -2,7 +2,6 @@
 // buttons explain that instead of failing silently.
 
 const SERVER_ONLY: Record<string, string> = {
-    saveDocx: 'Word export',
     saveCompiled: 'Saving a compiled .cpdz worksheet',
     savePortable: 'Saving a portable package',
 };

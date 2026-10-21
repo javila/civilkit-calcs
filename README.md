@@ -8,9 +8,10 @@ solvers, `$Plot`/`$Map` SVG plots and charts, the markdown modes (a port of the 
 subset that CalcpadCE uses), `#UI` input forms, and `#read`/`#write`/`#append` with CSV,
 text and Excel (.xlsx/.xlsm) files.
 
-Not ported: Word/OpenXml export, raster (SkiaSharp) plot output, `#ProjectPath` and
-`#LibraryPath` path roots, and compiled `.cpdz` worksheets. Word and raster plots report
-"not supported" errors.
+Word export (calcpad-docx, a port of Calcpad.OpenXml's Word path) is in the CLI
+(`Cli input.cpd output.docx`) and the browser (Export > Save Word). Not ported: raster
+(SkiaSharp) plot output, `#ProjectPath` and `#LibraryPath` path roots, and compiled `.cpdz`
+worksheets. Raster plots report "not supported" errors.
 
 ## Layout
 
@@ -100,8 +101,12 @@ What works in the browser:
   network requests; anything else is blocked with a note in the preview (DEVIATIONS.md, D3).
   Insert > Libraries adds a listed library's script tag.
 
-What does not: Word export, compiled `.cpdz` worksheets and portable packages need
-Calcpad.Server and say so. Linting, semantic highlighting, go-to-definition/rename, prettify
+* Save Word writes the .docx in the page: the engine renders the equations as Office Math and
+  calcpad-docx-wasm, a separate module loaded on the first export (about 600 KB gzipped, with
+  DejaVu Sans fetched for the text of plots), builds the document (DEVIATIONS.md, D6).
+
+What does not: compiled `.cpdz` worksheets and portable packages need Calcpad.Server and say
+so. Linting, semantic highlighting, go-to-definition/rename, prettify
 and the snippet library come from Calcpad.Highlighter, which is not ported, so the editor
 runs without them. The PDF has the browser's header and footer, not Calcpad.Server's.
 

@@ -1,7 +1,7 @@
 //! Command line front end, compatible with the batch conversion mode of Calcpad.Cli:
 //!
 //! ```text
-//! Cli <input.cpd> [output.html] [-b] [-s]
+//! Cli <input.cpd> [output.html | output.docx | html | docx] [-b] [-s]
 //! ```
 //!
 //! `-b` writes only `<div class="calcpad-output">...</div>` (used by the conformance
@@ -172,7 +172,7 @@ fn main() -> ExitCode {
             out_file,
             input.file_stem().unwrap().to_string_lossy()
         ))
-    } else if ["html", "htm"].contains(&out_file.as_str()) {
+    } else if ["html", "htm", "docx"].contains(&out_file.as_str()) {
         input.with_extension(&out_file)
     } else {
         PathBuf::from(&out_file)
@@ -181,8 +181,9 @@ fn main() -> ExitCode {
         .extension()
         .map(|e| e.to_string_lossy().to_string())
         .unwrap_or_default();
-    if ext != "html" && ext != "htm" {
-        eprintln!("Invalid output extension. Must be .html or .htm (Word and PDF output are not supported).");
+    let is_docx = ext == "docx";
+    if ext != "html" && ext != "htm" && !is_docx {
+        eprintln!("Invalid output extension. Must be .html, .htm or .docx (PDF output is not supported).");
         return ExitCode::from(1);
     }
     let full_input = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
@@ -203,6 +204,7 @@ fn main() -> ExitCode {
     macro_parser.source_file_path = Some(file_name_abs.clone());
     let (has_macro_errors, unwrapped) = macro_parser.parse(&code, true);
     let mut out_of_scope: Option<String> = None;
+    let mut expressions: Vec<String> = Vec::new();
     let html = if has_macro_errors {
         calcpad_reader::code_to_html(&unwrapped)
     } else {
@@ -210,12 +212,32 @@ fn main() -> ExitCode {
         *parser.math_settings.borrow_mut() = settings.math.clone();
         parser.is_us = settings.is_us;
         parser.plot_settings = settings.plot.clone();
+        // Converter.ToOpenXml: the equations as Office Math too.
+        parser.capture_open_xml = is_docx;
         parser.parse(&unwrapped, true);
         out_of_scope = parser.out_of_scope.clone();
+        expressions = std::mem::take(&mut parser.open_xml_expressions);
         parser.html_result.clone()
     };
     if let Ok(scope_file) = std::env::var("CALCPAD_RS_SCOPE_FILE") {
         let _ = std::fs::write(scope_file, out_of_scope.unwrap_or_default());
+    }
+    if is_docx {
+        calcpad_docx::fonts::load_system_fonts();
+        let base = full_input.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+        let resolver = move |src: &str| -> Option<Vec<u8>> {
+            let path = src.strip_prefix("file:///").unwrap_or(src);
+            let p = Path::new(path);
+            let p = if p.is_absolute() { p.to_path_buf() } else { base.join(p) };
+            std::fs::read(p).ok()
+        };
+        let page = format!("<html><body>{}</body></html>", html);
+        let bytes = calcpad_docx::html_to_docx(&page, &expressions, Some(&resolver));
+        if let Err(e) = std::fs::write(&out_path, bytes) {
+            eprintln!("{}", e);
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
     }
     let content = if is_body_only {
         format!("<div class=\"calcpad-output\">{}</div>", html)

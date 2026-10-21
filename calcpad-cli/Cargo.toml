@@ -11,3 +11,4 @@ path = "src/main.rs"
 
 [dependencies]
 calcpad-core = { path = "../calcpad-core" }
+calcpad-docx = { path = "../calcpad-docx", features = ["system-fonts"] }
