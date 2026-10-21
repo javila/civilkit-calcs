@@ -1,0 +1,14 @@
+[package]
+name = "calcpad-highlighter-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly bindings of calcpad-highlighter for the CalcpadCE web editor"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+calcpad-highlighter = { path = "../calcpad-highlighter" }
+# Must match the wasm-bindgen CLI used by tools/build_wasm.sh.
+wasm-bindgen = "=0.2.122"

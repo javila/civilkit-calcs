@@ -6,10 +6,9 @@
 // the network as before. No calculation request leaves the page.
 //
 //   convert, convert?unwrap=true, health   the calcpad-wasm engine (in a worker)
-//   lint, highlight, definitions,           501: Calcpad.Highlighter is not ported, so the
-//   symbol-at-position, prettify            editor runs without diagnostics, semantic
-//                                           highlighting, go-to-definition and prettify
-//   snippets                                an empty list (the library is in the Highlighter)
+//   lint, highlight, definitions,           the calcpad-highlighter-wasm module (a second wasm,
+//   symbol-at-position, prettify,           loaded in its own worker on first use)
+//   snippets
 //   docx                                    calcpad-docx-wasm (Word export, loaded on demand)
 //   xlsx                                    calcpad-rs's own: the variables as an Excel workbook
 //   cpdz, portable, log-level, pdf          501: these need Calcpad.Server. PDF is printed by
@@ -24,12 +23,13 @@ const API_PREFIX = '/api/calcpad/';
 /** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
 const UI_ASSETS_MARKER = '<!--calcpad-ui-assets-->';
 
-const NOT_PORTED: Record<string, string> = {
-    lint: 'Linting',
-    highlight: 'Semantic highlighting',
-    definitions: 'Definitions',
-    'symbol-at-position': 'Go to definition, references and rename',
-    prettify: 'Prettify',
+/** Endpoints answered by calcpad-highlighter-wasm, with the method each one calls. */
+const HIGHLIGHTER_METHODS: Record<string, string> = {
+    lint: 'lint',
+    highlight: 'highlight',
+    definitions: 'definitions',
+    'symbol-at-position': 'symbol_at_position',
+    prettify: 'prettify',
 };
 
 const NEEDS_SERVER: Record<string, string> = {
@@ -171,6 +171,70 @@ class EngineWorker {
     }
 }
 
+/**
+ * The worker of the highlighter wasm. Requests run one at a time in arrival order; a request whose
+ * caller gave up is not interrupted (the answers are quick), its result is just dropped.
+ */
+class HighlighterWorker {
+    private worker: Worker | null = null;
+    private seq = 0;
+    private pending = new Map<number, { resolve: (v: string) => void; reject: (e: unknown) => void }>();
+    private files: EngineFile[] = [];
+
+    constructor(private readonly base: string) {}
+
+    private start(): Worker {
+        if (this.worker) return this.worker;
+        const w = new Worker(new URL('./highlighter-worker.ts', import.meta.url), { type: 'module' });
+        w.onmessage = (e: MessageEvent<{ id: number; result?: string; error?: string }>) => {
+            const p = this.pending.get(e.data.id);
+            if (!p) return;
+            this.pending.delete(e.data.id);
+            if (e.data.error !== undefined) p.reject(new Error(e.data.error));
+            else p.resolve(e.data.result ?? '');
+        };
+        w.onerror = (e: ErrorEvent) => {
+            const err = new Error(`calcpad-highlighter worker failed: ${e.message || 'could not load'}`);
+            for (const p of this.pending.values()) p.reject(err);
+            this.pending.clear();
+            this.worker?.terminate();
+            this.worker = null;
+        };
+        this.worker = w;
+        w.postMessage({ id: 0, base: this.base, kind: 'files', files: this.files });
+        return w;
+    }
+
+    private post(msg: Record<string, unknown>, signal?: AbortSignal | null): Promise<string> {
+        return new Promise<string>((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            const id = ++this.seq;
+            this.pending.set(id, { resolve, reject });
+            signal?.addEventListener('abort', () => {
+                if (this.pending.delete(id)) reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+            }, { once: true });
+            this.start().postMessage({ id, base: this.base, ...msg });
+        });
+    }
+
+    call(method: string, body: string, signal?: AbortSignal | null): Promise<string> {
+        return this.post({ kind: 'call', method, body }, signal);
+    }
+
+    snippets(category: string, signal?: AbortSignal | null): Promise<string> {
+        return this.post({ kind: 'snippets', category }, signal);
+    }
+
+    setFiles(files: EngineFile[]): void {
+        this.files = files;
+        // Only tell a running worker; a worker started later receives the files when it starts.
+        if (this.worker) void this.post({ kind: 'files', files }).catch(() => {});
+    }
+}
+
 function notAvailable(what: string, reason: string): Response {
     return new Response(`${what} is not available in the browser build of CalcpadCE (calcpad-rs): ${reason}.`, {
         status: 501,
@@ -229,10 +293,12 @@ export function installWasmTransport(): WasmTransport {
     // when the app is served from a sub folder.
     const base = new URL(import.meta.env.BASE_URL || './', document.baseURI).href;
     const engine = new EngineWorker(base);
+    const highlighter = new HighlighterWorker(base);
     const nativeFetch = window.fetch.bind(window);
     const head = reportHeadMarkup(base).then(m => engine.setHead(m));
     const transport: WasmTransport = {
         async setFiles(files) {
+            highlighter.setFiles(files);
             await engine.setFiles(files);
         },
         onFilesWritten: null,
@@ -242,9 +308,22 @@ export function installWasmTransport(): WasmTransport {
     const handle = async (url: URL, method: string, body: string | null, signal?: AbortSignal | null): Promise<Response> => {
         const endpoint = url.pathname.slice(API_PREFIX.length).replace(/\/+$/, '');
         if (endpoint === 'health') return Response.json({ status: 'ok' });
-        // The snippet library lives in Calcpad.Highlighter (not ported). An empty list, not an
-        // error, so the Insert panel does not poll for it every few seconds.
-        if (endpoint === 'snippets') return Response.json({ count: 0, snippets: [] });
+        if (endpoint === 'snippets' && method === 'GET') {
+            const out = await highlighter.snippets(url.searchParams.get('category') ?? '', signal);
+            return new Response(out, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        }
+        if (endpoint in HIGHLIGHTER_METHODS && method === 'POST') {
+            if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
+            const out = await highlighter.call(HIGHLIGHTER_METHODS[endpoint], body, signal);
+            // Where the server answers a status, the module answers {"status": n, "error": "..."}.
+            if (out.startsWith('{"status":')) {
+                const err = JSON.parse(out) as { status?: number; error?: string };
+                if (typeof err.status === 'number' && typeof err.error === 'string') {
+                    return new Response(err.error, { status: err.status });
+                }
+            }
+            return new Response(out, { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        }
         if (endpoint === 'convert' && method === 'POST') {
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
@@ -316,7 +395,6 @@ export function installWasmTransport(): WasmTransport {
                 headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
             });
         }
-        if (endpoint in NOT_PORTED) return notAvailable(NOT_PORTED[endpoint], 'Calcpad.Highlighter is not ported yet');
         if (endpoint in NEEDS_SERVER) return notAvailable(NEEDS_SERVER[endpoint], 'it needs Calcpad.Server');
         return notAvailable(endpoint, 'unknown endpoint');
     };

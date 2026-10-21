@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["calcpad-core", "calcpad-cli", "calcpad-wasm", "calcpad-docx", "calcpad-docx-wasm"]
+members = ["calcpad-core", "calcpad-cli", "calcpad-wasm", "calcpad-docx", "calcpad-docx-wasm", "calcpad-highlighter", "calcpad-highlighter-wasm"]
 
 [workspace.package]
 version = "0.1.0"
