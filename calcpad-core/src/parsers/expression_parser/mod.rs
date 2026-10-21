@@ -267,6 +267,11 @@ pub struct ExpressionParser {
     /// The files `#read`/`#write`/`#append` use.
     pub data_files: crate::data_files::DataFilesRef,
     pub html_result: String,
+    /// `getXml`: also render every equation as Office Math (OMML) for the Word export. The
+    /// equation's span then carries `id="eq-N"`, its index in `open_xml_expressions`.
+    pub capture_open_xml: bool,
+    /// `OpenXmlExpressions`
+    pub open_xml_expressions: Vec<String>,
     /// The first out of scope feature hit while parsing, if any.
     pub out_of_scope: Option<String>,
     error_count: i32,
@@ -333,6 +338,8 @@ impl ExpressionParser {
             allow_data_write: true,
             data_files: crate::data_files::default_files(),
             html_result: String::new(),
+            capture_open_xml: false,
+            open_xml_expressions: Vec::new(),
             out_of_scope: None,
             error_count: 0,
             is_val: 0,
@@ -900,6 +907,7 @@ impl ExpressionParser {
             self.parse_mode_stack.clear();
             self.ui.ui_var_counts.clear();
             self.ui.ui_declaration_index.clear();
+            self.open_xml_expressions.clear();
         } else {
             if self.line_cache.len() < line_count {
                 self.line_cache.resize(line_count, LineInfo::empty());
@@ -1036,7 +1044,7 @@ impl ExpressionParser {
             } else {
                 let html = p.to_html()?;
                 if !html.is_empty() {
-                    self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
+                    self.push_equation(&html)?;
                 }
             }
         }
@@ -1066,9 +1074,24 @@ impl ExpressionParser {
                     };
                 }
                 if !html.is_empty() {
-                    self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
+                    self.push_equation(&html)?;
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Appends an equation's span; with `capture_open_xml` (and formatted equations, as upstream)
+    /// its Office Math goes to `open_xml_expressions` and the span is numbered.
+    fn push_equation(&mut self, html: &str) -> CResult<()> {
+        if self.capture_open_xml && self.math_settings.borrow().format_equations {
+            let xml = self.parser.as_ref().unwrap().to_xml()?;
+            self.open_xml_expressions.push(xml);
+            let n = self.open_xml_expressions.len() - 1;
+            self.sb
+                .push_str(&format!("<span class=\"eq\" id=\"eq-{}\">{}</span>", n, html));
+        } else {
+            self.sb.push_str(&format!("<span class=\"eq\">{}</span>", html));
         }
         Ok(())
     }

@@ -825,6 +825,11 @@ impl MathParser {
         self.render(OutputFormat::Html)
     }
 
+    /// `ToXml`: the equation as Office Math (OMML), for the Word export.
+    pub fn to_xml(&self) -> CResult<String> {
+        self.render(OutputFormat::Xml)
+    }
+
     pub fn get_settings_variable(&self, name: &str, default_value: f64) -> CResult<f64> {
         let v = self.variables.borrow().get(name).cloned();
         if let Some(v) = v {

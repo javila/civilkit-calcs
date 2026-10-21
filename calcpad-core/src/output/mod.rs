@@ -1,6 +1,7 @@
 //! Port of Output/OutputWriter.cs (abstract writer + shared helpers).
 pub mod html_writer;
 pub mod text_writer;
+pub mod xml_writer;
 
 use crate::base_types::complex::{Complex, Types};
 use crate::base_types::real_value::RealValue;
@@ -130,13 +131,17 @@ pub trait OutputWriter {
             is_power: &mut bool,
             sub: &mut u8,
         ) {
+            let is_xml = w.format_type() == OutputFormat::Xml;
             let ls = if literal.chars().count() != 1 || !literal.starts_with('\u{00B0}') {
                 format_local(w, literal, sub)
+            } else if is_xml {
+                xml_writer::run(literal)
             } else {
                 literal.clone()
             };
             if *is_power {
-                sb.push_str(&w.format_power(&ls, power, -1, -1));
+                let ps = if is_xml { xml_writer::run(power) } else { power.clone() };
+                sb.push_str(&w.format_power(&ls, &ps, -1, -1));
             } else {
                 sb.push_str(&ls);
             }

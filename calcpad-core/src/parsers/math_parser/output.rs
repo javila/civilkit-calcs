@@ -12,6 +12,7 @@ use crate::messages;
 use crate::netfmt;
 use crate::output::html_writer::HtmlWriter;
 use crate::output::text_writer::TextWriter;
+use crate::output::xml_writer::XmlWriter;
 use crate::output::{OutputFormat, OutputWriter};
 use crate::validator;
 
@@ -165,6 +166,22 @@ fn fix_power_formatting(s: &str) -> String {
     s.to_string()
 }
 
+/// `FixPowerFormatting` for the XML writer: the number inside the first run is reformatted.
+/// Upstream keeps the number's first character in front of the reformatted number
+/// (`span[..(i1 + 1)]`), so "2" became "22"; the number replaces the whole text here.
+fn fix_power_formatting_xml(s: &str) -> String {
+    if let Some(i2) = s.find("</") {
+        if i2 > 0 {
+            let start = &s[..i2];
+            let i1 = start.rfind('>').map(|i| i + 1).unwrap_or(0);
+            if i1 > 0 {
+                return format!("{}{}{}", &s[..i1], fix_power_formatting(&start[i1..]), &s[i2..]);
+            }
+        }
+    }
+    s.to_string()
+}
+
 fn fix_offset(s: &str, offset: i32) -> String {
     if offset < 0 {
         format!("<span class=\"dvc up\">{}</span>", s)
@@ -194,6 +211,7 @@ impl MathParser {
         let phasor = self.phasor.get();
         let writer: Box<dyn OutputWriter> = match format {
             OutputFormat::Html => Box::new(HtmlWriter::new(Some(&settings), phasor)),
+            OutputFormat::Xml => Box::new(XmlWriter::new(Some(&settings), phasor)),
             _ => Box::new(TextWriter::new(Some(&settings), phasor)),
         };
         let writer = writer.as_ref();
@@ -463,6 +481,9 @@ impl<'a> Renderer<'a> {
         if self.writer.format_type() == OutputFormat::Html {
             return Ok(sb.to_html(self.format_equations, self.p));
         }
+        if self.writer.format_type() == OutputFormat::Xml {
+            return Ok(sb.to_xml(self.p));
+        }
         Ok(sb.to_text())
     }
 
@@ -705,7 +726,11 @@ impl<'a> Renderer<'a> {
             }
             if a.val_type == ValueTypes::Unit {
                 if self.p.settings.borrow().format_string.is_some() {
-                    sb = fix_power_formatting(&sb);
+                    sb = if self.writer.format_type() == OutputFormat::Xml {
+                        fix_power_formatting_xml(&sb)
+                    } else {
+                        fix_power_formatting(&sb)
+                    };
                 }
                 t.content = self.writer.format_power(&sa, &sb, -1, -1);
             } else {
@@ -757,6 +782,8 @@ impl<'a> Renderer<'a> {
                     if a.val_type == ValueTypes::Number && b.val_type == ValueTypes::Unit {
                         if b.content == "\u{00B0}" || is_text {
                             t.content = format!("{}{}", sa, sb);
+                        } else if self.writer.format_type() == OutputFormat::Xml {
+                            t.content = format!("{}{}{}", sa, XmlWriter::run_thin_space(), sb);
                         } else {
                             t.content = format!("{}{}{}", sa, THIN_SPACE, sb);
                         }
@@ -764,12 +791,16 @@ impl<'a> Renderer<'a> {
                         t.content = format!("{}{}{}", sa, self.writer.format_operator('\u{2299}'), sb);
                     } else if t.order == 1 && self.writer.format_type() == OutputFormat::Html {
                         t.content = format!("{}{}{}", sa, HtmlWriter::UNIT_PRODUCT, sb);
+                    } else if t.order == 1 && self.writer.format_type() == OutputFormat::Xml {
+                        t.content = format!("{}{}{}", sa, XmlWriter::unit_product(), sb);
                     } else {
                         t.content = format!("{}{}{}", sa, self.writer.format_operator('*'), sb);
                     }
                 } else if (content == "\u{00F7}" || content == "/") && t.order == 1 {
                     if self.writer.format_type() == OutputFormat::Html {
                         t.content = format!("{}{}{}", sa, HtmlWriter::UNIT_DIVISION, sb);
+                    } else if self.writer.format_type() == OutputFormat::Xml {
+                        t.content = format!("{}{}{}", sa, XmlWriter::unit_division(), sb);
                     } else {
                         t.content = format!("{}{}{}", sa, TextWriter::UNIT_DIVISION, sb);
                     }

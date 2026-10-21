@@ -14,7 +14,9 @@ use crate::base_types::value::Value;
 use crate::calculator::NEG_CHAR;
 use crate::exceptions;
 use crate::math_parser_exception::{CResult, MathParserException};
-use crate::output::{html_writer::HtmlWriter, text_writer::TextWriter, OutputFormat, OutputWriter};
+use crate::output::{
+    html_writer::HtmlWriter, text_writer::TextWriter, xml_writer::XmlWriter, OutputFormat, OutputWriter,
+};
 
 pub type UnitRef = Rc<Unit>;
 pub type OptUnit = Option<UnitRef>;
@@ -271,6 +273,16 @@ impl Unit {
         HtmlWriter::new(None, false).format_units_text(&t).unwrap_or_default()
     }
 
+    /// `Unit.Xml`: the units as Office Math runs.
+    pub fn xml(&self) -> String {
+        if self.text.borrow().is_none() {
+            return self.get_text(OutputFormat::Xml);
+        }
+        XmlWriter::new(None, false)
+            .format_units_text(&self.text())
+            .unwrap_or_default()
+    }
+
     pub fn format_string(&self) -> Option<String> {
         let t = self.text.borrow();
         let t = t.as_ref()?;
@@ -358,6 +370,7 @@ impl Unit {
     fn get_text(&self, format: OutputFormat) -> String {
         let writer: Box<dyn OutputWriter> = match format {
             OutputFormat::Html => Box::new(HtmlWriter::new(None, false)),
+            OutputFormat::Xml => Box::new(XmlWriter::new(None, false)),
             _ => Box::new(TextWriter::new(None, false)),
         };
         let mut sb = String::new();
@@ -904,11 +917,13 @@ pub fn get_product_or_division_operator(format: OutputFormat, is_product: bool) 
     if is_product {
         match format {
             OutputFormat::Html => HtmlWriter::UNIT_PRODUCT,
+            OutputFormat::Xml => crate::output::xml_writer::unit_product_static(),
             _ => "\u{00B7}",
         }
     } else {
         match format {
             OutputFormat::Html => HtmlWriter::UNIT_DIVISION,
+            OutputFormat::Xml => crate::output::xml_writer::unit_division_static(),
             _ => "\u{2215}",
         }
     }

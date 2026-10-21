@@ -17,6 +17,7 @@ use crate::extension_methods::trim;
 use crate::math_parser_exception::{CResult, MathParserException};
 use crate::output::html_writer::HtmlWriter;
 use crate::output::text_writer::TextWriter;
+use crate::output::xml_writer::{self, XmlWriter};
 use crate::output::OutputWriter;
 use crate::solver::{QuadratureMethods, Solver};
 
@@ -86,6 +87,7 @@ fn enum_name(st: SolverTypes) -> String {
 pub struct SolverItem {
     pub input: Option<String>,
     pub html: Option<String>,
+    pub xml: Option<String>,
     pub rpn: Option<Rpn>,
 }
 
@@ -350,7 +352,10 @@ impl SolverBlock {
             if let Some(r) = rpn {
                 *parser.rpn.borrow_mut() = Some(r);
                 let html = parser.to_html()?;
-                self.items.borrow_mut()[i].html = Some(html);
+                let xml = parser.to_xml()?;
+                let mut items = self.items.borrow_mut();
+                items[i].html = Some(html);
+                items[i].xml = Some(xml);
             }
         }
         if self.is_figure.get() {
@@ -366,6 +371,8 @@ impl SolverBlock {
                 let mut items = self.items.borrow_mut();
                 let h = items[0].html.clone().unwrap_or_default();
                 items[0].html = Some(w.add_brackets(&h, 1, '(', ')'));
+                let x = items[0].xml.clone().unwrap_or_default();
+                items[0].xml = Some(xml_writer::brackets(&x, '(', ')'));
             }
         }
         Ok(())
@@ -768,6 +775,92 @@ impl SolverBlock {
             sb.push_str("]}");
         }
         sb
+    }
+
+    /// `ToXml()`: the block as Office Math, for the Word export.
+    pub fn to_xml(&self, parser: &MathParser) -> String {
+        use xml_writer::{brackets, run, run_f, NORMAL_TEXT};
+        let items = self.items.borrow();
+        let len = items.len();
+        let w = XmlWriter::new(Some(&parser.settings.borrow()), parser.phasor.get());
+        let xml = |i: usize| items[i].xml.clone().unwrap_or_default();
+        let input = |i: usize| items[i].input.clone().unwrap_or_default();
+        let name = type_name(self.stype);
+        if self.is_block() {
+            let mut x: Vec<String> = (0..len).map(xml).collect();
+            if self.stype == SolverTypes::Inline {
+                x = vec![x.join(&run("; "))];
+            } else if self.stype == SolverTypes::While {
+                x[0] = format!("{} {}", run_f(name, NORMAL_TEXT), x[0]);
+            }
+            return w.format_block(&x);
+        }
+        if self.stype == SolverTypes::Integral || self.stype == SolverTypes::Area {
+            return w.format_nary(name, &xml(2), &xml(3), &format!("{}{}{}", xml(0), run(" d"), xml(1)));
+        }
+        if self.stype == SolverTypes::Sum || self.stype == SolverTypes::Product {
+            return w.format_nary(name, &format!("{}{}{}", xml(1), run("="), xml(2)), &xml(3), &xml(0));
+        }
+        if self.stype == SolverTypes::Slope || self.stype == SolverTypes::Derivative {
+            return w.format_subscript(
+                &w.add_brackets(
+                    &(w.format_division(&run("d"), &format!("{}{}", run("d"), xml(1)), 0) + &xml(0)),
+                    1,
+                    ' ',
+                    '|',
+                ),
+                &format!("{}{}{}", run(&input(1)), run("\u{2009}=\u{2009}"), xml(2)),
+            );
+        }
+        let mut sb = String::new();
+        if self.stype == SolverTypes::Repeat && len > 4 {
+            sb.push_str(&run_f(name, NORMAL_TEXT));
+            let mut x: Vec<String> = vec![String::new(); len - 2];
+            x[0] = format!(
+                "{}{}{}{}{}{}",
+                run_f("for ", NORMAL_TEXT),
+                xml(1),
+                run("="),
+                xml(2),
+                run("..."),
+                xml(3)
+            );
+            x[1] = xml(0);
+            for i in 4..len {
+                x[i - 2] = xml(i);
+            }
+            sb.push_str(&w.format_block(&x));
+            return sb;
+        }
+        sb.push_str(&xml(0));
+        if self.stype == SolverTypes::Root {
+            if len > 4 && items[4].xml.is_some() {
+                sb.push_str(&(run("=") + &xml(4)));
+            } else {
+                sb.push_str(&run("=0"));
+            }
+        }
+        if self.stype == SolverTypes::Repeat {
+            sb.push_str(&run_f(" for ", NORMAL_TEXT));
+        } else {
+            sb.push_str(&run(";"));
+        }
+        sb.push_str(&xml(1));
+        if matches!(
+            self.stype,
+            SolverTypes::Repeat | SolverTypes::Slope | SolverTypes::Derivative
+        ) {
+            sb.push_str(&run("="));
+            sb.push_str(&xml(2));
+            if self.stype == SolverTypes::Repeat {
+                sb.push_str(&run("..."));
+                sb.push_str(&xml(3));
+            }
+        } else {
+            sb.push_str(&run("\u{2208}"));
+            sb.push_str(&brackets(&format!("{}{}{}", xml(2), run(";"), xml(3)), '[', ']'));
+        }
+        run_f(name, NORMAL_TEXT) + &brackets(&sb, '{', '}')
     }
 
     /// `ToString()`
