@@ -7,9 +7,11 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p target/tmp && export TMPDIR="$PWD/target/tmp"
 OUT=web/calcpad-web/public/wasm
-cargo build -p calcpad-wasm -p calcpad-docx-wasm --target wasm32-unknown-unknown --profile wasm
+cargo build -p calcpad-wasm --target wasm32-unknown-unknown --profile wasm
+cargo build -p calcpad-docx-wasm --target wasm32-unknown-unknown --profile wasm-size
 for m in calcpad_wasm calcpad_docx_wasm; do
-  wasm-bindgen target/wasm32-unknown-unknown/wasm/$m.wasm --target web --no-typescript --out-dir "$OUT"
+  profile=wasm; [ "$m" = calcpad_docx_wasm ] && profile=wasm-size
+  wasm-bindgen target/wasm32-unknown-unknown/$profile/$m.wasm --target web --no-typescript --out-dir "$OUT"
   if command -v wasm-opt >/dev/null 2>&1; then
     wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \
       "$OUT/${m}_bg.wasm" -o "$OUT/${m}_bg.wasm"

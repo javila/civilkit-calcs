@@ -15,11 +15,20 @@ debug = false
 [profile.test]
 opt-level = 3
 
-# The browser build of calcpad-wasm (tools/build_wasm.sh): optimized for size.
+# The browser build of the engine, calcpad-wasm (tools/build_wasm.sh). opt-level "s" rather
+# than "z": on Soil Stress and Deformations (a $Map of about a minute) "z" ran 2.3 times slower
+# than native code and "s" 1.6 times, for 118 KB more gzipped (640 KB). "3" was another 10 %
+# faster but 784 KB gzipped. SIMD gained nothing, and the talc allocator was slower than the
+# default (dlmalloc).
 [profile.wasm]
 inherits = "release"
-opt-level = "z"
+opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# The Word export (calcpad-docx-wasm), loaded on demand: size matters more than speed.
+[profile.wasm-size]
+inherits = "wasm"
+opt-level = "z"

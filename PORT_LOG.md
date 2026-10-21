@@ -207,3 +207,29 @@ LibreOffice: Calcpad's plots align labels with style rules that neither resvg no
 apply, and the SVG had `viewbox` in lower case (upstream renames it to `viewBox`; so does the
 port). Upstream bugs not carried over: FixPowerFormatting doubled a unit power's first digit,
 and ordered lists referred to numbering instances that do not exist.
+
+## Profiling Soil Stress and Deformations (the slowest sample)
+
+Times on the development machine, measured in pairs at the same load:
+
+| build | time |
+|---|---|
+| native release (CLI) | 25.9 s |
+| wasm, opt-level "z" (until now) | 60.7 s |
+| wasm, opt-level "s" (now) | 40.6 s |
+| wasm, opt-level "3" | about 10 % faster than "s", but 784 KB gzipped |
+| wasm "s" with simd128 | no change |
+| wasm "s" with the talc allocator | slower (61 to 66 s) |
+
+The engine module is 640 KB gzipped with "s" (522 KB with "z"); the Word module keeps "z".
+
+Where the time goes (native, macOS `sample`): about 45 % in malloc/free and dropping values,
+almost all of it unit arithmetic inside the custom function the `$Map` evaluates: every
+`Unit::multiply_or_divide` or `pow` makes about five heap allocations (two vectors, the powers
+slice, the factors cell and the unit). The interpreter loop (`eval_expr`) is next, at about 8 %.
+Sharing unit results through a cache would remove most of the allocations, but units carry
+interior mutability (factors, text), so that is a design change, not a cheap fix; it is left
+for later.
+
+Upstream's time could not be measured: the live API answers this sheet with HTTP 500 after
+about 16 s (with raster or vector plots), and .NET is not available here.
