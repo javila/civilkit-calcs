@@ -308,7 +308,7 @@ await drop([{ name: 'lib-check.cpd', text: 'k = 5\n' }, { name: 'data-check.csv'
 await page.waitForFunction(() => (window).calcpadFiles.library.list().length >= 2, null, { timeout: 10000 });
 // The dropped worksheet opened in a tab of its own; the check runs in a new one.
 await page.locator('.cprs-file-btn').click();
-await page.locator('.cprs-menu button', { hasText: 'New worksheet' }).click();
+await page.locator('.cprs-menu button', { hasText: /^New$/ }).click();
 await setEditor("'Library check\n#include lib-check.cpd\nk2 = k*2\n#read M from data-check.csv\nt = sum(M)\n#write M to out-check.csv");
 const libText = await frameText('Library check');
 check(/k2\s*=[\s\S]*=\s*10/.test(libText), `#include resolves against the library (k2 = 10) (${JSON.stringify(libText.slice(0, 160))})`);
@@ -539,6 +539,111 @@ await page.waitForTimeout(300);
 const inserted = await page.evaluate(() => (window).calcpadActiveEditor.getValue());
 check(inserted.includes(`'<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js"></script>`), `Insert > Libraries inserts the script tag (${JSON.stringify(inserted.slice(0, 90))})`);
 
+// ---- 8. Samples ----------------------------------------------------------------------------
+const MANIFEST = JSON.parse(readFileSync(join(web, 'calcpad-web', 'public', 'samples', 'manifest.json'), 'utf8'));
+const SAMPLES = MANIFEST.samples;
+// Every convert the UI makes, with the errors its response carried (X-Calcpad-Errors).
+await page.evaluate(() => {
+    const inner = window.fetch;
+    (window).__converts = [];
+    window.fetch = async (input, init) => {
+        const res = await inner(input, init);
+        if (String(input instanceof Request ? input.url : input).includes('/api/calcpad/convert') && typeof init?.body === 'string') {
+            try {
+                const body = JSON.parse(init.body);
+                const errors = JSON.parse(decodeURIComponent(res.headers.get('X-Calcpad-Errors') ?? '%5B%5D'));
+                const html = await res.clone().text();
+                (window).__converts.push({
+                    content: String(body.content ?? '').replace(/\r\n/g, '\n'), preview: !!body.extraFiles, errors,
+                    libraryImages: (html.match(/<img\b[^>]*\bsrc\s*=\s*["']data:image\//g) ?? []).length,
+                });
+            } catch { /* not ours to judge */ }
+        }
+        return res;
+    };
+});
+const sampleText = (s) => readFileSync(join(web, 'calcpad-web', 'public', s.file), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
+const dialog = page.locator('.cprs-samples');
+const items = () => page.locator('.cprs-samples .cprs-s-item');
+const shownIds = async () => (await items().evaluateAll((els) => els.map((e) => e.dataset.sampleId))).sort();
+async function openSamples() {
+    await page.locator('.cprs-file-btn').click();
+    await page.locator('.cprs-menu button', { hasText: 'Samples...' }).click();
+    await dialog.waitFor({ timeout: 10000 });
+}
+const expectIds = (pred) => SAMPLES.filter(pred).map((s) => s.id).sort();
+const haystack = (s) => `${s.title} ${s.description} ${s.codes.join(' ')} ${s.folder}`.toLowerCase();
+
+// The link on an empty editor opens the browser.
+await page.evaluate(() => (window).calcpadTabs.newUntitled(''));
+await page.locator('.cprs-samples-link').waitFor({ state: 'visible', timeout: 5000 }).then(() => check(true, 'an empty editor shows the samples link'), () => check(false, 'an empty editor shows the samples link'));
+await page.locator('.cprs-samples-link').click().catch(() => {});
+check(await dialog.isVisible(), 'the link opens the Samples browser');
+check(await items().count() === SAMPLES.length, `the browser lists all ${SAMPLES.length} samples (${await items().count()})`);
+await page.screenshot({ path: join(out, 'browser-samples.png') });
+
+// Search, code filter and groups narrow the list, to exactly the matching samples.
+await page.locator('.cprs-s-search').fill('punching');
+const punching = expectIds((s) => haystack(s).includes('punching'));
+const gotPunching = await shownIds();
+check(punching.length > 0 && punching.length < SAMPLES.length && JSON.stringify(gotPunching) === JSON.stringify(punching),
+    `search "punching" shows exactly the ${punching.length} samples that mention it (${gotPunching.length})`);
+await page.locator('.cprs-s-search').fill('');
+await page.locator('.cprs-s-code').selectOption('EN 1998-1');
+const seismic = expectIds((s) => s.codes.includes('EN 1998-1'));
+const gotSeismic = await shownIds();
+check(seismic.length > 0 && JSON.stringify(gotSeismic) === JSON.stringify(seismic), `the code filter EN 1998-1 shows exactly its ${seismic.length} samples (${gotSeismic.length})`);
+await page.locator('.cprs-s-code').selectOption('');
+await page.locator('.cprs-s-group', { hasText: /^Steel / }).click();
+const steel = expectIds((s) => s.group === 'Steel');
+check(JSON.stringify(await shownIds()) === JSON.stringify(steel), `the Steel group shows its ${steel.length} samples`);
+await page.locator('.cprs-s-group', { hasText: /^All / }).click();
+
+// The preview renders the selected sample, images included.
+const withImage = SAMPLES.find((s) => s.assets.some((a) => /\.png$/.test(a.key)) && !s.scripts && !s.read);
+await page.locator(`.cprs-s-item[data-sample-id="${withImage.id}"]`).click();
+const previewFrame = page.frameLocator('.cprs-s-preview');
+const previewImg = await previewFrame.locator('img').first().evaluate((img) => new Promise((ok) => {
+    if (img.complete) return ok(img.naturalWidth);
+    img.onload = () => ok(img.naturalWidth);
+    img.onerror = () => ok(0);
+}), null, { timeout: 30000 }).catch(() => 0);
+check(previewImg > 0, `the preview renders "${withImage.title}" with its image`);
+await page.screenshot({ path: join(out, 'browser-samples-preview.png') });
+await page.keyboard.press('Escape');
+
+// Every sample opens from the browser as an untitled copy and renders with no errors.
+const sampleFailures = [];
+examplePageErrors = [];
+// --sample-filter <text> opens only the samples whose upstream path contains it (for quick runs).
+const sampleFilter = arg('--sample-filter', '');
+for (const s of SAMPLES.filter((x) => x.upstream.includes(sampleFilter))) {
+    const text = sampleText(s);
+    await page.evaluate(() => { (window).__converts = []; });
+    await openSamples();
+    await page.locator('.cprs-s-search').fill(s.title);
+    await page.locator(`.cprs-s-item[data-sample-id="${s.id}"]`).click();
+    await page.locator('.cprs-s-open').click();
+    let got = null;
+    // Soil Stress and Deformations takes about a minute in WebAssembly, more on a busy machine.
+    for (let i = 0; i < 750 && !got; i++) {
+        await page.waitForTimeout(400);
+        got = await page.evaluate((head) => (window).__converts.find((c) => !c.preview && c.content.startsWith(head)) ?? null, text.slice(0, 120));
+    }
+    const tab = await page.evaluate(() => ({ title: (window).calcpadTabs.activeTab?.title, path: (window).calcpadTabs.activeTab?.filePath }));
+    const problems = [];
+    if (!got) problems.push('no render');
+    else if (got.errors.length) problems.push(`${got.errors.length} error(s): ${got.errors[0].message}`);
+    if (tab.title !== s.title || tab.path) problems.push(`opened as ${tab.title} (${tab.path})`);
+    // Its images come from the library (the transport turns them into data: URLs).
+    if (s.assets.some((a) => /\.(png|jpe?g|gif|svg)$/i.test(a.key)) && got && got.libraryImages === 0) problems.push('images not shown from the library');
+    if (problems.length) sampleFailures.push(`${s.upstream}: ${problems.join('; ')}`);
+    await page.evaluate(() => (window).calcpadTabs.close((window).calcpadTabs.activeId));
+}
+examplePageErrors = null;
+check(sampleFailures.length === 0, `all ${sampleFilter ? `"${sampleFilter}"` : SAMPLES.length} samples open from the browser and render with no errors (${sampleFailures.slice(0, 5).join(' | ')})`);
+for (const f of sampleFailures) console.log(`       ${f}`);
+
 // ---- server-only exports say so ----------------------------------------------------------
 const reportGroup = page.locator('.export-group').filter({ has: page.locator('.export-group-title', { hasText: /^Report$/ }) });
 // A persistent handler: with only waitForEvent('dialog') the alert stayed open and the click hung.
@@ -576,14 +681,14 @@ const subFailed = requests.filter((r) => r.url.includes('/calcs/') && r.url.ends
 check(subFailed > 0, 'under /calcs/ the engine is fetched from /calcs/wasm/');
 
 // ---- 3. no calculation request left the page ---------------------------------------------
-const STATIC = /^\/(calcs\/)?(|index\.html|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
+const STATIC = /^\/(calcs\/)?(|index\.html|samples\/.*|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
 const remote = requests.filter((r) => !r.url.startsWith('data:') && !r.url.startsWith('blob:'));
 const api = remote.filter((r) => new URL(r.url).pathname.includes('/api/'));
 // Other origins: only the exact library files on the list (and the one added in the test).
 const ALLOWED_FOREIGN = new Set([...LISTED.keys(), UNLISTED]);
 const foreign = remote.filter((r) => new URL(r.url).origin !== origin && !ALLOWED_FOREIGN.has(r.url) && !cspBlocked.has(r.url));
 // The upstream examples ask for their own images (Images/..., relative to the page): GETs too.
-const nonStatic = remote.filter((r) => new URL(r.url).origin === origin && (r.method !== 'GET' || !(STATIC.test(new URL(r.url).pathname) || /^\/(Images|Models)\/|^\/toc\.js$/.test(new URL(r.url).pathname))));
+const nonStatic = remote.filter((r) => new URL(r.url).origin === origin && (r.method !== 'GET' || !(STATIC.test(new URL(r.url).pathname) || /^\/(Images|Models)\/|^\/toc\.js$|^\/[^/]+\.(png|jpe?g|gif|svg)$/.test(new URL(r.url).pathname))));
 check(api.length === 0, `no /api/ request on the network (${api.length}: ${api.map((r) => r.url).join(', ')})`);
 check(foreign.length === 0, `no request to another origin (${foreign.map((r) => r.url).join(', ')})`);
 check(nonStatic.length === 0, `only GETs of static files (${nonStatic.map((r) => `${r.method} ${r.url}`).join(', ')})`);
