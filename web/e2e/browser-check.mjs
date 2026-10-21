@@ -18,7 +18,7 @@
 //   node e2e/browser-check.mjs [--ref ../../calcpad-ref] [--port 4180]
 import { replaceCStyleOperators } from '../calcpad-web/src/wasm/c-style.ts';
 import { createServer } from 'node:http';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -768,6 +768,84 @@ if (legacyMarker) {
 const bad = await hlApi('lint', { content: '  ' });
 check(bad.status === 400, 'lint of an empty document answers 400 like the server');
 check(requests.some((r) => r.url.endsWith('/wasm/calcpad_highlighter_wasm_bg.wasm')), 'the highlighter wasm was loaded from /wasm/');
+
+// ---- dark theme: form controls and drawings in the preview ----------------------------------
+// Upstream's samples style a select for a white page (black text, no border, appearance none) and
+// draw black-on-transparent SVG; on the dark preview both must stay readable (transport.ts).
+{
+    const luminance = (rgb) => {
+        const [r, g, b] = rgb.match(/[\d.]+/g).slice(0, 3).map((v) => { const c = Number(v) / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a, b) => { const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+    const sheet = [
+        "'<p>Section type -",
+        "'<select data-target=\"s\" style=\"font-weight:bold; border:none; background: none; color: black; box-shadow:none; appearance: none;\">",
+        "'<option value=1>IPE 100</option><option value=2>IPE 120</option></select></p>",
+        "'<svg width=\"80\" height=\"40\" viewBox=\"0 0 80 40\" xmlns=\"http://www.w3.org/2000/svg\"><text x=\"5\" y=\"20\" fill=\"black\">91</text></svg>",
+        "'<div style=\"background:#f0f0ee\"><p id=\"card\">light card text</p></div>",
+        "a = 1",
+    ].join('\n');
+    const read = async (colorScheme) => {
+        const ctx = await browser.newContext({ viewport: { width: 1400, height: 900 }, colorScheme });
+        await ctx.addInitScript(() => { if (window === window.top && !sessionStorage.getItem('seeded')) { sessionStorage.setItem('seeded', '1'); localStorage.clear(); } });
+        const p = await ctx.newPage();
+        await p.goto(`${origin}/`);
+        await p.waitForFunction(() => (window).calcpadActiveEditor != null, null, { timeout: 30000 });
+        await p.evaluate((t) => (window).calcpadActiveEditor.setValue(t), sheet);
+        let got = null;
+        for (let i = 0; i < 100 && !got; i++) {
+            await p.waitForTimeout(250);
+            for (const f of p.frames()) {
+                if (f === p.mainFrame()) continue;
+                got = await f.evaluate(() => {
+                    const sel = document.querySelector('select[data-target="s"]');
+                    const svg = document.querySelector('svg');
+                    if (!sel || !svg) return null;
+                    const cs = getComputedStyle(sel);
+                    const card = document.querySelector('#card');
+                    return {
+                        dark: document.body.classList.contains('dark-theme'),
+                        selColor: cs.color, selBg: cs.backgroundColor, selBorder: cs.borderTopWidth + ' ' + cs.borderTopStyle, selAppearance: cs.appearance,
+                        pageBg: getComputedStyle(document.body).backgroundColor,
+                        svgBg: getComputedStyle(svg).backgroundColor,
+                        cardText: card ? getComputedStyle(card).color : '', cardBg: card ? getComputedStyle(card.parentElement).backgroundColor : '',
+                        lightCard: !!document.querySelector('.cprs-light-card'),
+                    };
+                }).catch(() => null);
+                if (got) break;
+            }
+        }
+        await ctx.close();
+        return got;
+    };
+    const dark = await read('dark');
+    check(dark?.dark === true, 'the dark preview renders with the dark theme class');
+    if (dark) {
+        check(contrast(dark.selColor, dark.selBg) >= 4.5, `dark theme: the select's text has contrast against its own background (${dark.selColor} on ${dark.selBg}, ${contrast(dark.selColor, dark.selBg).toFixed(1)}:1)`);
+        check(contrast(dark.selBg, dark.pageBg) >= 1.1 || /^[1-9]/.test(dark.selBorder), `dark theme: the select is recognisable (border ${dark.selBorder}, appearance ${dark.selAppearance})`);
+        check(dark.selAppearance !== 'none' && /^[1-9]/.test(dark.selBorder), 'dark theme: the select has a border and a native arrow, not upstream\'s appearance:none');
+        check(dark.svgBg === 'rgb(255, 255, 255)', `dark theme: an inline SVG drawing sits on a white card (${dark.svgBg})`);
+        check(dark.lightCard && contrast(dark.cardText, dark.cardBg) >= 4.5, `dark theme: text on a worksheet's own light card is dark enough (${dark.cardText} on ${dark.cardBg})`);
+    }
+    const light = await read('light');
+    check(light?.dark === false && light.selColor === 'rgb(0, 0, 0)' && light.svgBg === 'rgba(0, 0, 0, 0)' && light.selAppearance === 'none', `light theme: the select and the SVG are as upstream wrote them (${light?.selColor}, ${light?.svgBg}, ${light?.selAppearance})`);
+}
+
+// ---- select, radio and checkbox elements mapped to text boxes (e2e/select-map-check.mjs) ----------
+{
+    let output = '';
+    let ok = true;
+    try {
+        // Asynchronous: this process serves the build the child loads.
+        output = await new Promise((done, fail) => execFile('node', [join(here, 'select-map-check.mjs'), '--url', origin, '--out', join(out, 'select-map')], { encoding: 'utf8', timeout: 900000 }, (err, stdout, stderr) => (err ? fail(Object.assign(err, { stdout, stderr })) : done(stdout))));
+    } catch (err) {
+        ok = false;
+        output = `${err.stdout ?? ''}${err.stderr ?? ''}`;
+    }
+    for (const line of output.split('\n').filter((l) => /^(ok  |FAIL)/.test(l))) check(line.startsWith('ok  '), `mapped controls: ${line.slice(5)}`);
+    check(ok, 'the mapped-controls check passes');
+}
 
 // ---- 6. the same build from a sub folder ---------------------------------------------------
 const sub = await context.newPage();

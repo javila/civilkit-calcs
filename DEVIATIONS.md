@@ -204,6 +204,43 @@ input form (Settings > Open #UI Documents in Input Mode) and carry the "input fo
 Samples browser. Result: 61 of the 101 samples converted (574 fields); 23 fields in 14 sheets
 remain.
 
+## D9. Dark preview: form controls, drawings and light cards stay readable
+
+**CalcpadCE:** a worksheet's own HTML is styled for a white page. The steel I-section samples
+write a select as `color:black; border:none; background:none; appearance:none`, draw SVG with
+black text and strokes, and one puts its inputs on a `#f0f0ee` card.
+
+**calcpad-rs:** in the dark Preview and Input views only (the rule is `@media screen` under the
+page's `dark-theme` class, so the print frame, the exports and the light theme are unchanged) the
+page carries a stylesheet (`PREVIEW_DARK` in `src/wasm/transport.ts`): inline SVG and `$Plot`
+images sit on a white card and other images get a white background; select, input and textarea
+get a readable colour, a border, a hover and focus outline, and a select the native arrow
+(`!important`, since the inline style would win; the #UI controls keep their own look); the
+`html` canvas gets the page background; and an element whose own inline style has a light
+background is marked `cprs-light-card` by a small inline script, inside which the text takes
+the light theme's colours. Checked by the browser check (computed contrast of the select, the
+SVG card, the light card, the light theme unchanged).
+
+## D10. select, radio and checkbox elements fill the text boxes they name
+
+**CalcpadCE:** docs/programming.md ("Advanced UI with Html and CSS") says a select, radio button
+or checkbox whose `name` or `data-target` equals the `id` of an element fills the text boxes
+inside it with the semicolon separated parts of its value, in order. Neither CalcpadCE's web
+frontend nor Calcpad.Server's pages do it, so in the browser build changing such a select did
+nothing.
+
+**calcpad-rs:** the input form's script (`calcpad-wasm/assets/ui-preview-script.html`) does it,
+for the `calcpad-ui-input` boxes (the #UI fields, which the sample conversion D8 produced for
+these sheets), and as an addition the change recalculates at once: the new values go to the
+host in one `uiValuesChange` message (one render), through the existing postMessage channel, so
+the sandbox and CSP are unchanged. A part that is not a number (the field's own rule) is
+skipped. A checkbox gives its `value` when ticked and `0` when not (the documentation does not
+say what unticked means). The chosen option, radio button and tick are plain HTML that a
+render would reset, so they ride along in the frame state the host already hands back
+(`__calcpadUiPosition`). Only the Input view maps (the Preview is static, and the Report shows
+the values the form saved); `e2e/select-map-check.mjs` clicks through it on the I-section,
+catalogue, Wind Load, radio and checkbox cases.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

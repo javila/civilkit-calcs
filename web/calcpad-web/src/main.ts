@@ -1428,6 +1428,23 @@ async function bootstrap(): Promise<void> {
             return;
         }
 
+        // Several #UI values changed at once, by a select, radio button or checkbox mapped to
+        // the text boxes of an element (ui-preview-script.html): record them all, render once.
+        if (data.type === 'uiValuesChange') {
+            if (!fromPreview || !Array.isArray(data.changes)) return;
+            const group = (data.groupId && groups.get(data.groupId)) || activeGroup;
+            const docKey = uiDocKeyFor(group);
+            let changed = false;
+            for (const c of data.changes) {
+                if (c && typeof c.varName === 'string' && uiOverrides.set(docKey, c.varName, String(c.newValue))) changed = true;
+            }
+            if (!changed) return;
+            uiOverridesDirty.add(docKey);
+            refreshUiDirtyIndicator();
+            void refreshPreviewFor(group);
+            return;
+        }
+
         // Results -> editor navigation. An 'output' line only makes sense in the unwrapped
         // view when the document has macros/includes, so the pane flips there scrolled to it
         // (the two-step); a 'source' line navigates Monaco directly, and the message's

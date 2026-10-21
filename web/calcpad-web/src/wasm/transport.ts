@@ -45,15 +45,53 @@ const NEEDS_SERVER: Record<string, string> = {
 };
 
 /**
- * In the dark theme, $Plot/$Map SVGs (transparent, with dark grey text and grid) sit on a white
- * "paper" card, as they print and as upstream's PNG plots look. Screen only: print is unchanged,
- * and the light theme has no rule.
+ * Dark theme, Preview and Input only (`@media screen`: the print frame and every export keep
+ * upstream's white page, and the light theme has no rule):
+ *
+ *  - Drawings and plots (inline SVG, $Plot/$Map images) sit on a white "paper" card, as they
+ *    print and as upstream's PNG plots look; other images get a white background. Their text and strokes are black, written for a
+ *    white page: the Steel I-Section drawing, the frame and FEA sketches, the plots.
+ *  - Form controls written for a white page (upstream's samples style a select with
+ *    `color:black; background:none; border:none; appearance:none`) get a readable colour, a
+ *    border and, for a select, the native chevron and a hover state. The inline styles win
+ *    unless overridden, hence !important. The #UI controls (calcpad-ui-*) have their own look.
+ *  - The page background also paints the frame's canvas (`html`), so a browser that keeps the
+ *    iframe canvas white cannot show the light grey text on white.
  */
-const PLOT_PAPER = '<style>@media screen{.dark-theme svg.plot,.dark-theme img.plot{background:#fff;padding:6pt;border-radius:6px;box-sizing:content-box}}</style>';
+const PREVIEW_DARK = '<style>@media screen{'
+    + 'html:has(>body.dark-theme){background-color:#1e1e1e}'
+    + '.dark-theme svg,.dark-theme img.plot{background:#fff;padding:6pt;border-radius:6px;box-sizing:content-box}'
+    // Raster drawings with a transparent background (the flat slab sketch) are black on clear.
+    + '.dark-theme img:not(.plot){background:#fff}'
+    + '.dark-theme select:not([class*="calcpad-ui"]),.dark-theme textarea:not([class*="calcpad-ui"]),'
+    + '.dark-theme input:not([class*="calcpad-ui"]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=button]):not([type=submit]):not([type=file]){'
+    + 'color:#e6e6e6!important;background-color:#2d2d30!important;border:1px solid #858585!important;border-radius:3px!important;box-shadow:none!important}'
+    + '.dark-theme select:not([class*="calcpad-ui"]){appearance:auto!important;-webkit-appearance:menulist!important;padding:1px 4px!important;cursor:pointer;color-scheme:dark}'
+    + '.dark-theme select:not([class*="calcpad-ui"]):hover,.dark-theme textarea:not([class*="calcpad-ui"]):hover,.dark-theme input:not([class*="calcpad-ui"]):not([type=checkbox]):not([type=radio]):hover{border-color:#4fc1ff!important}'
+    + '.dark-theme select:not([class*="calcpad-ui"]):focus,.dark-theme textarea:not([class*="calcpad-ui"]):focus,.dark-theme input:not([class*="calcpad-ui"]):focus{outline:1px solid #4fc1ff;outline-offset:1px}'
+    + '.dark-theme select option{background-color:#2d2d30;color:#e6e6e6}'
+    // A worksheet card with its own light inline background (the catalogue sample's grey panel):
+    // the text inside is set as the light theme sets it, or it would be light grey on light.
+    + '.dark-theme .cprs-light-card,.dark-theme .cprs-light-card .eq{color:#000}'
+    + '.dark-theme .cprs-light-card .eq var{color:#06d}.dark-theme .cprs-light-card .eq i{color:#086}'
+    + '.dark-theme .cprs-light-card .nary{color:#c080f0}.dark-theme .cprs-light-card .cond{color:#e000d0}'
+    + '.dark-theme .cprs-light-card a{color:#0645ad}'
+    + '.dark-theme .cprs-light-card select:not([class*="calcpad-ui"]),.dark-theme .cprs-light-card input:not([class*="calcpad-ui"]):not([type=checkbox]):not([type=radio]){'
+    + 'color:#000!important;background-color:#fff!important;border-color:#8a8a8a!important}'
+    + '.dark-theme .cprs-light-card select option{background-color:#fff;color:#000}'
+    + '}</style>'
+    // Marks the cards: elements whose own inline style gives them a light background.
+    + '<script>document.addEventListener("DOMContentLoaded",function(){var b=document.body;'
+    + 'if(!b||!b.classList.contains("dark-theme"))return;'
+    + 'document.querySelectorAll("[style*=background]").forEach(function(el){'
+    + 'if(el.closest("svg")||el.tagName==="SELECT"||el.tagName==="INPUT"||el.tagName==="TEXTAREA")return;'
+    + 'var m=getComputedStyle(el).backgroundColor.match(/[\\d.]+/g);if(!m)return;'
+    + 'var a=m.length>3?+m[3]:1;if(a<0.5)return;'
+    + 'if((0.2126*+m[0]+0.7152*+m[1]+0.0722*+m[2])/255>0.6)el.classList.add("cprs-light-card")})});</script>';
 
-function addPlotPaper(html: string): string {
+function addPreviewDark(html: string): string {
     const i = html.toLowerCase().lastIndexOf('</head>');
-    return i < 0 ? html : html.slice(0, i) + PLOT_PAPER + html.slice(i);
+    return i < 0 ? html : html.slice(0, i) + PREVIEW_DARK + html.slice(i);
 }
 
 /** A file the engine can read (#include, #read): an absolute path and its bytes. */
@@ -336,7 +374,7 @@ export function installWasmTransport(): WasmTransport {
             let html = out.html ?? '';
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
-            html = addPlotPaper(html);
+            html = addPreviewDark(html);
             // Worksheet scripts: only listed library files, checked by hash; no network access.
             html = applyScriptPolicy(html, libraries(), window.location.origin);
             if (out.files?.length && transport.onFilesWritten) {
