@@ -14,6 +14,8 @@ interface Host {
     appendOutput: (level: 'info' | 'warn' | 'error', message: string) => void;
     /** The message bridge: the File menu prints through the Export tab's Save PDF path. */
     bridge: { handleMessage(message: unknown): void };
+    /** Shows a sidebar tab ('export'). */
+    showSidebarTab?: (id: string) => void;
 }
 
 export function installWebFiles(transport: WasmTransport, host: Host): WebFiles {
@@ -25,6 +27,7 @@ export function installWebFiles(transport: WasmTransport, host: Host): WebFiles 
         log: host.appendOutput,
         print: () => host.bridge.handleMessage({ type: 'generatePdf', variant: 'report' }),
         openSamples: () => void samples.open(),
+        openExport: host.showSidebarTab ? () => host.showSidebarTab!('export') : undefined,
     });
     // Images a worksheet names (Images/..., ./x.png) are shown from the library.
     transport.resolveFile = (key) => library.get(key)?.data;

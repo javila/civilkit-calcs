@@ -2,7 +2,7 @@
 // drag and drop) is wired to Tauri's native dialogs only; this module gives the web build its
 // own, without a server:
 //
-//   File menu (status bar, right)  New, Open, Save, Save As, Recent, Print, the library
+//   File menu (menu bar, top)      New, Open, Samples, Save, Save As, Recent, Print, Export, the library
 //   Ctrl+O / Ctrl+S / Ctrl+Shift+S open and save
 //   drag and drop                   .cpd opens in the editor, any other file joins the library
 //
@@ -37,6 +37,8 @@ export interface WebFilesOptions {
     print: () => void;
     /** Opens the Samples browser. */
     openSamples?: () => void;
+    /** Shows the Export tab (HTML, PDF, Word, #write). */
+    openExport?: () => void;
 }
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
@@ -296,11 +298,16 @@ export class WebFiles {
     private installButton(): void {
         const style = document.createElement('style');
         style.textContent = `
-.cprs-file-btn{position:fixed;right:8px;bottom:0;height:22px;z-index:1000;border:0;padding:0 10px;
-  background:var(--vscode-statusBar-background,#007acc);color:var(--vscode-statusBar-foreground,#fff);
-  font:inherit;font-size:12px;cursor:pointer}
-.cprs-file-btn:hover{background:rgba(255,255,255,.15)}
-.cprs-menu{position:fixed;right:8px;bottom:26px;z-index:1001;min-width:260px;max-height:70vh;overflow:auto;
+body{display:flex;flex-direction:column}
+#app{height:auto!important;flex:1;min-height:0}
+.cprs-menubar{flex:none;display:flex;align-items:center;height:28px;padding:0 4px;gap:2px;font-size:13px;
+  background:var(--vscode-titleBar-activeBackground,var(--vscode-sideBar-background,#f3f3f3));
+  color:var(--vscode-titleBar-activeForeground,var(--vscode-foreground,#333));
+  border-bottom:1px solid var(--vscode-titleBar-border,var(--vscode-panel-border,#ddd))}
+.cprs-file-btn{height:22px;border:0;padding:0 10px;border-radius:3px;background:none;color:inherit;font:inherit;cursor:pointer}
+.cprs-file-btn:hover,.cprs-file-btn.open{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08))}
+.cprs-menubar .cprs-brand{margin-left:auto;padding:0 10px;opacity:.6;font-size:12px}
+.cprs-menu{position:fixed;left:4px;top:28px;z-index:1001;min-width:260px;max-height:80vh;overflow:auto;
   background:var(--vscode-menu-background,#fff);color:var(--vscode-menu-foreground,#222);
   border:1px solid var(--vscode-menu-border,#c8c8c8);box-shadow:0 4px 16px rgba(0,0,0,.2);font-size:13px;padding:4px 0}
 .cprs-menu button{display:flex;justify-content:space-between;gap:16px;width:100%;border:0;background:none;
@@ -314,15 +321,22 @@ export class WebFiles {
 .cprs-menu .cprs-row button.cprs-x{width:auto;padding:5px 10px}
 .cprs-menu .cprs-empty{padding:4px 14px;opacity:.6}`;
         document.head.appendChild(style);
+        // A menu bar above the app (the app is a full-height flex column below it).
+        const bar = document.createElement('div');
+        bar.className = 'cprs-menubar';
+        bar.setAttribute('role', 'menubar');
         const btn = document.createElement('button');
         btn.className = 'cprs-file-btn';
         btn.textContent = 'File';
-        btn.title = 'Open, save, print and the file library';
+        btn.setAttribute('role', 'menuitem');
+        btn.title = 'New, open, samples, save, recent files, print and export';
         btn.addEventListener('click', e => {
             e.stopPropagation();
             this.toggleMenu();
         });
-        document.body.appendChild(btn);
+        this.fileButton = btn;
+        bar.appendChild(btn);
+        document.body.insertBefore(bar, document.body.firstChild);
         document.addEventListener('mousedown', e => {
             if (this.menu && !this.menu.contains(e.target as Node) && e.target !== btn) this.closeMenu();
         });
@@ -331,9 +345,12 @@ export class WebFiles {
         });
     }
 
+    private fileButton: HTMLButtonElement | null = null;
+
     private closeMenu(): void {
         this.menu?.remove();
         this.menu = null;
+        this.fileButton?.classList.remove('open');
     }
 
     private toggleMenu(): void {
@@ -367,17 +384,19 @@ export class WebFiles {
             menu.appendChild(d);
         };
         const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
-        item('New worksheet', () => this.newWorksheet());
-        if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());
+        item('New', () => this.newWorksheet());
         item('Open...', () => void this.open(), `${mod}+O`);
+        if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());
         item('Save', () => void this.save(), `${mod}+S`);
         item('Save As...', () => void this.save(true), `${mod}+Shift+S`);
-        item('Print / Save as PDF...', () => this.o.print());
         menu.appendChild(document.createElement('hr'));
         head('Recent');
         const recent = readRecent();
         if (!recent.length) empty('No recent worksheets');
         for (const r of recent) item(r.name, () => void this.openRecent(r), new Date(r.time).toLocaleDateString());
+        menu.appendChild(document.createElement('hr'));
+        item('Print PDF...', () => this.o.print());
+        if (this.o.openExport) item('Export...', () => this.o.openExport!());
         menu.appendChild(document.createElement('hr'));
         head('Library (#include and #read)');
         const files = this.o.library.list();
@@ -403,5 +422,6 @@ export class WebFiles {
         item('Add files to the library...', () => void this.addToLibrary());
         document.body.appendChild(menu);
         this.menu = menu;
+        this.fileButton?.classList.add('open');
     }
 }
