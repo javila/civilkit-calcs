@@ -7,6 +7,8 @@
 //   { id, kind: 'call', method, body }                 method(body) -> JSON string
 //   { id, kind: 'snippets', category }                 snippets(category) -> JSON string
 
+export {};
+
 type FileEntry = { path: string; data: Uint8Array };
 
 type Req =
@@ -27,8 +29,8 @@ let module_: Promise<Highlighter> | null = null;
 function load(base: string): Promise<Highlighter> {
     if (!module_) {
         module_ = (async () => {
-            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_highlighter.js`)) as Highlighter;
-            await mod.default({ module_or_path: `${base}wasm/calcpad_highlighter_bg.wasm` });
+            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_highlighter_wasm.js`)) as Highlighter;
+            await mod.default({ module_or_path: `${base}wasm/calcpad_highlighter_wasm_bg.wasm` });
             return mod;
         })();
     }

@@ -38,7 +38,7 @@ pattern!(
     multiline_macro_def,
     format!(r"(?i)#def\s+([{MACRO_NAME_START_CHARS}][{MACRO_NAME_CHARS}]*\$?)(?:\(([^)]*)\))?\s*$")
 );
-pattern!(include_statement, r"(?i)^\s*#include\s+(.+)$".to_string());
+pattern!(include_statement, r"(?i)^\s*#include\s+(.+)$");
 // funcName(params) = $Inline{ | $Block{ | $While{
 pattern!(
     function_with_command_block,
@@ -46,7 +46,7 @@ pattern!(
         r"(?i)^\s*([{IDENTIFIER_START_CHARS}][{IDENTIFIER_CHARS}]*)\s*\(([^)]*)\)\s*=\s*\$(Inline|Block|While)\s*\{{"
     )
 );
-pattern!(loose_macro_name_extract, r"(?i)#def\s+([^\s(=]+)".to_string());
+pattern!(loose_macro_name_extract, r"(?i)#def\s+([^\s(=]+)");
 pattern!(
     valid_macro_name,
     format!(r"^[{MACRO_NAME_START_CHARS}][{MACRO_NAME_CHARS}]*\$?$")

@@ -78,7 +78,7 @@ impl CalcpadTokenizer {
         }
         let mut sorted: Vec<Vec<char>> = self.macro_parameters.iter().map(|p| p.chars().collect()).collect();
         // Longer parameters first (stable)
-        sorted.sort_by(|a, b| b.len().cmp(&a.len()));
+        sorted.sort_by_key(|p| std::cmp::Reverse(p.len()));
 
         if sorted.is_empty() {
             self.add_token(comment_type, text);
@@ -168,7 +168,7 @@ impl CalcpadTokenizer {
             let mc: Vec<char> = m.chars().collect();
             if mc.len() <= text.len() {
                 let tail = to_string(&text[text.len() - mc.len()..]);
-                if eq_ignore_case(&tail, m) && best.as_ref().map_or(true, |b| mc.len() > b.len()) {
+                if eq_ignore_case(&tail, m) && best.as_ref().is_none_or(|b| mc.len() > b.len()) {
                     best = Some(mc);
                 }
             }
@@ -197,7 +197,7 @@ impl CalcpadTokenizer {
             let pc: Vec<char> = p.chars().collect();
             if pc.len() < text.len()
                 && text[text.len() - pc.len()..] == pc[..]
-                && best.as_ref().map_or(true, |b| pc.len() > b.len())
+                && best.as_ref().is_none_or(|b| pc.len() > b.len())
             {
                 best = Some(pc);
             }

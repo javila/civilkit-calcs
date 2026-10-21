@@ -84,6 +84,18 @@ impl TokenType {
         Self::NAMES[self as usize]
     }
 
+    /// The CSS class of the unwrapped code listing: the name with a lower case first letter, the
+    /// same names as the editor's semantic token types (`JavaScript` is `javascript`).
+    pub fn class_name(self) -> String {
+        if self == TokenType::JavaScript {
+            return "javascript".to_string();
+        }
+        let n = self.name();
+        let mut c = n.chars();
+        let first = c.next().map(|f| f.to_lowercase().to_string()).unwrap_or_default();
+        format!("{first}{}", c.as_str())
+    }
+
     pub fn from_i32(v: i32) -> Option<TokenType> {
         use TokenType::*;
         const ALL: [TokenType; 31] = [

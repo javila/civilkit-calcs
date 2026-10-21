@@ -8,8 +8,11 @@
 //! returned with the result, for the page to save.
 //!
 //! Differences from the server:
-//! * the code view (`unwrap` / macro errors) is not syntax highlighted (the server's
-//!   fallback when Calcpad.Highlighter fails), since Calcpad.Highlighter is not ported;
+//! * the code view (`unwrap` / macro errors) is highlighted by Calcpad.Highlighter's tokenizer,
+//!   which lives in a second wasm (calcpad-highlighter-wasm). The page makes it available as
+//!   `globalThis.calcpadTokenizeListing`; without it the listing is plain (the server's
+//!   fallback when tokenizing fails) and the answer carries `"needsHighlighter": true` so the
+//!   page can load the module and convert again;
 //! * the bundled fonts (`BundledFonts`) are not compiled in: the page passes the same
 //!   `<style>`/`<script>` markup once with [`set_report_head`];
 //! * the datagrid libraries (`BundledUiAssets`) are left as the marker [`UI_ASSETS_MARKER`],
@@ -35,7 +38,16 @@ const UI_PREVIEW_SCRIPT: &str = include_str!("../assets/ui-preview-script.html")
 /// Stands where `BundledUiAssets.GetHeadMarkup()` goes; the page swaps the libraries in.
 pub const UI_ASSETS_MARKER: &str = "<!--calcpad-ui-assets-->";
 
+/// Tokenizes a code listing; the answer is the JSON of `tokenize_listing`.
+type ListingTokenizerFn = fn(&str) -> String;
+/// Per listing line: (column, length, CSS class) of its tokens.
+type ListingTokens = HashMap<usize, Vec<(usize, usize, String)>>;
+
 thread_local! {
+    /// Set when a code listing was built without tokens (see [`tokenize_listing`]).
+    static LISTING_UNHIGHLIGHTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Native hook standing in for `globalThis.calcpadTokenizeListing` (tests).
+    static LISTING_TOKENIZER: RefCell<Option<ListingTokenizerFn>> = const { RefCell::new(None) };
     static FILES: RefCell<HashMap<String, Vec<u8>>> = RefCell::new(HashMap::new());
     static WRITTEN: RefCell<Vec<(String, Vec<u8>)>> = const { RefCell::new(Vec::new()) };
     static REPORT_HEAD: RefCell<String> = const { RefCell::new(String::new()) };
@@ -45,6 +57,74 @@ thread_local! {
 extern "C" {
     #[wasm_bindgen(js_namespace = Date)]
     fn now() -> f64;
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+extern "C" {
+    /// Provided by the page once the highlighter module is loaded; throws until then.
+    #[wasm_bindgen(catch, js_name = calcpadTokenizeListing)]
+    fn js_tokenize_listing(text: &str) -> Result<String, JsValue>;
+}
+
+/// Installs the function that tokenizes a code listing on non-wasm targets (tests).
+pub fn set_listing_tokenizer(f: Option<fn(&str) -> String>) {
+    LISTING_TOKENIZER.with(|t| *t.borrow_mut() = f);
+}
+
+/// `{"<line>": [[column, length, class], ...]}` for the listing, or `None` when no tokenizer
+/// is available.
+fn tokenize_listing(text: &str) -> Option<ListingTokens> {
+    #[cfg(target_arch = "wasm32")]
+    let answer = js_tokenize_listing(text).ok();
+    #[cfg(not(target_arch = "wasm32"))]
+    let answer = LISTING_TOKENIZER.with(|t| t.borrow().map(|f| f(text)));
+    let Some(answer) = answer else {
+        LISTING_UNHIGHLIGHTED.with(|u| u.set(true));
+        return None;
+    };
+    let v: Json = serde_json::from_str(&answer).ok()?;
+    let mut out = HashMap::new();
+    for (line, items) in v.as_object()? {
+        let mut tokens = Vec::new();
+        for item in items.as_array()? {
+            let a = item.as_array()?;
+            tokens.push((
+                a.first()?.as_u64()? as usize,
+                a.get(1)?.as_u64()? as usize,
+                a.get(2)?.as_str()?.to_string(),
+            ));
+        }
+        out.insert(line.parse().ok()?, tokens);
+    }
+    Some(out)
+}
+
+/// `CalcpadService.HighlightLine`: slices the source line (not the token text, so normalised
+/// glyphs list as written) into `<span class="...">` runs.
+fn highlight_line(line: &str, tokens: Option<&Vec<(usize, usize, String)>>) -> String {
+    let Some(tokens) = tokens.filter(|_| !line.is_empty()) else {
+        return html_encode(line);
+    };
+    let chars: Vec<char> = line.chars().collect();
+    let slice = |a: usize, b: usize| -> String { html_encode(&chars[a..b].iter().collect::<String>()) };
+    let mut result = String::new();
+    let mut pos = 0;
+    for (column, length, class) in tokens {
+        let end = (column + length).min(chars.len());
+        if *column < pos || end <= *column {
+            continue;
+        }
+        if *column > pos {
+            result.push_str(&slice(pos, *column));
+        }
+        result.push_str(&format!("<span class=\"{}\">{}</span>", class, slice(*column, end)));
+        pos = end;
+    }
+    if pos < chars.len() {
+        result.push_str(&slice(pos, chars.len()));
+    }
+    result
 }
 
 #[wasm_bindgen(start)]
@@ -167,6 +247,9 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             Ok(bytes) => out["xlsx"] = serde_json::json!(base64_encode(&bytes)),
             Err(e) => out["xlsxError"] = serde_json::json!(e),
         }
+    }
+    if LISTING_UNHIGHLIGHTED.with(|u| u.replace(false)) {
+        out["needsHighlighter"] = serde_json::Value::Bool(true);
     }
     out.to_string()
 }
@@ -460,8 +543,8 @@ fn html_decode(s: &str) -> String {
     out
 }
 
-/// `CalcpadService.ConvertCodeToHtml` (the listing is not syntax highlighted: the server's
-/// own fallback when tokenizing fails, since Calcpad.Highlighter is not ported).
+/// `CalcpadService.ConvertCodeToHtml`. The listing is highlighted with the tokens of
+/// [`tokenize_listing`]; without a tokenizer it is plain, as on the server when tokenizing fails.
 fn convert_code_to_html(code: &str, error_list: &[CalcpadError]) -> String {
     const ERROR_STRING: &str = "#Error";
     let mut by_output: HashMap<i32, String> = HashMap::new();
@@ -491,6 +574,11 @@ fn convert_code_to_html(code: &str, error_list: &[CalcpadError]) -> String {
     let mut sb = String::new();
     let lines: Vec<&str> = code.split(['\r', '\n']).filter(|l| !l.is_empty()).collect();
     sb.push_str("<div class=\"code\">\n");
+    let line_texts: Vec<&str> = lines
+        .iter()
+        .map(|l| l.find('\u{000B}').map_or(*l, |v| &l[..v]))
+        .collect();
+    let tokens_by_line = tokenize_listing(&line_texts.join("\n"));
     let mut line_number = 0;
     for line in &lines {
         line_number += 1;
@@ -524,7 +612,8 @@ fn convert_code_to_html(code: &str, error_list: &[CalcpadError]) -> String {
         } else if line_text.contains("<a href=\"#0\" data-text=\"") || line_text.starts_with("Error in") {
             sb.push_str(&format!("<span class=\"err\">{}</span>", line_text));
         } else {
-            sb.push_str(&html_encode(line_text));
+            let tokens = tokens_by_line.as_ref().and_then(|t| t.get(&(line_number as usize - 1)));
+            sb.push_str(&highlight_line(line_text, tokens));
         }
         sb.push_str("</p>\n");
     }

@@ -1,16 +1,29 @@
 #!/bin/sh
-# Builds calcpad-wasm (the engine) and calcpad-docx-wasm (the Word export, loaded on demand)
-# for the browser into web/calcpad-web/public/wasm.
+# Builds the wasm modules for the browser into web/calcpad-web/public/wasm:
+#   calcpad-wasm              the calculation engine
+#   calcpad-docx-wasm         the Word export (loaded on demand)
+#   calcpad-highlighter-wasm  the editor's highlighting, linting and snippets (loaded on first use)
 # Requires the wasm32-unknown-unknown target, the wasm-bindgen CLI (same version as the
 # wasm-bindgen crate) and, optionally, wasm-opt (binaryen).
+# Usage: tools/build_wasm.sh [engine|docx|highlighter]   (default: all)
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p target/tmp && export TMPDIR="$PWD/target/tmp"
 OUT=web/calcpad-web/public/wasm
-cargo build -p calcpad-wasm --target wasm32-unknown-unknown --profile wasm
-cargo build -p calcpad-docx-wasm --target wasm32-unknown-unknown --profile wasm-size
-for m in calcpad_wasm calcpad_docx_wasm; do
-  profile=wasm; [ "$m" = calcpad_docx_wasm ] && profile=wasm-size
+
+for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm; do
+  case $m in
+    calcpad_wasm) crate=calcpad-wasm; profile=wasm ;;
+    calcpad_docx_wasm) crate=calcpad-docx-wasm; profile=wasm-size ;;
+    calcpad_highlighter_wasm) crate=calcpad-highlighter-wasm; profile=wasm-size ;;
+  esac
+  case "${1:-all}" in
+    all) ;;
+    engine) [ $m = calcpad_wasm ] || continue ;;
+    docx) [ $m = calcpad_docx_wasm ] || continue ;;
+    highlighter) [ $m = calcpad_highlighter_wasm ] || continue ;;
+  esac
+  cargo build -p $crate --target wasm32-unknown-unknown --profile $profile
   wasm-bindgen target/wasm32-unknown-unknown/$profile/$m.wasm --target web --no-typescript --out-dir "$OUT"
   if command -v wasm-opt >/dev/null 2>&1; then
     wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals \

@@ -392,3 +392,23 @@ pub fn prettify(request_json: &str) -> String {
     };
     json!({ "content": CalcpadPrettifier::prettify(content, Some(&options)) }).to_string()
 }
+
+/// The tokens of an unwrapped code listing, for `CalcpadService.HighlightLine`: the whole listing
+/// is tokenized as one document and the answer maps each line to `[column, length, class]`
+/// triples (columns and lengths in Unicode scalar values, not UTF-16: the caller slices its own
+/// scalar-value lines). `None` tokens are left out.
+pub fn tokenize_listing(text: &str) -> String {
+    let result = CalcpadTokenizer::new().tokenize(text);
+    let mut by_line = serde_json::Map::new();
+    for (line, tokens) in &result.tokens_by_line {
+        let items: Vec<Value> = tokens
+            .iter()
+            .filter(|t| t.token_type != crate::tokenizer::models::TokenType::None)
+            .map(|t| json!([t.column, t.length, t.token_type.class_name()]))
+            .collect();
+        if !items.is_empty() {
+            by_line.insert(line.to_string(), Value::Array(items));
+        }
+    }
+    Value::Object(by_line).to_string()
+}

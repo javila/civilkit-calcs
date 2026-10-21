@@ -7,6 +7,11 @@
 //   { id, kind: 'head', markup }             setting the report head (the bundled fonts)
 //   { id, kind: 'docx', html, expressions }  the .docx bytes of a rendered page (calcpad-docx-wasm,
 //                                            loaded on first use with DejaVu Sans for drawing text)
+//
+// The code view (unwrapped listing, macro errors) is syntax highlighted by the highlighter
+// wasm. The engine reads the tokens through globalThis.calcpadTokenizeListing; when a convert
+// builds a listing without it the answer says "needsHighlighter", and the worker loads the
+// highlighter module (once) and converts again.
 
 type FileEntry = { path: string; data: Uint8Array };
 
@@ -47,7 +52,27 @@ interface Engine {
     version: () => string;
 }
 
+interface ListingTokenizer {
+    default: (input?: unknown) => Promise<unknown>;
+    tokenize_listing: (text: string) => string;
+}
+
 let engine: Promise<Engine> | null = null;
+let highlighter: Promise<void> | null = null;
+
+/** Loads the highlighter wasm and gives the engine its tokenizer. */
+function loadHighlighter(base: string): Promise<void> {
+    if (!highlighter) {
+        highlighter = (async () => {
+            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_highlighter_wasm.js`)) as ListingTokenizer;
+            await mod.default({ module_or_path: `${base}wasm/calcpad_highlighter_wasm_bg.wasm` });
+            (globalThis as Record<string, unknown>).calcpadTokenizeListing = (text: string) => mod.tokenize_listing(text);
+        })();
+        // A failed load is not retried by every render; the listing just stays plain.
+        highlighter.catch(() => {});
+    }
+    return highlighter;
+}
 
 function load(base: string): Promise<Engine> {
     if (!engine) {
@@ -81,7 +106,16 @@ self.onmessage = async (e: MessageEvent<Req>) => {
                 self.postMessage({ id: req.id, result: '{}' });
                 break;
             default:
-                self.postMessage({ id: req.id, result: mod.convert(req.body, req.unwrap) });
+                {
+                    let result = mod.convert(req.body, req.unwrap);
+                    if (result.includes('"needsHighlighter":true') && !(globalThis as Record<string, unknown>).calcpadTokenizeListing) {
+                        try {
+                            await loadHighlighter(req.base);
+                            result = mod.convert(req.body, req.unwrap);
+                        } catch { /* the plain listing stands */ }
+                    }
+                    self.postMessage({ id: req.id, result });
+                }
         }
     } catch (err) {
         self.postMessage({ id: req.id, error: err instanceof Error ? err.message : String(err) });

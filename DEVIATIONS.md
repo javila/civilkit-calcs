@@ -223,5 +223,61 @@ These are not deliberate behaviour changes, but they can make output differ:
   data URLs (`BundledFonts`). `calcpad-wasm` does not compile them in (they would add about
   640 KB to the module); the page fetches them once from `report-fonts/` and passes the same
   `<style>` and `window.__calcpadFonts` markup with each request, so the HTML matches.
-* **Browser build, code view:** the unwrapped/macro-error listing is not syntax highlighted,
-  which is Calcpad.Server's own fallback when the Calcpad.Highlighter tokenizer fails.
+* **Browser build, code view:** the unwrapped/macro-error listing is coloured by the
+  highlighter wasm, which the engine worker loads on demand (the engine asks through
+  `globalThis.calcpadTokenizeListing`; without it the listing is plain, which is
+  Calcpad.Server's own fallback when the tokenizer fails, and the answer says
+  `needsHighlighter` so the worker loads the module and converts again).
+
+## Calcpad.Highlighter (calcpad-highlighter)
+
+The port reproduces the upstream tokens, diagnostics and definitions; the list below is where
+it differs. Tests: `calcpad-highlighter/tests` and the unit tests in `calcpad-highlighter/src`.
+
+* **H1. Columns are Unicode scalar values inside, UTF-16 units on the wire.** C# strings are
+  UTF-16, so a character outside the BMP is two columns upstream. The port scans `&[char]`,
+  and `api` converts every column and length it returns to UTF-16 (and the cursor column of
+  `symbol-at-position` back). `tokenize_listing`, which only the engine reads, stays in scalar
+  values. Pinned by `tests/api.rs` and the browser check.
+* **H2. .NET character classes.** `char.IsLetter`/`IsDigit` are approximated from Rust's
+  `is_alphabetic` and a short table of Nd ranges (`text.rs`); OrdinalIgnoreCase is invariant
+  simple upper-casing. They differ from .NET only for exotic scripts.
+* **H3. Regexes** use the Rust `regex` crate (no lookaround; only the patterns the highlighter
+  applies are compiled). `IgnoreCase` is Unicode simple folding; `$` is written `\n?\z` where
+  .NET `$` also matches before a final newline.
+* **H4. JSON.** `System.Text.Json` is `serde_json` with `preserve_order`; nesting deeper than
+  64 is rejected like `JsonDocument`, but serde_json also rejects lone surrogate escapes and
+  numbers such as `1e999`, and collapses duplicate property names. `preserve_order` is
+  switched on for the workspace by feature unification, so `calcpad-core`'s `serde_json`
+  also keeps insertion order (its tests are unchanged).
+* **H5. Uncaught C# exceptions return gracefully.** An empty document to
+  `ContentResolver.GetStagedContent` (C# `ArgumentException`) is one empty line; a metadata
+  comment with a non-string array item (`InvalidOperationException`) is not metadata;
+  `Substring` past the end of a line in the semantic, naming and usage validators, an empty
+  macro parameter name in `StringBuilder.Replace`, and the other spots listed in the code as
+  "C# would throw" are handled instead of crashing.
+* **H6. Disk access** goes through `IncludeProvider` (`NoDisk` by default, `NativeDisk` for
+  native hosts, `MemoryFiles` in the browser). `Path.GetFullPath`, `Combine` and
+  `GetDirectoryName` are reimplemented on strings (Unix rules, Windows rules when a path
+  starts with a drive letter or `\\`); SHA-256 for `IncludedFileHashes` is in-tree.
+* **H7. Set and dictionary order.** .NET `FrozenSet`/`FrozenDictionary` enumeration order is
+  unspecified; the port uses declaration order where the C# code iterates (`CommandBlocks`,
+  `KeywordToType` for the `#else if` versus `#else` prefix match, `commands_with_brace`).
+  `Dictionary<,>`/`HashSet<>` enumerate in insertion order (`text::StrMap`/`StrSet`), also
+  reproducing slot reuse in `LintIgnoreRegionParser`. `List.Sort` (unstable above 16
+  elements) is a stable sort for the macro parameters.
+* **H8. Not ported:** the `ContentResolutionCache` (every request resolves again, a
+  one-document editor re-resolves in milliseconds), `CalcpadLinter.LintAsync` (a `Task.Run`
+  wrapper), the console warning for invalid script/style/svg tag nesting, request
+  cancellation (a superseded request is dropped by the page), and the C# `Console` output.
+* **H9. Snippet text.** The 24 snippet descriptions that contained an em-dash use a spaced
+  hyphen; everything else in `snippets.json` is the C# data in C# order. `AllSnippets` is a
+  `FrozenSet` upstream (unspecified order); the port keeps registry order. The `snippets` JSON
+  mimics the default `System.Text.Json` encoder escaping.
+* **H10. Browser wiring.** The editor's `highlight`, `lint`, `definitions`,
+  `symbol-at-position`, `prettify` and `snippets` requests are answered by the highlighter
+  wasm with the server's JSON shapes and status codes (400 for an empty document, with
+  `{"status", "error"}` carrying them across the worker). `sourceFilePath` is looked up in the
+  page's file library like the engine's `#include`. The `HtmlComment` test that renders a
+  worksheet through the Calcpad.Core parsers (`SettingsDirective_AppliesFourDecimals...`) is
+  `#[ignore]`d in the highlighter crate; the Core behaviour is covered by the engine tests.

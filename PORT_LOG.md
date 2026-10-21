@@ -233,3 +233,34 @@ for later.
 
 Upstream's time could not be measured: the live API answers this sheet with HTTP 500 after
 about 16 s (with raster or vector plots), and .NET is not available here.
+
+## Calcpad.Highlighter
+
+Ported as `calcpad-highlighter` (library) and `calcpad-highlighter-wasm` (browser module),
+from the same commit `0cf438f`. The snippet data (7,595 lines of C# object initializers) is
+one generated JSON file; the rest is ported by hand with the C# folder structure.
+
+| Upstream | C# lines | calcpad-rs | Rust lines |
+|---|---:|---|---:|
+| Tokenizer/ (CalcpadTokenizer*.cs, ParseModeTracker, Models) | 4192 | tokenizer/ | 3407 |
+| ContentResolution/ + Calcpad.Core PathRoots | 2615 | content_resolution/, path_roots.rs | 3753 |
+| Linter/ (CalcpadLinter, validators, helpers, models, constants) | 7632 | linter/ | 7385 |
+| HtmlComment/ + Calcpad.Core DirectiveDto/SettingsDto | 347 | html_comment/, core_dto/ | 708 |
+| Snippets/ | 7595 | snippets/ (+ snippets.json, 218 KB) | 1279 |
+| Prettifier/ | 151 | prettifier/ | 188 |
+| Parsing/ (char classes, span enumerators) | 346 | parsing/, text.rs | 132 + text |
+| Calcpad.Server endpoints (highlight, lint, definitions, symbol-at-position, prettify, snippets, listing highlight) | ~600 | api.rs, utf16.rs, calcpad-highlighter-wasm | 740 |
+
+Tests: the 24 files of `Calcpad.Tests/Highlighter` (23 test classes and the fixture) are
+transcribed as `calcpad-highlighter/tests/*.rs` plus the corpus test over the upstream
+`valid/` and `errors/` worksheets (30 + 9 files, 39 expected codes), and
+`Calcpad.Tests/Server/UnwrappedListingHighlightTests.cs` as
+`calcpad-wasm/tests/unwrapped_listing_highlight.rs`. All pass, apart from one test of
+`HTMLCommentTests` that renders through Calcpad.Core (ignored, see DEVIATIONS.md H10). The
+tests were checked by mutation (breaking the keyword argument rule fails four).
+
+Browser: `web/e2e/browser-check.mjs` now also checks the Monaco markers, the highlight,
+definitions, symbol, prettify, snippets and code-view responses, the UTF-16 columns, the 400
+answer and that the highlighter wasm loads from `/wasm/`. Sizes (no wasm-opt available):
+engine 1,413,340 bytes (511,533 gzipped), highlighter 1,068,661 bytes (351,454 gzipped), both
+in one module 2,156,350 bytes (774,769 gzipped), so they are two modules.

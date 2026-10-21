@@ -10,7 +10,8 @@
     clippy::len_zero,
     clippy::nonminimal_bool,
     clippy::new_without_default,
-    clippy::should_implement_trait
+    clippy::should_implement_trait,
+    clippy::field_reassign_with_default
 )]
 pub mod api;
 pub mod content_resolution;

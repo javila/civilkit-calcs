@@ -701,6 +701,55 @@ check(JSON.stringify(sheets?.Variables?.slice(1, 5)) === JSON.stringify([['a', 3
 check(JSON.stringify(sheets?.Inputs) === JSON.stringify([['Name', 'Value', 'Unit'], ['L', 4.5, 'm'], ['F', 12.5, 'kN']]), `the input field and the #UI control are the inputs (${JSON.stringify(sheets?.Inputs)})`);
 check(JSON.stringify(sheets?.v) === JSON.stringify([['Index', 'Value', 'Unit'], [1, 1, 'm'], [2, 2, 'm'], [3, 3, 'm']]), 'the vector has its own sheet');
 
+// ---- editor language features from calcpad-highlighter-wasm ---------------------------------
+// Diagnostics (Monaco markers), semantic tokens and the other Calcpad.Server endpoints that front
+// Calcpad.Highlighter are answered in the page by the highlighter wasm (a second module, loaded
+// on first use).
+await page.reload();
+await page.waitForFunction(() => (window).calcpadActiveEditor != null, null, { timeout: 30000 });
+await setEditor("L = 6m\nr = L + undefined_name\nf(x) = x^2\nz = f(1; 2)\n'a comment");
+const markers = await page.waitForFunction(() => {
+    const ms = (window).monaco.editor.getModelMarkers({});
+    return ms.length >= 2 ? ms.map((m) => ({ line: m.startLineNumber, col: m.startColumn, end: m.endColumn, msg: m.message })) : null;
+}, null, { timeout: 30000 }).then((h) => h.jsonValue(), () => null);
+check(markers != null, `the editor shows diagnostics from the highlighter wasm (${JSON.stringify(markers)?.slice(0, 200)})`);
+if (markers) {
+    check(markers.some((m) => m.line === 2 && /undefined/i.test(m.msg) && m.end > m.col), 'undefined_name on line 2 is marked as undefined');
+    check(markers.some((m) => m.line === 4), 'the call f(1; 2) with too many parameters is marked on line 4');
+}
+const hlApi = async (endpoint, body, method = 'POST') => page.evaluate(async ([endpoint, body, method]) => {
+    const r = await fetch(`/api/calcpad/${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: method === 'POST' ? JSON.stringify(body) : undefined });
+    const t = await r.text();
+    return { status: r.status, text: t };
+}, [endpoint, body, method]);
+const hl = await hlApi('highlight', { content: "L = 6m\n'caf\u00e9 \ud83d\ude00 text' + x", includeText: true });
+const tokens = hl.status === 200 ? JSON.parse(hl.text).tokens : [];
+const tokenOf = (line, text) => tokens.find((t) => t.line === line && t.text === text);
+check(tokenOf(0, 'L')?.type === 'Variable' && tokenOf(0, '6')?.type === 'Const' && tokenOf(0, 'm')?.type === 'Units', 'highlight: L is a Variable, 6 a Const, m a Unit');
+const comment = tokens.find((t) => t.line === 1 && t.type === 'Comment');
+const line1 = "'caf\u00e9 \ud83d\ude00 text' + x";
+const xTok = tokens.find((t) => t.line === 1 && t.text === 'x');
+check(comment != null && comment.length === comment.text.length && xTok?.column === line1.length - 1, `highlight: columns and lengths are UTF-16 units, an emoji counts two (${JSON.stringify([comment?.length, xTok?.column, line1.length])})`);
+const defs = await hlApi('definitions', { content: 'a = 2\nf(x; y = 1) = x*y\n#def m$ = 5' });
+const dj = defs.status === 200 ? JSON.parse(defs.text) : {};
+check(dj.variables?.[0]?.name === 'a' && dj.functions?.[0]?.name === 'f' && dj.macros?.[0]?.name === 'm$', 'definitions lists the variable, the function and the macro');
+const sym = await hlApi('symbol-at-position', { content: 'a = 2\nb = a + a', line: 1, column: 4 });
+const sj = sym.status === 200 ? JSON.parse(sym.text) : null;
+check(sj?.symbolName === 'a' && sj.locations?.length === 3, 'symbol-at-position finds the three occurrences of a');
+const pr = await hlApi('prettify', { content: '#if 1 > 0\nx = 1\n#end if' });
+check(pr.status === 200 && JSON.parse(pr.text).content === '#if 1 > 0\n\tx = 1\n#end if', 'prettify indents the #if block');
+const sn = await hlApi('snippets', null, 'GET');
+const snj = sn.status === 200 ? JSON.parse(sn.text) : {};
+check(snj.count > 1000 && snj.snippets?.some((x) => x.insert === 'sin(\u00a7)'), `snippets: the library has ${snj.count} entries`);
+const listing = await page.evaluate(async () => {
+    const r = await fetch('/api/calcpad/convert?unwrap=true', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'a = 1\nb = a + 2m' }) });
+    return r.text();
+});
+check(listing.includes('<span class="variable">a</span>') && listing.includes('<span class="const">2</span><span class="units">m</span>'), 'the unwrapped code view is highlighted with the tokenizer (loaded on demand into the engine worker)');
+const bad = await hlApi('lint', { content: '  ' });
+check(bad.status === 400, 'lint of an empty document answers 400 like the server');
+check(requests.some((r) => r.url.endsWith('/wasm/calcpad_highlighter_wasm_bg.wasm')), 'the highlighter wasm was loaded from /wasm/');
+
 // ---- 6. the same build from a sub folder ---------------------------------------------------
 const sub = await context.newPage();
 sub.on('pageerror', (e) => pageErrors.push(`/calcs/: ${e.message}`));

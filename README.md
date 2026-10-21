@@ -6,7 +6,9 @@ values, units, operators, functions, custom functions, solve blocks, the directi
 settings), vectors and matrices including the high performance (HP) types and their
 solvers, `$Plot`/`$Map` SVG plots and charts, the markdown modes (a port of the Markdig
 subset that CalcpadCE uses), `#UI` input forms, and `#read`/`#write`/`#append` with CSV,
-text and Excel (.xlsx/.xlsm) files.
+text and Excel (.xlsx/.xlsm) files. The editor's language services (Calcpad.Highlighter:
+tokenizer, linter, content resolution, definitions, prettifier and the snippet library) are
+ported as `calcpad-highlighter`.
 
 Word export (calcpad-docx, a port of Calcpad.OpenXml's Word path) is in the CLI
 (`Cli input.cpd output.docx`) and the browser (Export > Save Word). Not ported: raster
@@ -23,6 +25,16 @@ worksheets. Raster plots report "not supported" errors.
   ...), so a C# file can be found next to its port.
 * `calcpad-cli`: the `Cli` binary, compatible with the batch mode of Calcpad.Cli
   (`Cli input.cpd output.html -b -s`).
+* `calcpad-highlighter`: the port of Calcpad.Highlighter, with the same folder names
+  (`tokenizer`, `content_resolution`, `linter`, `html_comment`, `snippets`, `prettifier`,
+  `parsing`). `api` answers the Calcpad.Server endpoints `highlight`, `lint`, `definitions`,
+  `symbol-at-position`, `prettify` and `snippets` (request JSON to response JSON, UTF-16
+  columns); `#include` files come from an in-memory file system (`api::MemoryFiles`) or, for
+  native hosts, `content_resolution::IncludeProvider`. The snippet data is
+  `snippets/snippets.json`, generated once from the C# object initializers.
+* `calcpad-highlighter-wasm`: WebAssembly bindings of `calcpad-highlighter`, a second wasm
+  that the page loads on first use (the editor's lint, highlight and snippet requests) and
+  that the engine worker loads to colour the code view.
 * `calcpad-wasm`: WebAssembly bindings (wasm-bindgen). `convert` answers what
   Calcpad.Server's `POST /api/calcpad/convert` answers (the HTML page and the
   `X-Calcpad-Errors` list); `#include` files come from an in-memory map the page fills.
@@ -37,6 +49,10 @@ worksheets. Raster plots report "not supported" errors.
 ```sh
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
+
+`calcpad-highlighter/tests` transcribes CalcpadCE's `Calcpad.Tests/Highlighter` xunit classes
+(plus `UnwrappedListingHighlightTests` in `calcpad-wasm/tests`); `tests/data` holds the
+`valid/` and `errors/` worksheets of the upstream linter corpus.
 
 `cargo test` runs the transcribed CalcpadCE xunit tests (`calcpad-core/tests/xunit_*.rs`,
 regenerated with `tools/transcribe_all.sh`; `ui_directive.rs` and `data_exchange.rs` are
@@ -63,6 +79,10 @@ tools/build_wasm.sh                       # web/calcpad-web/public/wasm
 cd web && npm install && npm run build    # web/calcpad-web/dist
 npm run preview -- --port 4173            # then open http://localhost:4173/
 ```
+
+`tools/build_wasm.sh` builds both modules (`engine` or `highlighter` builds one). The
+highlighter is a separate wasm because the two in one module are 775 KB gzipped (the engine
+alone is 512 KB, the highlighter alone 351 KB, without wasm-opt).
 
 `npm run dev` serves the same with hot reload. The end-to-end check (headless Chromium via
 Playwright: typing, a 30 worksheet sample through Export > Save HTML, network capture, the
@@ -109,9 +129,10 @@ What works in the browser:
   DejaVu Sans fetched for the text of plots), builds the document (DEVIATIONS.md, D6).
 
 What does not: compiled `.cpdz` worksheets and portable packages need Calcpad.Server and say
-so. Linting, semantic highlighting, go-to-definition/rename, prettify
-and the snippet library come from Calcpad.Highlighter, which is not ported, so the editor
-runs without them. The PDF has the browser's header and footer, not Calcpad.Server's.
+so. Linting, semantic highlighting, go-to-definition/rename, prettify, the snippet library and
+the colouring of the code view come from `calcpad-highlighter-wasm`, a second wasm module (see
+DEVIATIONS.md, H1 to H10 for where it differs). The PDF has the browser's header and footer,
+not Calcpad.Server's.
 
 ## Status
 
