@@ -101,6 +101,9 @@ What works in the browser:
   network requests; anything else is blocked with a note in the preview (DEVIATIONS.md, D3).
   Insert > Libraries adds a listed library's script tag.
 
+* File > Export Excel saves the variables as a workbook: all variables with values and units,
+  a sheet per vector or matrix, and the inputs (calcpad-rs's own, DEVIATIONS.md, D7; also
+  `Cli input.cpd output.xlsx`).
 * Save Word writes the .docx in the page: the engine renders the equations as Office Math and
   calcpad-docx-wasm, a separate module loaded on the first export (about 600 KB gzipped, with
   DejaVu Sans fetched for the text of plots), builds the document (DEVIATIONS.md, D6).

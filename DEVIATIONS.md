@@ -158,6 +158,27 @@ Differences from upstream's writer, each deliberate:
   checks above stand in for it.
 * The Office Math is written without the indentation upstream's verbatim strings carry.
 
+## D7. Excel export of the variables (addition)
+
+CalcpadCE has no such export. File > Export Excel (and `Cli input.cpd output.xlsx`) saves the
+calculated worksheet's variables as a workbook, written with the writer `#write` uses
+(`openxml::variables_export`, recorded by `ExpressionParser::capture_values`):
+
+* **Variables:** every variable in the order it was first assigned, with its last value, as
+  name, value, unit. A vector or matrix names the sheet that holds it.
+* **One sheet per vector or matrix:** the elements, each row with its unit.
+* **Inputs:** the variables set by input fields (`?`) and `#UI` controls.
+
+Numbers are numeric cells at full precision; units are text in their own column. A complex
+value is written as text ("3 + 2i"). The report is calculated as for print, with the input
+values and `#UI` entries the sheet holds. It is checked by `calcpad-core/tests/excel_export.rs`
+(read back with the reader `#read` uses), by `tools/xlsx_check.py` (every sample, read with
+openpyxl), and by the browser check.
+
+Found on the way: the workbook writer ordered a row's cells by comparing their references as
+text, so a 27th column ("AA1") went in front of "B1" and the sheet was invalid. It now compares
+column numbers, which also fixes `#write` past column Z.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

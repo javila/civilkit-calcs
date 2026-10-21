@@ -11,6 +11,7 @@
 //                                           highlighting, go-to-definition and prettify
 //   snippets                                an empty list (the library is in the Highlighter)
 //   docx                                    calcpad-docx-wasm (Word export, loaded on demand)
+//   xlsx                                    calcpad-rs's own: the variables as an Excel workbook
 //   cpdz, portable, log-level, pdf          501: these need Calcpad.Server. PDF is printed by
 //                                           the browser instead (message-bridge.ts)
 
@@ -293,6 +294,26 @@ export function installWasmTransport(): WasmTransport {
             return new Response(new Uint8Array(bytes), {
                 status: 200,
                 headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+            });
+        }
+        if (endpoint === 'xlsx' && method === 'POST') {
+            // calcpad-rs's own export: every variable with its value, vectors and matrices on
+            // their own sheets, and the input fields (openxml::variables_export).
+            if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
+            const request = JSON.parse(body) as Record<string, unknown>;
+            request.exportXlsx = true;
+            request.enableUi = false;
+            request.includeLineAnchors = false;
+            const out = JSON.parse(await engine.convert(JSON.stringify(request), false, signal)) as {
+                status?: number; error?: string; xlsx?: string; xlsxError?: string;
+            };
+            if (out.status) return new Response(out.error ?? '', { status: out.status });
+            if (!out.xlsx) {
+                return new Response(out.xlsxError ?? 'The worksheet could not be calculated (check it for macro errors).', { status: 422 });
+            }
+            return new Response(fromBase64(out.xlsx), {
+                status: 200,
+                headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
             });
         }
         if (endpoint in NOT_PORTED) return notAvailable(NOT_PORTED[endpoint], 'Calcpad.Highlighter is not ported yet');

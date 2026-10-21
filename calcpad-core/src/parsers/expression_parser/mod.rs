@@ -249,6 +249,44 @@ enum ParseMode {
 }
 
 /// Port of the public ExpressionParser class.
+/// Records the variable the expression just calculated assigns (`x = ...` or `x ← ...`),
+/// with its value; an input field (`?`) or a `#UI` control marks it as an input.
+fn capture_assignment(p: &MathParser, captured: &mut Vec<CapturedValue>, from_ui: bool) {
+    let rpn = p.rpn.borrow();
+    let Some(rpn) = rpn.as_ref() else { return };
+    let (Some(first), Some(last)) = (rpn.first(), rpn.last()) else {
+        return;
+    };
+    let (first, last) = (first.borrow(), last.borrow());
+    if first.ttype != crate::parsers::math_parser::tokens::TokenTypes::Variable
+        || !(last.content == "=" || last.content == "\u{2190}")
+    {
+        return;
+    }
+    let name = first.content.clone();
+    let is_input = from_ui
+        || rpn
+            .iter()
+            .any(|t| t.borrow().ttype == crate::parsers::math_parser::tokens::TokenTypes::Input);
+    let Ok(value) = p.get_variable(&name) else { return };
+    match captured.iter_mut().find(|c| c.name == name) {
+        Some(c) => {
+            c.value = value;
+            c.is_input |= is_input;
+        }
+        None => captured.push(CapturedValue { name, value, is_input }),
+    }
+}
+
+/// A variable recorded for the Excel export (`ExpressionParser::capture_values`).
+#[derive(Clone, Debug)]
+pub struct CapturedValue {
+    pub name: String,
+    pub value: Value,
+    /// Set by an input field (`?`) or a `#UI` control.
+    pub is_input: bool,
+}
+
 pub struct ExpressionParser {
     pub math_settings: Rc<RefCell<MathSettings>>,
     pub plot_settings: PlotSettings,
@@ -272,6 +310,10 @@ pub struct ExpressionParser {
     pub capture_open_xml: bool,
     /// `OpenXmlExpressions`
     pub open_xml_expressions: Vec<String>,
+    /// Record each variable an expression assigns, for the Excel export (`captured_values`).
+    pub capture_values: bool,
+    /// The variables in the order they were first assigned, each with its last value.
+    pub captured_values: Vec<CapturedValue>,
     /// The first out of scope feature hit while parsing, if any.
     pub out_of_scope: Option<String>,
     error_count: i32,
@@ -340,6 +382,8 @@ impl ExpressionParser {
             html_result: String::new(),
             capture_open_xml: false,
             open_xml_expressions: Vec::new(),
+            capture_values: false,
+            captured_values: Vec::new(),
             out_of_scope: None,
             error_count: 0,
             is_val: 0,
@@ -908,6 +952,7 @@ impl ExpressionParser {
             self.ui.ui_var_counts.clear();
             self.ui.ui_declaration_index.clear();
             self.open_xml_expressions.clear();
+            self.captured_values.clear();
         } else {
             if self.line_cache.len() < line_count {
                 self.line_cache.resize(line_count, LineInfo::empty());
@@ -1034,6 +1079,9 @@ impl ExpressionParser {
         }
         if self.calculate && self.is_val > -1 {
             p.calculate(is_output, cache_id)?;
+            if self.capture_values {
+                capture_assignment(p, &mut self.captured_values, false);
+            }
         } else {
             p.define_custom_units()?;
         }
@@ -1057,6 +1105,9 @@ impl ExpressionParser {
         p.parse(expression, true)?;
         if self.calculate && self.is_val > -1 {
             p.calculate(is_output, -1)?;
+            if self.capture_values {
+                capture_assignment(p, &mut self.captured_values, true);
+            }
         } else {
             p.define_custom_units()?;
         }

@@ -40,6 +40,8 @@ export interface WebFilesOptions {
     openSamples?: () => void;
     /** Shows the Export tab (HTML, PDF, Word, #write). */
     openExport?: () => void;
+    /** Saves the variables as an Excel workbook (calcpad-rs's own export). */
+    exportXlsx?: () => void;
 }
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
@@ -399,6 +401,7 @@ body{display:flex;flex-direction:column}
         menu.appendChild(document.createElement('hr'));
         item('Print PDF...', () => this.o.print());
         if (this.o.openExport) item('Export...', () => this.o.openExport!());
+        if (this.o.exportXlsx) item('Export Excel...', () => this.o.exportXlsx!());
         menu.appendChild(document.createElement('hr'));
         head('Library (#include and #read)');
         const files = this.o.library.list();

@@ -28,6 +28,7 @@ export function installWebFiles(transport: WasmTransport, host: Host): WebFiles 
         print: () => host.bridge.handleMessage({ type: 'generatePdf', variant: 'report' }),
         openSamples: () => void samples.open(),
         openExport: host.showSidebarTab ? () => host.showSidebarTab!('export') : undefined,
+        exportXlsx: () => host.bridge.handleMessage({ type: 'saveXlsx' }),
     });
     // Images a worksheet names (Images/..., ./x.png) are shown from the library.
     transport.resolveFile = (key) => library.get(key)?.data;

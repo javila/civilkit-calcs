@@ -128,7 +128,7 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
             });
         }
     }
-    let (mut html, errors, expressions) = convert_inner(&r, unwrap || r.force_unwrapped_code);
+    let (mut html, errors, expressions, xlsx) = convert_inner(&r, unwrap || r.force_unwrapped_code);
     FILES.with(|f| {
         let mut f = f.borrow_mut();
         for key in &borrowed {
@@ -162,6 +162,12 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
     if r.capture_open_xml {
         out["openXmlExpressions"] = serde_json::json!(expressions);
     }
+    if let Some(x) = xlsx {
+        match x {
+            Ok(bytes) => out["xlsx"] = serde_json::json!(base64_encode(&bytes)),
+            Err(e) => out["xlsxError"] = serde_json::json!(e),
+        }
+    }
     out.to_string()
 }
 
@@ -185,6 +191,8 @@ struct ConvertRequest {
     write: bool,
     /// Also render each equation as Office Math, for the Word export (`captureOpenXml`).
     capture_open_xml: bool,
+    /// Also return the variables as an Excel workbook (`exportXlsx`, calcpad-rs's own).
+    export_xlsx: bool,
 }
 
 /// Case insensitive property lookup, as ASP.NET Core binds JSON.
@@ -325,12 +333,13 @@ impl ConvertRequest {
             }),
             write: prop_bool(req, "write").unwrap_or(false),
             capture_open_xml: prop_bool(req, "captureOpenXml").unwrap_or(false),
+            export_xlsx: prop_bool(req, "exportXlsx").unwrap_or(false),
         }
     }
 }
 
 /// `CalcpadService.Convert`
-type Converted = (String, Vec<CalcpadError>, Vec<String>);
+type Converted = (String, Vec<CalcpadError>, Vec<String>, Option<Result<Vec<u8>, String>>);
 
 fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
     let enable_ui = r.enable_ui && !r.for_print;
@@ -351,6 +360,7 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
         parser
     };
     let mut expressions = Vec::new();
+    let mut xlsx = None;
     let html_result = if has_macro_errors || force_unwrapped_code {
         if force_unwrapped_code && !has_macro_errors {
             // This pass only collects error lines, so it must never repeat the writes.
@@ -368,9 +378,15 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
         parser.show_error_lines = show_error_lines;
         parser.allow_data_write = r.write;
         parser.capture_open_xml = r.capture_open_xml;
+        parser.capture_values = r.export_xlsx;
         parser.parse(&output_text, true);
         errors.extend(parser.errors_list.iter().cloned());
         expressions = std::mem::take(&mut parser.open_xml_expressions);
+        if r.export_xlsx {
+            xlsx = Some(calcpad_core::openxml::variables_export::workbook(
+                &parser.captured_values,
+            ));
+        }
         // Model bindings (docs/model-bindings.md): mark each bound input. No model is connected
         // in the browser yet, so the typed values are used.
         calcpad_core::model_bindings::annotate_html(
@@ -378,7 +394,12 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
             &calcpad_core::model_bindings::parse(&output_text),
         )
     };
-    (wrap_html_result(&html_result, &r.theme, enable_ui), errors, expressions)
+    (
+        wrap_html_result(&html_result, &r.theme, enable_ui),
+        errors,
+        expressions,
+        xlsx,
+    )
 }
 
 /// `HttpUtility.HtmlAttributeEncode`

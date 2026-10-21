@@ -1,5 +1,5 @@
 import { BaseMessageBridge, type ExportRequest } from 'calcpad-frontend/services/message-bridge/base';
-import { getDefaultSettings } from 'calcpad-frontend/types/settings';
+import { buildApiSettings, getDefaultSettings } from 'calcpad-frontend/types/settings';
 import type { CalcpadSettings } from 'calcpad-frontend/types/settings';
 import type { ExportVariant } from 'calcpad-frontend/types/api';
 import { mimeFromExtension, bytesToBase64 } from 'calcpad-frontend';
@@ -100,10 +100,39 @@ export class MessageBridge extends BaseMessageBridge {
 
     /** calcpad-rs: exports that need Calcpad.Server say so (see wasm/server-only.ts). */
     protected handlePlatformMessage(message: any): boolean {
+        if (message?.type === 'saveXlsx') {
+            void this.saveXlsx();
+            return true;
+        }
         const notice = serverOnlyMessage(message?.type);
         if (notice == null) return false;
         void this.showAlert('Not available in the browser', notice, 'info');
         return true;
+    }
+
+    /**
+     * calcpad-rs: File > Export Excel. The report's variables, calculated in the page, as an
+     * .xlsx (openxml::variables_export): a sheet of all variables, one per vector or matrix,
+     * and one of the inputs.
+     */
+    private async saveXlsx(): Promise<void> {
+        const content = this.getActiveEditorContent();
+        const res = await fetch(`${window.location.origin}/api/calcpad/xlsx`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, settings: buildApiSettings(this.settings), forPrint: true }),
+        });
+        if (!res.ok) {
+            void this.showAlert('Excel export', await res.text(), 'error');
+            return;
+        }
+        await this.saveExportedFile({
+            defaultName: 'calcpad-variables.xlsx',
+            data: new Uint8Array(await res.arrayBuffer()),
+            mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            extensions: ['xlsx'],
+            dialogTitle: 'Save Excel Workbook',
+        });
     }
 
     protected async saveExportedFile(req: ExportRequest): Promise<string | null> {

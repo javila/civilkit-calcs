@@ -679,6 +679,28 @@ check(/<m:f>/.test(documentXml) && /<m:rad>/.test(documentXml), 'the division an
 check(/word\/media\/image\d+\.png/.test(listing) && /word\/media\/image\d+\.svg/.test(listing), 'the plot is in the document as a PNG with its SVG beside it');
 check(/asvg:svgBlip/.test(documentXml), 'the picture refers to the SVG for Word versions that show it');
 
+// ---- Excel export (calcpad-rs's own) ---------------------------------------------------------
+await page.evaluate(() => (window).calcpadActiveEditor.setValue("'Excel export check\na = 2\nL = ? {4.5}m\n#UI F = 12.5kN\nM = F*L\nv = [1; 2; 3]*1m\nK = [1; 2|3; 4]\na = a + 1"));
+await page.waitForTimeout(1500);
+await page.locator('.cprs-file-btn').click();
+const [xlsxDownload] = await Promise.all([
+    page.waitForEvent('download', { timeout: 120000 }),
+    page.locator('.cprs-menu button', { hasText: 'Export Excel...' }).click(),
+]);
+const xlsxPath = join(tmp, 'excel-check.xlsx');
+await xlsxDownload.saveAs(xlsxPath);
+// Read with openpyxl, as a spreadsheet program would.
+let sheets = null;
+try {
+    sheets = JSON.parse(execFileSync('python3', ['-c',
+        'import json,sys,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nprint(json.dumps({ws.title:[[c.value for c in r] for r in ws.iter_rows()] for ws in wb}))',
+        xlsxPath], { encoding: 'utf8' }));
+} catch (e) { sheets = { error: String(e).slice(0, 200) }; }
+check(JSON.stringify(Object.keys(sheets ?? {})) === JSON.stringify(['Variables', 'v', 'K', 'Inputs']), `File > Export Excel saves a workbook with Variables, a sheet per vector and matrix, and Inputs (${JSON.stringify(Object.keys(sheets ?? {}))})`);
+check(JSON.stringify(sheets?.Variables?.slice(1, 5)) === JSON.stringify([['a', 3, ''], ['L', 4.5, 'm'], ['F', 12.5, 'kN'], ['M', 56.25, 'kNm']]), `the variables in calculation order, numbers as numbers and units in their own column (${JSON.stringify(sheets?.Variables?.slice(1, 5))})`);
+check(JSON.stringify(sheets?.Inputs) === JSON.stringify([['Name', 'Value', 'Unit'], ['L', 4.5, 'm'], ['F', 12.5, 'kN']]), `the input field and the #UI control are the inputs (${JSON.stringify(sheets?.Inputs)})`);
+check(JSON.stringify(sheets?.v) === JSON.stringify([['Index', 'Value', 'Unit'], [1, 1, 'm'], [2, 2, 'm'], [3, 3, 'm']]), 'the vector has its own sheet');
+
 // ---- 6. the same build from a sub folder ---------------------------------------------------
 const sub = await context.newPage();
 sub.on('pageerror', (e) => pageErrors.push(`/calcs/: ${e.message}`));

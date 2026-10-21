@@ -497,10 +497,11 @@ fn insert_cell<'a>(row: &'a mut Element, prefix: &str, cell_ref: &str) -> &'a mu
         None => {
             let mut cell = Element::new(&format!("{}c", prefix));
             cell.set_attr("r", cell_ref);
-            let key = cell_ref.to_ascii_uppercase();
+            // By column number: as text "AA1" would sort before "B1".
+            let key = CellRef::col_from_ref(Some(cell_ref));
             let before = row.children.iter().position(|n| {
                 matches!(n, Node::Element(c) if local(&c.name) == "c"
-                    && c.attr("r").is_some_and(|r| r.to_ascii_uppercase() > key))
+                    && c.attr("r").is_some_and(|r| CellRef::col_from_ref(Some(r)) > key))
             });
             match before {
                 Some(i) => {
@@ -629,6 +630,28 @@ mod tests {
 
     fn s(v: &[&[&str]]) -> Vec<Vec<String>> {
         v.iter().map(|r| r.iter().map(|c| c.to_string()).collect()).collect()
+    }
+
+    #[test]
+    fn cells_past_column_z_stay_in_column_order() {
+        let row: Vec<String> = (1..=30).map(|i| i.to_string()).collect();
+        let book = write(None, "Sheet1", "A1", "AD1", std::slice::from_ref(&row), false).unwrap();
+        // Writing over the row again inserts nothing out of place.
+        let book = write(Some(&book), "Sheet1", "Z1", "AB1", &s(&[&["x", "y", "z"]]), true).unwrap();
+        let parts = zip::read(&book).unwrap();
+        let sheet = parts.iter().find(|p| p.name.ends_with("sheet1.xml")).unwrap();
+        let text = String::from_utf8(sheet.data.clone()).unwrap();
+        let refs: Vec<i32> = text
+            .match_indices(" r=\"")
+            .filter_map(|(i, _)| {
+                let v = &text[i + 4..];
+                let r = &v[..v.find('"')?];
+                (!r.chars().all(|c| c.is_ascii_digit())).then(|| CellRef::col_from_ref(Some(r)))
+            })
+            .collect();
+        assert_eq!(refs, (1..=30).collect::<Vec<i32>>(), "{text}");
+        let back = read(&book, "Sheet1", "Y1", "AC1").unwrap().unwrap();
+        assert_eq!(back, s(&[&["25", "x", "y", "z", "29"]]));
     }
 
     #[test]

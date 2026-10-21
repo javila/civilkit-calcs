@@ -1,7 +1,7 @@
 //! Command line front end, compatible with the batch conversion mode of Calcpad.Cli:
 //!
 //! ```text
-//! Cli <input.cpd> [output.html | output.docx | html | docx] [-b] [-s]
+//! Cli <input.cpd> [output.html | output.docx | output.xlsx | html | docx | xlsx] [-b] [-s]
 //! ```
 //!
 //! `-b` writes only `<div class="calcpad-output">...</div>` (used by the conformance
@@ -172,7 +172,7 @@ fn main() -> ExitCode {
             out_file,
             input.file_stem().unwrap().to_string_lossy()
         ))
-    } else if ["html", "htm", "docx"].contains(&out_file.as_str()) {
+    } else if ["html", "htm", "docx", "xlsx"].contains(&out_file.as_str()) {
         input.with_extension(&out_file)
     } else {
         PathBuf::from(&out_file)
@@ -182,8 +182,9 @@ fn main() -> ExitCode {
         .map(|e| e.to_string_lossy().to_string())
         .unwrap_or_default();
     let is_docx = ext == "docx";
-    if ext != "html" && ext != "htm" && !is_docx {
-        eprintln!("Invalid output extension. Must be .html, .htm or .docx (PDF output is not supported).");
+    let is_xlsx = ext == "xlsx";
+    if ext != "html" && ext != "htm" && !is_docx && !is_xlsx {
+        eprintln!("Invalid output extension. Must be .html, .htm, .docx or .xlsx (PDF output is not supported).");
         return ExitCode::from(1);
     }
     let full_input = std::fs::canonicalize(input).unwrap_or_else(|_| input.to_path_buf());
@@ -205,6 +206,7 @@ fn main() -> ExitCode {
     let (has_macro_errors, unwrapped) = macro_parser.parse(&code, true);
     let mut out_of_scope: Option<String> = None;
     let mut expressions: Vec<String> = Vec::new();
+    let mut captured = Vec::new();
     let html = if has_macro_errors {
         calcpad_reader::code_to_html(&unwrapped)
     } else {
@@ -214,13 +216,30 @@ fn main() -> ExitCode {
         parser.plot_settings = settings.plot.clone();
         // Converter.ToOpenXml: the equations as Office Math too.
         parser.capture_open_xml = is_docx;
+        // The Excel export: the variables and their values (calcpad-rs's own feature).
+        parser.capture_values = is_xlsx;
         parser.parse(&unwrapped, true);
         out_of_scope = parser.out_of_scope.clone();
         expressions = std::mem::take(&mut parser.open_xml_expressions);
+        captured = std::mem::take(&mut parser.captured_values);
         parser.html_result.clone()
     };
     if let Ok(scope_file) = std::env::var("CALCPAD_RS_SCOPE_FILE") {
         let _ = std::fs::write(scope_file, out_of_scope.unwrap_or_default());
+    }
+    if is_xlsx {
+        let bytes = match calcpad_core::openxml::variables_export::workbook(&captured) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("{}", e);
+                return ExitCode::from(1);
+            }
+        };
+        if let Err(e) = std::fs::write(&out_path, bytes) {
+            eprintln!("{}", e);
+            return ExitCode::from(1);
+        }
+        return ExitCode::SUCCESS;
     }
     if is_docx {
         calcpad_docx::fonts::load_system_fonts();
