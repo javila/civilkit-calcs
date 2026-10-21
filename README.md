@@ -68,7 +68,7 @@ Playwright: typing, a 30 worksheet sample through Export > Save HTML, network ca
 server-only exports) and its stub comparison:
 
 ```sh
-cd web && npx playwright install chromium && node e2e/browser-check.mjs
+cd web && npx playwright install chromium && node e2e/browser-check.mjs && node e2e/c-style-check.mjs
 cd .. && .venv/bin/python -I tools/compare_browser.py --ref ../calcpad-ref
 ```
 
@@ -80,7 +80,7 @@ What works in the browser:
 * the editor, preview, unwrapped view, report view, Variables and TOC panels;
 * `#UI` input forms (entries, dropdowns, radio buttons, checkboxes and datagrids): enter
   values in the Input view, the report uses them, Save values writes them into the document;
-* Samples (File > Samples, or the link on an empty editor): 100 of CalcpadCE's structural and
+* Samples (File > Samples, or the link on an empty editor): 101 of CalcpadCE's structural and
   maths examples (`tools/gen_samples.mjs`, attribution in `public/samples/NOTICE.md`) with
   groups, search, a design code filter and a preview; Open makes an untitled copy and puts the
   sample's images and data files into the library;

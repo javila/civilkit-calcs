@@ -101,6 +101,19 @@ binding (`calcpad_core::model_bindings`). Upstream passes the comment through un
 does the CLI here, so CLI output and the stub comparison are unchanged. No model is connected
 yet: the typed values are used.
 
+## D5. The browser converts C-style operators when it opens a sheet
+
+The desktop app and the CLI read a worksheet file through `CalcpadReader`, which turns the
+C-style shortcuts outside comments into Calcpad's operators: `==` `!=` `>=` `<=` into
+≡ ≠ ≥ ≤, `%%` `&&` `||` `<<` into ⦼ ∧ ∨ ∠ and `<*` into ←. Upstream's server API does
+not, so a sheet written with them (Simply Supported Beams/Concentrated Forces.cpd uses `%%`)
+fails there. The browser build is the desktop app here, so it converts a sheet when it opens
+one (File > Open, drag and drop, recent files, Samples), in the editor text as the desktop
+does. Included files are not converted, as in the CLI. The conversion is
+`calcpad_core::extension_methods::replace_c_style_operators` (moved from the CLI), with a
+TypeScript copy in the browser (`c-style.ts`); `web/e2e/c-style-check.mjs` holds the two equal
+over every line of the upstream repository.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

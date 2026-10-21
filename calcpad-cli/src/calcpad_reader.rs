@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::path::{Component, Path, PathBuf};
 
-use calcpad_core::extension_methods::{enumerate_comments, enumerate_lines};
+use calcpad_core::extension_methods::{enumerate_lines, replace_c_style_operators};
 use calcpad_core::parsers::macro_parser::{get_fields, has_input_fields, set_line_input_fields, FileProvider};
 use calcpad_core::validator::is_keyword;
 use calcpad_core::{CResult, MathParserException};
@@ -39,53 +39,6 @@ pub fn read(file_name: &str) -> Result<String, String> {
         output_lines.push(s);
     }
     Ok(output_lines.join("\n"))
-}
-
-fn replace_c_style_operators(s: &str) -> String {
-    if s.is_empty() {
-        return String::new();
-    }
-    let mut sb: Vec<char> = Vec::with_capacity(s.len());
-    for item in enumerate_comments(s) {
-        if !item.is_empty() && !item.starts_with('"') && !item.starts_with('\'') {
-            for c in item.chars() {
-                let last = sb.last().copied();
-                let replace_shortcut = |search: char, replace: char, sb: &mut Vec<char>| {
-                    if sb.last() == Some(&search) {
-                        let n = sb.len() - 1;
-                        sb[n] = replace;
-                    } else {
-                        sb.push(search);
-                    }
-                };
-                match c {
-                    '=' => match last {
-                        None => sb.push(c),
-                        Some('=') => *sb.last_mut().unwrap() = '\u{2261}',
-                        Some('!') => *sb.last_mut().unwrap() = '\u{2260}',
-                        Some('>') => *sb.last_mut().unwrap() = '\u{2265}',
-                        Some('<') => *sb.last_mut().unwrap() = '\u{2264}',
-                        _ => sb.push(c),
-                    },
-                    '%' => replace_shortcut('%', '\u{29BC}', &mut sb),
-                    '&' => replace_shortcut('&', '\u{2227}', &mut sb),
-                    '|' => replace_shortcut('|', '\u{2228}', &mut sb),
-                    '<' => replace_shortcut('<', '\u{2220}', &mut sb),
-                    '*' => {
-                        if last == Some('<') {
-                            *sb.last_mut().unwrap() = '\u{2190}';
-                        } else {
-                            sb.push('*');
-                        }
-                    }
-                    _ => sb.push(c),
-                }
-            }
-        } else {
-            sb.extend(item.chars());
-        }
-    }
-    sb.into_iter().collect()
 }
 
 fn set_input_fields_from_file(fields_text: &str, lines: &mut [String]) {

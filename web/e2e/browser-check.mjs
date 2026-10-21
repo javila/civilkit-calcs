@@ -16,6 +16,7 @@
 //
 // Usage (from web/, after `npm run build:wasm && npm run build`):
 //   node e2e/browser-check.mjs [--ref ../../calcpad-ref] [--port 4180]
+import { replaceCStyleOperators } from '../calcpad-web/src/wasm/c-style.ts';
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -562,7 +563,8 @@ await page.evaluate(() => {
         return res;
     };
 });
-const sampleText = (s) => readFileSync(join(web, 'calcpad-web', 'public', s.file), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n');
+// As the app opens a sample: C-style operators converted (c-style.ts).
+const sampleText = (s) => replaceCStyleOperators(readFileSync(join(web, 'calcpad-web', 'public', s.file), 'utf8').replace(/^﻿/, '').replace(/\r\n/g, '\n'));
 const dialog = page.locator('.cprs-samples');
 const items = () => page.locator('.cprs-samples .cprs-s-item');
 const shownIds = async () => (await items().evaluateAll((els) => els.map((e) => e.dataset.sampleId))).sort();

@@ -13,6 +13,7 @@
 // #include and #read resolve against. Files a worksheet writes are added to the library and
 // downloaded when their content changes.
 
+import { replaceCStyleOperators } from './c-style';
 import type { FileLibrary } from './library';
 import { dbRequest, libraryPath, STORE_HANDLES } from './library';
 import type { EngineFile } from './transport';
@@ -198,7 +199,8 @@ export class WebFiles {
             tabs.activate(existing.id);
             return;
         }
-        tabs.openFile(path, content);
+        // As the desktop app opens a file: C-style operator shortcuts ("%%", "==") become Calcpad's.
+        tabs.openFile(path, replaceCStyleOperators(content));
     }
 
     async openRecent(entry: RecentEntry): Promise<void> {

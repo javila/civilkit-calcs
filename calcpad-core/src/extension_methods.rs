@@ -188,8 +188,66 @@ pub fn tag_end_index(s: &str) -> Option<usize> {
     None
 }
 
+/// `CalcpadReader.ReplaceCStyleOperators` (Calcpad.Cli and the desktop app): outside comments,
+/// `==` `!=` `>=` `<=` become ≡ ≠ ≥ ≤, `%%` `&&` `||` `<<` become ⦼ ∧ ∨ ∠, and `<*` becomes ←.
+/// Applied to each line of a worksheet when it is opened, not to included files.
+pub fn replace_c_style_operators(s: &str) -> String {
+    if s.is_empty() {
+        return String::new();
+    }
+    let mut sb: Vec<char> = Vec::with_capacity(s.len());
+    for item in enumerate_comments(s) {
+        if !item.is_empty() && !item.starts_with('"') && !item.starts_with('\'') {
+            for c in item.chars() {
+                let last = sb.last().copied();
+                let replace_shortcut = |search: char, replace: char, sb: &mut Vec<char>| {
+                    if sb.last() == Some(&search) {
+                        let n = sb.len() - 1;
+                        sb[n] = replace;
+                    } else {
+                        sb.push(search);
+                    }
+                };
+                match c {
+                    '=' => match last {
+                        None => sb.push(c),
+                        Some('=') => *sb.last_mut().unwrap() = '\u{2261}',
+                        Some('!') => *sb.last_mut().unwrap() = '\u{2260}',
+                        Some('>') => *sb.last_mut().unwrap() = '\u{2265}',
+                        Some('<') => *sb.last_mut().unwrap() = '\u{2264}',
+                        _ => sb.push(c),
+                    },
+                    '%' => replace_shortcut('%', '\u{29BC}', &mut sb),
+                    '&' => replace_shortcut('&', '\u{2227}', &mut sb),
+                    '|' => replace_shortcut('|', '\u{2228}', &mut sb),
+                    '<' => replace_shortcut('<', '\u{2220}', &mut sb),
+                    '*' => {
+                        if last == Some('<') {
+                            *sb.last_mut().unwrap() = '\u{2190}';
+                        } else {
+                            sb.push('*');
+                        }
+                    }
+                    _ => sb.push(c),
+                }
+            }
+        } else {
+            sb.extend(item.chars());
+        }
+    }
+    sb.into_iter().collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn c_style_operators_outside_comments() {
+        assert_eq!(
+            super::replace_c_style_operators("a == b != c >= d <= e 'x == y' n%%2 && p || q << 3 <* 1"),
+            "a \u{2261} b \u{2260} c \u{2265} d \u{2264} e 'x == y' n\u{29BC}2 \u{2227} p \u{2228} q \u{2220} 3 \u{2190} 1"
+        );
+    }
+
     use super::*;
 
     #[test]

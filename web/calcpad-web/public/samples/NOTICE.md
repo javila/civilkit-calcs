@@ -62,6 +62,7 @@ The copies keep upstream's folder layout under this folder. Worksheets:
 - `Examples/Structural/Reinforced Concrete - Seismic Detailing/Column Detailing for DCM.cpd`
 - `Examples/Structural/Reinforced Concrete - Seismic Detailing/Shear Wall Detailing for DCM.cpd`
 - `Examples/Structural/Simply Supported Beams/Concentrated Force.cpd`
+- `Examples/Structural/Simply Supported Beams/Concentrated Forces.cpd`
 - `Examples/Structural/Simply Supported Beams/Concentrated Moment.cpd`
 - `Examples/Structural/Simply Supported Beams/Linearly Distributed Load.cpd`
 - `Examples/Structural/Simply Supported Beams/Partially Distributed Load.cpd`

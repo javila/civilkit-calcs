@@ -4,6 +4,7 @@
 // groups, search over title, description and codes, a design code filter, a rendered preview,
 // and Open, which makes a new untitled copy and puts the sample's files into the library.
 
+import { replaceCStyleOperators } from './c-style';
 import type { FileLibrary } from './library';
 import type { TabsLike } from './web-files';
 
@@ -115,7 +116,7 @@ export class SamplesBrowser {
 
     /** Opens `sample` as a new untitled worksheet and puts its files into the library. */
     async openSample(sample: Sample): Promise<void> {
-        const text = new TextDecoder().decode(await bytes(sample.file)).replace(/^﻿/, '');
+        const text = replaceCStyleOperators(new TextDecoder().decode(await bytes(sample.file)).replace(/^﻿/, ''));
         for (const a of sample.assets) await this.host.library.put(a.key, await bytes(a.url));
         this.host.tabs().newUntitled(text, sample.title);
         this.host.log('info', `Opened the sample "${sample.title}" as a new worksheet${sample.assets.length ? `; its ${sample.assets.length} file(s) are in the library` : ''}.`);
@@ -231,7 +232,7 @@ export class SamplesBrowser {
         const seq = ++this.previewSeq;
         frame.srcdoc = '<p style="font:13px sans-serif;color:#666">Rendering...</p>';
         try {
-            const text = new TextDecoder().decode(await bytes(s.file)).replace(/^﻿/, '');
+            const text = replaceCStyleOperators(new TextDecoder().decode(await bytes(s.file)).replace(/^﻿/, ''));
             const extraFiles: Record<string, string> = {};
             for (const a of s.assets) {
                 if (/\.(cpd|txt|csv|xlsx|xlsm)$/i.test(a.key)) extraFiles[a.key] = toBase64(await bytes(a.url));

@@ -8,6 +8,8 @@
 // Each worksheet is rendered once with the calcpad-wasm engine (the browser build's own
 // engine, run here in Node). One that reports any error is left out of the manifest and
 // listed in the output.
+// The browser opens a sheet as the desktop app does, converting C-style operators ("%%").
+import { replaceCStyleOperators } from '../web/calcpad-web/src/wasm/c-style.ts';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,6 +39,7 @@ const SUPPORT_PREFIX = {
     'Reinforced Concrete - Plates': 'Two-Way Slab Panel', 'Reinforced Concrete - Punching': 'Punching Shear',
 };
 const TITLES = {
+    'Structural/Simply Supported Beams/Concentrated Forces.cpd': 'Simply Supported Beam: Several Concentrated Forces',
     'Structural/Continuous Beam/Continuous Beam.cpd': 'Continuous Beam: Force Method under Uniform Load',
     'Structural/Deflections/Cantilever with Concentrated Load.cpd': 'Deflection: Cantilever with a Tip Load',
     'Structural/Deflections/Cantilever with Unifrom Load.cpd': 'Deflection: Cantilever under Uniform Load',
@@ -193,7 +196,7 @@ for (const [top, folder] of folders) {
         }
         // Render check: the engine with the sheet's files, as the browser has them.
         for (const [key, abs] of assets) engine.set_file_bytes(key, readFileSync(abs));
-        const res = JSON.parse(engine.convert(JSON.stringify({ content: text }), false));
+        const res = JSON.parse(engine.convert(JSON.stringify({ content: replaceCStyleOperators(text) }), false));
         engine.clear_files();
         const errors = res.errors ?? [];
         if (res.status || errors.length) {

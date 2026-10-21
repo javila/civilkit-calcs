@@ -471,6 +471,25 @@
    ]
   },
   {
+   "id": "structural-simply-supported-beams-concentrated-forces",
+   "title": "Simply Supported Beam: Several Concentrated Forces",
+   "group": "Beams",
+   "folder": "Simply Supported Beams",
+   "file": "samples/Structural/Simply Supported Beams/Concentrated Forces.cpd",
+   "upstream": "Examples/Structural/Simply Supported Beams/Concentrated Forces.cpd",
+   "description": "Series of n equal forces F spaced at a = l / (n + 1), with M_max taken at mid-span and switching between the odd-n and even-n closed forms.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": [
+    {
+     "key": "/Images/mechanics/beams/simply-supported-beam-forces.png",
+     "url": "samples/Images/mechanics/beams/simply-supported-beam-forces.png"
+    }
+   ]
+  },
+  {
    "id": "structural-simply-supported-beams-uniformly-distributed-load",
    "title": "Simply Supported Beam: Uniformly Distributed Load",
    "group": "Beams",

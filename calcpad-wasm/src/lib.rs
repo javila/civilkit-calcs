@@ -89,6 +89,14 @@ pub fn clear_files() {
 /// `POST /api/calcpad/convert[?unwrap=true]`: takes the request body as JSON and returns
 /// `{"html": ..., "errors": [...]}` (the response body and the `X-Calcpad-Errors` header),
 /// or `{"status": 400|500, "error": ...}` where the server returns that status.
+/// The C-style operator shortcuts (`==`, `<=`, `%%`, ...) of one line as the desktop app reads
+/// them (`calcpad_core::extension_methods::replace_c_style_operators`). For the parity check of
+/// the browser's own copy (c-style.ts).
+#[wasm_bindgen]
+pub fn replace_c_style_operators(line: &str) -> String {
+    calcpad_core::extension_methods::replace_c_style_operators(line)
+}
+
 #[wasm_bindgen]
 pub fn convert(request_json: &str, unwrap: bool) -> String {
     let req: Json = match serde_json::from_str(request_json) {
