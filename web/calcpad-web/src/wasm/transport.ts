@@ -192,6 +192,11 @@ class EngineWorker {
         return this.post({ kind: 'convert', body, unwrap }, signal);
     }
 
+    /** The Excel workbook of a rendered page and the variable sheets (calcpad-docx-wasm). */
+    xlsx(html: string, sheetsJson: string, signal?: AbortSignal | null): Promise<Uint8Array> {
+        return this.post<Uint8Array>({ kind: 'xlsx', html, sheets: sheetsJson }, signal);
+    }
+
     /** The Word document of a rendered page (calcpad-docx-wasm, loaded on first use). */
     docx(html: string, expressions: string[], signal?: AbortSignal | null): Promise<Uint8Array> {
         return this.post<Uint8Array>({ kind: 'docx', html, expressions: JSON.stringify(expressions) }, signal);
@@ -414,21 +419,26 @@ export function installWasmTransport(): WasmTransport {
             });
         }
         if (endpoint === 'xlsx' && method === 'POST') {
-            // calcpad-rs's own export: every variable with its value, vectors and matrices on
-            // their own sheets, and the input fields (openxml::variables_export).
+            // calcpad-rs's own export (DEVIATIONS D7): the worksheet as a "Report" sheet with its
+            // text, equations, tables and pictures (calcpad-docx), then the variables, the
+            // vectors and matrices and the input fields.
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
+            await head;
             const request = JSON.parse(body) as Record<string, unknown>;
             request.exportXlsx = true;
             request.enableUi = false;
             request.includeLineAnchors = false;
             const out = JSON.parse(await engine.convert(JSON.stringify(request), false, signal)) as {
-                status?: number; error?: string; xlsx?: string; xlsxError?: string;
+                status?: number; error?: string; html?: string; xlsxSheets?: unknown;
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
-            if (!out.xlsx) {
-                return new Response(out.xlsxError ?? 'The worksheet could not be calculated (check it for macro errors).', { status: 422 });
+            if (!out.xlsxSheets) {
+                return new Response('The worksheet could not be calculated (check it for macro errors).', { status: 422 });
             }
-            return new Response(fromBase64(out.xlsx), {
+            let html = out.html ?? '';
+            if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
+            const bytes = await engine.xlsx(html, JSON.stringify(out.xlsxSheets), signal);
+            return new Response(new Uint8Array(bytes), {
                 status: 200,
                 headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
             });

@@ -93,6 +93,7 @@ dependencies = [
 name = "calcpad-docx-wasm"
 version = "0.1.0"
 dependencies = [
+ "calcpad-core",
  "calcpad-docx",
  "serde_json",
  "wasm-bindgen",

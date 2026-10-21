@@ -5,6 +5,7 @@
 //   { id, kind: 'convert', body, unwrap }    with the JSON string calcpad-wasm's convert() returns
 //   { id, kind: 'files', files }             replacing the in-memory files #include and #read see
 //   { id, kind: 'head', markup }             setting the report head (the bundled fonts)
+//   { id, kind: 'xlsx', html, sheets }       the .xlsx bytes of a rendered page and the variable sheets
 //   { id, kind: 'docx', html, expressions }  the .docx bytes of a rendered page (calcpad-docx-wasm,
 //                                            loaded on first use with DejaVu Sans for drawing text)
 //
@@ -19,11 +20,13 @@ type Req =
     | { id: number; base: string; kind: 'convert'; body: string; unwrap: boolean }
     | { id: number; base: string; kind: 'files'; files: FileEntry[] }
     | { id: number; base: string; kind: 'head'; markup: string }
-    | { id: number; base: string; kind: 'docx'; html: string; expressions: string };
+    | { id: number; base: string; kind: 'docx'; html: string; expressions: string }
+    | { id: number; base: string; kind: 'xlsx'; html: string; sheets: string };
 
 interface DocxModule {
     default: (input?: unknown) => Promise<unknown>;
     docx: (html: string, expressions: string) => Uint8Array;
+    xlsx: (html: string, sheets: string) => Uint8Array;
     add_font: (data: Uint8Array) => void;
 }
 
@@ -88,6 +91,12 @@ function load(base: string): Promise<Engine> {
 self.onmessage = async (e: MessageEvent<Req>) => {
     const req = e.data;
     try {
+        if (req.kind === 'xlsx') {
+            const docx = await loadDocx(req.base);
+            const bytes = docx.xlsx(req.html, req.sheets);
+            self.postMessage({ id: req.id, result: bytes }, [bytes.buffer]);
+            return;
+        }
         if (req.kind === 'docx') {
             const docx = await loadDocx(req.base);
             const bytes = docx.docx(req.html, req.expressions);

@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 calcpad-docx = { path = "../calcpad-docx" }
+calcpad-core = { path = "../calcpad-core" }
 # Must match the wasm-bindgen CLI used by tools/build_wasm.sh.
 wasm-bindgen = "=0.2.122"
 serde_json = "1"

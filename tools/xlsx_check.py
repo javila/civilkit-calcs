@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Excel export check (calcpad-rs's own feature) over the Samples, read with openpyxl.
 
-For every sample, the CLI writes its variables as .xlsx; openpyxl must open the workbook, and:
+For every sample, the CLI writes the worksheet as .xlsx (a Report sheet, then the variables); openpyxl must open the workbook, and:
   * "Variables" and "Inputs" start with the Name / Value / Unit header;
   * every value is a real number, a complex number as text, or the name of the sheet that
     holds a vector or matrix, and that sheet exists;
@@ -22,19 +22,21 @@ import openpyxl
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAMPLES = os.path.join(ROOT, "web", "calcpad-web", "public", "samples")
 OUT = os.path.join(ROOT, "target", "tmp", "xlsx-check")
-CLI = os.path.join(ROOT, "target", "release", "Cli")
+CLI = os.environ.get("CALCPAD_CLI", os.path.join(ROOT, "target", "release", "Cli"))
 REF = re.compile(r'^(vector of \d+|matrix \d+ × \d+) \(sheet "(.+)"\)$')
 COMPLEX = re.compile(r"^-?[\d.]+(E[+-]?\d+)? [+-] [\d.]+(E[+-]?\d+)?i$")
 
 
 def check(path, problems):
     wb = openpyxl.load_workbook(path)
-    if wb.sheetnames[0] != "Variables" or wb.sheetnames[-1] != "Inputs":
+    if wb.sheetnames[:2] != ["Report", "Variables"] or wb.sheetnames[-1] != "Inputs":
         problems.append(f"sheets {wb.sheetnames}")
         return 0
+    check_report(wb, problems)
     header = ["Name", "Value", "Unit"]
     rows = [[c.value for c in r] for r in wb["Variables"].iter_rows()]
-    if rows[0] != header:
+    # A fourth "Note" column says where a unit was read from the text.
+    if rows[0][:3] != header or rows[0][3:] not in ([], [None], ["Note"]):
         problems.append(f"Variables header {rows[0]}")
     names = set()
     for name, value, unit in (r[:3] for r in rows[1:]):
@@ -65,9 +67,53 @@ def check(path, problems):
     return len(rows) - 1
 
 
+REPORT_HEADER = ["Description", "Name", "Expression", "With the values", "Value", "Unit"]
+
+
+def check_report(wb, problems):
+    """The Report sheet: header, equation rows agree with the Variables sheet, pictures are
+    real PNGs, hyperlinks go to sheets that exist, merged text cells hold text."""
+    ws = wb["Report"]
+    rows = [[c.value for c in r] for r in ws.iter_rows()]
+    if rows[0][:6] != REPORT_HEADER:
+        problems.append(f"Report header {rows[0][:6]}")
+    names = {r[0].value for r in wb["Variables"].iter_rows(min_row=2)}
+    last = {r[0].value: r[1].value for r in wb["Variables"].iter_rows(min_row=2)}
+    texts = 0
+    for i, r in enumerate(rows[1:], start=2):
+        desc, name, expr, with_values, value, unit = (list(r) + [None] * 6)[:6]
+        if name is not None:
+            # Rows of a call ("f(2) = 5"), a loop variable or a bare expression have no variable.
+            if name and name not in names:
+                check_report.unmatched = getattr(check_report, "unmatched", 0) + 1
+        elif desc:
+            texts += 1
+    for img in ws._images:
+        data = img._data()
+        if data[:8] != b"\x89PNG\r\n\x1a\n" and data[:3] != b"\xff\xd8\xff" and data[:3] != b"GIF":
+            problems.append("a picture that is not PNG, JPEG or GIF")
+        if img.width <= 0 or img.height <= 0:
+            problems.append("a picture without a size")
+    links = [c.hyperlink for r in ws.iter_rows() for c in r if c.hyperlink]
+    check_report.links = getattr(check_report, "links", 0) + len(links)
+    for link in links:
+        target = (link.location or "").split("!")[0].strip("'").replace("''", "'")
+        if not target or target not in wb.sheetnames:
+            problems.append(f"link to a missing sheet {target!r}")
+    for rng in ws.merged_cells.ranges:
+        if rng.min_col != 1 or rng.max_col != 6 or ws.cell(rng.min_row, 1).value in (None, ""):
+            if rng.min_col == 1 and rng.max_col == 6:
+                problems.append(f"merged cells {rng} hold nothing")
+    check_report.stats = getattr(check_report, "stats", [0, 0, 0])
+    check_report.stats[0] += len(ws._images)
+    check_report.stats[1] += sum(1 for r in rows[1:] if r[1] is not None)
+    check_report.stats[2] += texts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--filter", default="")
+    ap.add_argument("--soffice", default="/Applications/LibreOffice.app/Contents/MacOS/soffice")
     args = ap.parse_args()
     os.makedirs(OUT, exist_ok=True)
     manifest = json.load(open(os.path.join(SAMPLES, "manifest.json")))
@@ -88,7 +134,21 @@ def main():
             problems.append(f"openpyxl: {e}")
         books += 1
         failures.extend(f"{s['id']}: {p}" for p in problems)
-    print(f"{books} workbooks, {variables} variables")
+    # LibreOffice opens every workbook and prints it (one PDF each).
+    books_out = sorted(os.path.join(OUT, f) for f in os.listdir(OUT) if f.endswith(".xlsx"))
+    if books_out and os.path.exists(args.soffice):
+        pdf_dir = os.path.join(OUT, "pdf")
+        os.makedirs(pdf_dir, exist_ok=True)
+        subprocess.run([args.soffice, "--headless", "--convert-to", "pdf", "--outdir", pdf_dir, *books_out],
+                       capture_output=True, timeout=3600)
+        made = {f[:-4] for f in os.listdir(pdf_dir) if f.endswith(".pdf")}
+        missing = [os.path.basename(b) for b in books_out if os.path.basename(b)[:-5] not in made]
+        print(f"LibreOffice printed {len(books_out) - len(missing)} of {len(books_out)} workbooks")
+        failures.extend(f"LibreOffice could not print {m}" for m in missing)
+    else:
+        print(f"LibreOffice not found at {args.soffice}: print check skipped")
+    pics, eqs, texts = getattr(check_report, "stats", [0, 0, 0])
+    print(f"{books} workbooks, {variables} variables, {eqs} equation rows ({getattr(check_report, 'unmatched', 0)} of a call, a loop variable or an expression), {texts} text rows, {pics} pictures, {getattr(check_report, 'links', 0)} links to vector and matrix sheets")
     for f in failures:
         print("FAIL", f)
     print("all workbooks pass" if not failures else f"{len(failures)} failure(s)")

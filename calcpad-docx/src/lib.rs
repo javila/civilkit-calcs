@@ -8,6 +8,10 @@ pub mod html;
 pub mod image;
 pub mod package;
 pub mod writer;
+pub mod xlsx;
+pub mod xlsx_report;
+
+pub use xlsx_report::html_to_xlsx;
 
 pub use image::ImageResolver;
 

@@ -89,3 +89,17 @@ fn nothing_is_recorded_without_the_option() {
     p.parse(SHEET, true);
     assert!(p.captured_values.is_empty());
 }
+
+#[test]
+fn the_sheets_survive_json_and_name_the_variable_of_a_vector_sheet() {
+    let mut p = ExpressionParser::new();
+    p.capture_values = true;
+    p.parse(SHEET, true);
+    let sheets = variables_export::sheets(&p.captured_values);
+    let names: Vec<&str> = sheets.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Variables", "v", "K", "Inputs"]);
+    assert_eq!(sheets[1].variable.as_deref(), Some("v"));
+    assert_eq!(sheets[0].variable, None);
+    let back = variables_export::sheets_from_json(&variables_export::sheets_to_json(&sheets));
+    assert_eq!(back, sheets);
+}

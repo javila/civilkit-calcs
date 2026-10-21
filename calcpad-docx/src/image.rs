@@ -169,7 +169,7 @@ pub fn rasterize_svg(_svg: &str, _width: f64, _height: f64) -> Result<Vec<u8>, S
     Err("SVG images need the svg feature.".into())
 }
 
-fn extension_of(path: &str) -> String {
+pub(crate) fn extension_of(path: &str) -> String {
     let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let file = file.split(['?', '#']).next().unwrap_or(file);
     file.rsplit_once('.')
@@ -177,7 +177,7 @@ fn extension_of(path: &str) -> String {
         .unwrap_or_default()
 }
 
-fn check_type(ext: &str) -> Result<String, String> {
+pub(crate) fn check_type(ext: &str) -> Result<String, String> {
     let e = if ext == "jpg" { "jpeg" } else { ext };
     match e {
         "png" | "gif" | "jpeg" | "bmp" | "tif" | "tiff" | "wmf" | "emf" | "ico" | "pcx" | "svg" => Ok(e.to_string()),

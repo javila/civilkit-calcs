@@ -218,6 +218,10 @@ fn main() -> ExitCode {
         parser.capture_open_xml = is_docx;
         // The Excel export: the variables and their values (calcpad-rs's own feature).
         parser.capture_values = is_xlsx;
+        // The plots go into the workbook as pictures: drawn as SVG, which calcpad-docx rasterises.
+        if is_xlsx {
+            parser.plot_settings.vector_graphics = true;
+        }
         parser.parse(&unwrapped, true);
         out_of_scope = parser.out_of_scope.clone();
         expressions = std::mem::take(&mut parser.open_xml_expressions);
@@ -228,7 +232,18 @@ fn main() -> ExitCode {
         let _ = std::fs::write(scope_file, out_of_scope.unwrap_or_default());
     }
     if is_xlsx {
-        let bytes = match calcpad_core::openxml::variables_export::workbook(&captured) {
+        // The report as a sheet (calcpad-docx), then the variables, vectors, matrices and inputs.
+        calcpad_docx::fonts::load_system_fonts();
+        let base = full_input.parent().map(|d| d.to_path_buf()).unwrap_or_default();
+        let resolver = move |src: &str| -> Option<Vec<u8>> {
+            let path = src.strip_prefix("file:///").unwrap_or(src);
+            let p = Path::new(path);
+            let p = if p.is_absolute() { p.to_path_buf() } else { base.join(p) };
+            std::fs::read(p).ok()
+        };
+        let sheets = calcpad_core::openxml::variables_export::sheets(&captured);
+        let page = format!("<html><body>{}</body></html>", html);
+        let bytes = match calcpad_docx::html_to_xlsx(&page, &sheets, Some(&resolver)) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("{}", e);

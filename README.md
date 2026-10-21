@@ -122,11 +122,13 @@ What works in the browser:
   Insert > Libraries adds a listed library's script tag.
 
 * The bundled samples declare their inputs with `#UI` instead of upstream's deprecated `name = ? {default}` fields, rewritten by `tools/gen_samples.mjs` and checked against the original's rendering (DEVIATIONS.md, D8); the editor offers the same rewrite as a quick fix ("Convert to #UI") on the linter's warning.
-* File > Export Excel saves the variables as a workbook: all variables with values and units,
-  a sheet per vector or matrix, and the inputs (calcpad-rs's own, DEVIATIONS.md, D7; also
-  `Cli input.cpd output.xlsx`).
+* File > Export Excel saves the worksheet as a workbook: a Report sheet that mirrors the page
+  (headings and text, each equation as a row of name, expression, expression with the values,
+  value and unit, tables as cell ranges, plots and drawings as pictures), then all variables
+  with values and units, a sheet per vector or matrix, and the inputs (calcpad-rs's own,
+  DEVIATIONS.md, D7; built by calcpad-docx-wasm, also `Cli input.cpd output.xlsx`).
 * Save Word writes the .docx in the page: the engine renders the equations as Office Math and
-  calcpad-docx-wasm, a separate module loaded on the first export (about 600 KB gzipped, with
+  calcpad-docx-wasm, a separate module loaded on the first export (about 680 KB gzipped, with
   DejaVu Sans fetched for the text of plots), builds the document (DEVIATIONS.md, D6).
 
 What does not: compiled `.cpdz` worksheets and portable packages need Calcpad.Server and say

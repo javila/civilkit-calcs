@@ -142,12 +142,24 @@ fn scalar_cells(v: &Value) -> Option<(String, String)> {
     }
 }
 
-/// The workbook for the variables a parse recorded.
-pub fn workbook(values: &[CapturedValue]) -> Result<Vec<u8>, String> {
-    let mut used: HashSet<String> = ["variables", "inputs"].iter().map(|s| s.to_string()).collect();
+/// One sheet of the export: its name and rows of text (numbers as their text). A vector or
+/// matrix sheet also names the variable it holds.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sheet {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+    pub variable: Option<String>,
+}
+
+/// The sheets for the variables a parse recorded: "Variables", one per vector or matrix, "Inputs".
+pub fn sheets(values: &[CapturedValue]) -> Vec<Sheet> {
+    let mut used: HashSet<String> = ["variables", "inputs", "report"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let header = || vec!["Name".to_string(), "Value".to_string(), "Unit".to_string()];
     let mut variables = vec![header()];
-    let mut extra: Vec<(String, Vec<Vec<String>>)> = Vec::new();
+    let mut extra: Vec<Sheet> = Vec::new();
     for c in values {
         match scalar_cells(&c.value) {
             Some((value, unit)) => variables.push(vec![c.name.clone(), value, unit]),
@@ -167,13 +179,13 @@ pub fn workbook(values: &[CapturedValue]) -> Result<Vec<u8>, String> {
                     _ => continue,
                 };
                 variables.push(vec![c.name.clone(), what, String::new()]);
-                extra.push((sheet, rows));
+                extra.push(Sheet {
+                    name: sheet,
+                    rows,
+                    variable: Some(c.name.clone()),
+                });
             }
         }
-    }
-    let mut book = add_sheet(None, "Variables", &variables)?;
-    for (name, rows) in &extra {
-        book = add_sheet(Some(book), name, rows)?;
     }
     let mut inputs = vec![header()];
     for c in values.iter().filter(|c| c.is_input) {
@@ -182,7 +194,59 @@ pub fn workbook(values: &[CapturedValue]) -> Result<Vec<u8>, String> {
             None => inputs.push(vec![c.name.clone(), "(see Variables)".to_string(), String::new()]),
         }
     }
-    add_sheet(Some(book), "Inputs", &inputs)
+    let mut out = vec![Sheet {
+        name: "Variables".into(),
+        rows: variables,
+        variable: None,
+    }];
+    out.extend(extra);
+    out.push(Sheet {
+        name: "Inputs".into(),
+        rows: inputs,
+        variable: None,
+    });
+    out
+}
+
+/// The sheets as JSON, for a page that hands them to another module.
+pub fn sheets_to_json(sheets: &[Sheet]) -> serde_json::Value {
+    serde_json::Value::Array(
+        sheets
+            .iter()
+            .map(|s| serde_json::json!({ "name": s.name, "rows": s.rows, "variable": s.variable }))
+            .collect(),
+    )
+}
+
+/// The inverse of [`sheets_to_json`]; anything that does not fit is skipped.
+pub fn sheets_from_json(v: &serde_json::Value) -> Vec<Sheet> {
+    let Some(a) = v.as_array() else { return Vec::new() };
+    a.iter()
+        .filter_map(|s| {
+            let name = s.get("name")?.as_str()?.to_string();
+            let rows = s
+                .get("rows")?
+                .as_array()?
+                .iter()
+                .map(|r| {
+                    r.as_array()
+                        .map(|c| c.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect())
+                        .unwrap_or_default()
+                })
+                .collect();
+            let variable = s.get("variable").and_then(|x| x.as_str()).map(str::to_string);
+            Some(Sheet { name, rows, variable })
+        })
+        .collect()
+}
+
+/// The workbook for the variables a parse recorded.
+pub fn workbook(values: &[CapturedValue]) -> Result<Vec<u8>, String> {
+    let mut book: Option<Vec<u8>> = None;
+    for s in sheets(values) {
+        book = Some(add_sheet(book, &s.name, &s.rows)?);
+    }
+    book.ok_or_else(|| "Nothing to export.".to_string())
 }
 
 #[cfg(test)]

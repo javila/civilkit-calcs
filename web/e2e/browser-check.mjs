@@ -680,7 +680,7 @@ check(/word\/media\/image\d+\.png/.test(listing) && /word\/media\/image\d+\.svg/
 check(/asvg:svgBlip/.test(documentXml), 'the picture refers to the SVG for Word versions that show it');
 
 // ---- Excel export (calcpad-rs's own) ---------------------------------------------------------
-await page.evaluate(() => (window).calcpadActiveEditor.setValue("'Excel export check\na = 2\nL = ? {4.5}m\n#UI F = 12.5kN\nM = F*L\nv = [1; 2; 3]*1m\nK = [1; 2|3; 4]\na = a + 1"));
+await page.evaluate(() => (window).calcpadActiveEditor.setValue("'<h3>Excel export check</h3>\na = 2\nL = ? {4.5}m\n#UI F = 12.5kN\nM = F*L\nv = [1; 2; 3]*1m\nK = [1; 2|3; 4]\na = a + 1\n'<table><tr><th>Bar</th><th>Area</th></tr><tr><td>1</td><td>2.5</td></tr></table>\n$Plot{x^2 @ x = 0 : 2}"));
 await page.waitForTimeout(1500);
 await page.locator('.cprs-file-btn').click();
 const [xlsxDownload] = await Promise.all([
@@ -693,10 +693,25 @@ await xlsxDownload.saveAs(xlsxPath);
 let sheets = null;
 try {
     sheets = JSON.parse(execFileSync('python3', ['-c',
-        'import json,sys,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nprint(json.dumps({ws.title:[[c.value for c in r] for r in ws.iter_rows()] for ws in wb}))',
+        'import json,sys,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nd={ws.title:[[c.value for c in r] for r in ws.iter_rows()] for ws in wb}\nd["_images"]=len(wb["Report"]._images)\nd["_links"]=sum(1 for r in wb["Report"].iter_rows() for c in r if c.hyperlink)\nprint(json.dumps(d))',
         xlsxPath], { encoding: 'utf8' }));
 } catch (e) { sheets = { error: String(e).slice(0, 200) }; }
-check(JSON.stringify(Object.keys(sheets ?? {})) === JSON.stringify(['Variables', 'v', 'K', 'Inputs']), `File > Export Excel saves a workbook with Variables, a sheet per vector and matrix, and Inputs (${JSON.stringify(Object.keys(sheets ?? {}))})`);
+const sheetNames = Object.keys(sheets ?? {}).filter((k) => !k.startsWith('_'));
+check(JSON.stringify(sheetNames) === JSON.stringify(['Report', 'Variables', 'v', 'K', 'Inputs']), `File > Export Excel saves a workbook with a Report sheet, Variables, a sheet per vector and matrix, and Inputs (${JSON.stringify(sheetNames)})`);
+{
+    const report = sheets?.Report ?? [];
+    const rowOf = (name) => report.find((r) => r[1] === name);
+    check(report[0]?.slice(0, 6).join('|') === 'Description|Name|Expression|With the values|Value|Unit', `the Report sheet has its header (${JSON.stringify(report[0])})`);
+    check(report.some((r) => r[0] === 'Excel export check'), 'the Report sheet holds the heading as a cell');
+    const m = rowOf('M');
+    check(m && m[2] === 'F \u00B7 L' && typeof m[4] === 'number' && m[4] === 56.25 && /kN/.test(m[5] ?? ''), `an equation is a row: name, expression, value and unit (${JSON.stringify(m)})`);
+    check(m && /12\.5/.test(m[3] ?? ''), `... and the expression with the values put in (${JSON.stringify(m?.[3])})`);
+    const bar = report.findIndex((r) => r[0] === 'Bar' && r[1] === 'Area');
+    check(bar > 0 && report[bar + 1]?.[0] === 1 && report[bar + 1]?.[1] === 2.5, 'an HTML table is a cell range with its numbers as numbers');
+    check(sheets?._images >= 1, `the plot is a picture in the Report sheet (${sheets?._images})`);
+    const v = rowOf('v');
+    check(v && /see sheet "v"/.test(v[4] ?? '') && sheets?._links >= 2, `a vector or matrix value links to its sheet (${JSON.stringify(v?.[4])}, ${sheets?._links} links)`);
+}
 check(JSON.stringify(sheets?.Variables?.slice(1, 5)) === JSON.stringify([['a', 3, ''], ['L', 4.5, 'm'], ['F', 12.5, 'kN'], ['M', 56.25, 'kNm']]), `the variables in calculation order, numbers as numbers and units in their own column (${JSON.stringify(sheets?.Variables?.slice(1, 5))})`);
 check(JSON.stringify(sheets?.Inputs) === JSON.stringify([['Name', 'Value', 'Unit'], ['L', 4.5, 'm'], ['F', 12.5, 'kN']]), `the input field and the #UI control are the inputs (${JSON.stringify(sheets?.Inputs)})`);
 check(JSON.stringify(sheets?.v) === JSON.stringify([['Index', 'Value', 'Unit'], [1, 1, 'm'], [2, 2, 'm'], [3, 3, 'm']]), 'the vector has its own sheet');

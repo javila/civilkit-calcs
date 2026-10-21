@@ -158,22 +158,45 @@ Differences from upstream's writer, each deliberate:
   checks above stand in for it.
 * The Office Math is written without the indentation upstream's verbatim strings carry.
 
-## D7. Excel export of the variables (addition)
+## D7. Excel export of the worksheet (addition)
 
 CalcpadCE has no such export. File > Export Excel (and `Cli input.cpd output.xlsx`) saves the
-calculated worksheet's variables as a workbook, written with the writer `#write` uses
-(`openxml::variables_export`, recorded by `ExpressionParser::capture_values`):
+calculated worksheet as a workbook. The report is calculated as for print, with the input values
+and `#UI` entries the sheet holds. The variable sheets are made by the engine
+(`openxml::variables_export::sheets`, recorded by `ExpressionParser::capture_values`); the whole
+workbook is written by calcpad-docx (`xlsx.rs` the package writer, `xlsx_report.rs` the report),
+which the page loads on demand like the Word export.
 
-* **Variables:** every variable in the order it was first assigned, with its last value, as
-  name, value, unit. A vector or matrix names the sheet that holds it.
+* **Report** (first sheet): the rendered page in document order. Headings are bold and larger,
+  text paragraphs merged text cells. An equation is a row: description (the short label before it
+  in the text, "Yield strength -"), name, the expression, the expression with the values put in,
+  the value (a number cell, `m·10ⁿ` read as a number) and its unit; a vector or matrix value
+  links to its sheet. A table that holds only text is a cell range (header cells bold, borders,
+  numbers as numbers, colspan/rowspan merged); a table that lays out other content (headings,
+  pictures, equations) is read cell by cell, in order. Plots and inline SVG drawings are
+  pictures, rendered to PNG at twice their size by the code of the Word export, and images
+  (including those from the page's file library) too, each at its place in the text with the rows
+  it needs left free. A select shows the chosen option; hidden elements are skipped. Printing is
+  landscape, fitted to the width.
+* **Variables:** every variable in the order it was first assigned, with its last value, as name,
+  value, unit. A vector or matrix names the sheet that holds it.
 * **One sheet per vector or matrix:** the elements, each row with its unit.
 * **Inputs:** the variables set by input fields (`?`) and `#UI` controls.
 
-Numbers are numeric cells at full precision; units are text in their own column. A complex
-value is written as text ("3 + 2i"). The report is calculated as for print, with the input
-values and `#UI` entries the sheet holds. It is checked by `calcpad-core/tests/excel_export.rs`
-(read back with the reader `#read` uses), by `tools/xlsx_check.py` (every sample, read with
-openpyxl), and by the browser check.
+Units: a value carries a unit only when the calculation gave it one. Many sheets declare a
+variable as `h = ? {550}'mm` or `#UI 'Height -'h = 550'mm`: the unit is a comment after the value,
+so `h` is unitless (confirmed on the I-section sheet, where every dimension was). When the text
+that follows an equation's unitless number starts with a valid unit (checked with the unit
+parser: "mm", "kN/m", "mm" followed by an exponent), the Report row gets it in the Unit column
+and the Variables sheet in its Unit column with a Note ("unit read from the text after the
+value"). A word such as "with" is not a unit. Numbers are numeric cells at full precision; a
+complex value is text ("3 + 2i"). It is checked by `calcpad-core/tests/excel_export.rs`,
+`calcpad-docx/tests/xlsx_report.rs`, `tools/xlsx_check.py` (every sample through the CLI, read
+with openpyxl, and printed by LibreOffice) and the browser check.
+
+Not done: native Excel charts (the pictures are not editable), live formulas (the cells hold the
+calculated values and the expressions as text), and conditional output of `#if` blocks other
+than what the page shows.
 
 Found on the way: the workbook writer ordered a row's cells by comparing their references as
 text, so a 27th column ("AA1") went in front of "B1" and the sheet was invalid. It now compares

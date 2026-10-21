@@ -249,11 +249,9 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
     if r.capture_open_xml {
         out["openXmlExpressions"] = serde_json::json!(expressions);
     }
-    if let Some(x) = xlsx {
-        match x {
-            Ok(bytes) => out["xlsx"] = serde_json::json!(base64_encode(&bytes)),
-            Err(e) => out["xlsxError"] = serde_json::json!(e),
-        }
+    // The variable sheets for the Excel export; the page adds the report sheet (calcpad-docx).
+    if let Some(sheets) = xlsx {
+        out["xlsxSheets"] = sheets;
     }
     if LISTING_UNHIGHLIGHTED.with(|u| u.replace(false)) {
         out["needsHighlighter"] = serde_json::Value::Bool(true);
@@ -281,7 +279,7 @@ struct ConvertRequest {
     write: bool,
     /// Also render each equation as Office Math, for the Word export (`captureOpenXml`).
     capture_open_xml: bool,
-    /// Also return the variables as an Excel workbook (`exportXlsx`, calcpad-rs's own).
+    /// Also return the sheets of the variables for the Excel export (`exportXlsx`, calcpad-rs's own).
     export_xlsx: bool,
 }
 
@@ -429,7 +427,7 @@ impl ConvertRequest {
 }
 
 /// `CalcpadService.Convert`
-type Converted = (String, Vec<CalcpadError>, Vec<String>, Option<Result<Vec<u8>, String>>);
+type Converted = (String, Vec<CalcpadError>, Vec<String>, Option<serde_json::Value>);
 
 fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
     let enable_ui = r.enable_ui && !r.for_print;
@@ -473,8 +471,8 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
         errors.extend(parser.errors_list.iter().cloned());
         expressions = std::mem::take(&mut parser.open_xml_expressions);
         if r.export_xlsx {
-            xlsx = Some(calcpad_core::openxml::variables_export::workbook(
-                &parser.captured_values,
+            xlsx = Some(calcpad_core::openxml::variables_export::sheets_to_json(
+                &calcpad_core::openxml::variables_export::sheets(&parser.captured_values),
             ));
         }
         // Model bindings (docs/model-bindings.md): mark each bound input. No model is connected
