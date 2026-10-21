@@ -88,15 +88,25 @@ const requests = [];
 context.on('request', (r) => requests.push({ method: r.method(), url: r.url() }));
 // The settings the stubs were rendered with (.github/scripts/CliSettingsComparison.xml):
 // the web defaults with vector graphics on.
-// Printing: count print() calls from the print frame instead of opening a dialog.
+// Printing: count print() calls on the print frame instead of opening a dialog. The frame is
+// sandboxed without scripts, so the stub is put on its window from this page when it loads
+// (print.ts calls print() only after the load event and a fonts check).
 await context.addInitScript(() => {
-    if (window === window.top) return;
-    window.print = () => {
-        try {
-            window.top.__printed = (window.top.__printed ?? 0) + 1;
-            window.top.__printedHtml = document.documentElement.outerHTML;
-        } catch { /* a sandboxed result frame cannot reach the top window */ }
-    };
+    if (window !== window.top) return;
+    new MutationObserver((records) => {
+        for (const r of records) for (const n of r.addedNodes) {
+            if (!(n instanceof HTMLIFrameElement) || !(n.getAttribute('sandbox') ?? '').includes('allow-modals')) continue;
+            n.addEventListener('load', () => {
+                if (window.__realPrint) return;
+                const w = n.contentWindow;
+                window.__printSandbox = n.getAttribute('sandbox');
+                w.print = () => {
+                    window.__printed = (window.__printed ?? 0) + 1;
+                    window.__printedHtml = w.document.documentElement.outerHTML;
+                };
+            });
+        }
+    }).observe(document, { childList: true, subtree: true });
 });
 // Without the File System Access API, so saving takes the download path, which the test can see.
 await context.addInitScript(() => {
@@ -310,13 +320,33 @@ const written = downloads.filter((d) => d.suggestedFilename() === 'out-check.csv
 check(written.length === 1, `#write downloads out-check.csv once over two report renders (${written.length})`);
 if (written.length) check(readFileSync(await written[0].path(), 'utf8') === '1,2\n3,4\n', '#write writes the matrix as CSV');
 
-// Print: the report goes to the browser's print().
-await page.evaluate(() => { (window).__printed = 0; });
+// Print: the report goes to the browser's print(), and a worksheet's own script does not run in
+// the print frame (which shares this page's origin): it is removed before printing.
+// (No single quotes inside: a single quote ends a Calcpad comment.)
+await setEditor("'Library check\n'<script>try { window.top.__pwned = 1 } catch (e) {}</script><img src=\"data:,\" onerror=\"try { window.top.__pwned = 2 } catch (e) {}\"><a href=\"javascript:window.top.__pwned=3\">link</a>\nq = 1");
+await frameText('Library check');
+await page.evaluate(() => { (window).__printed = 0; (window).__pwned = undefined; });
 await page.locator('.preview-toolbar .toolbar-btn', { hasText: /^Print PDF$/ }).click();
 await page.waitForFunction(() => (window).__printed > 0, null, { timeout: 15000 }).catch(() => {});
 const printed = await page.evaluate(() => ({ n: (window).__printed, html: (window).__printedHtml ?? '' }));
 check(printed.n === 1 && printed.html.includes('@page') && printed.html.includes('Library check'),
     `Print PDF prints the report through the browser (${printed.n} print call)`);
+await page.waitForTimeout(1500);
+const pwned = await page.evaluate(() => ({ pwned: (window).__pwned, sandbox: (window).__printSandbox }));
+check(pwned.pwned === undefined, `a worksheet script does not run during Print (${pwned.pwned})`);
+check(!/__pwned/.test(printed.html), 'the worksheet script and handlers were removed from the printed page');
+check(pwned.sandbox === 'allow-same-origin allow-modals', `the print frame is sandboxed without scripts (${pwned.sandbox})`);
+// The real print(), unstubbed: Chrome ignores print() from a frame whose sandbox lacks
+// allow-modals and says so on the console.
+const printConsole = [];
+const onPrintConsole = (m) => printConsole.push(m.text());
+page.on('console', onPrintConsole);
+await page.evaluate(() => { (window).__realPrint = true; });
+await page.locator('.preview-toolbar .toolbar-btn', { hasText: /^Print PDF$/ }).click();
+await page.waitForTimeout(3000);
+await page.evaluate(() => { (window).__realPrint = false; });
+page.off('console', onPrintConsole);
+check(!printConsole.some((t) => /Ignored call to 'print\(\)'/.test(t)), 'the sandboxed print frame may call the real print()');
 await resultMode('Preview');
 
 // Open by drop, edit, save (download), and the recent list.
