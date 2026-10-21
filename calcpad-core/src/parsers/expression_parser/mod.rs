@@ -368,6 +368,12 @@ impl ExpressionParser {
         }
     }
 
+    /// The value of a variable after the last parse, for callers that read results (the
+    /// template tests, exports). `None` for a name the worksheet did not define.
+    pub fn variable(&self, name: &str) -> Option<Value> {
+        self.parser.as_ref().and_then(|p| p.get_variable(name).ok())
+    }
+
     fn p(&self) -> &MathParser {
         self.parser.as_ref().unwrap()
     }
