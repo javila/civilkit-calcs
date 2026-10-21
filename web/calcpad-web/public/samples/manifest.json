@@ -13,7 +13,7 @@
  "samples": [
   {
    "id": "structural-cantilevers-concentrated-force",
-   "title": "Concentrated Force",
+   "title": "Cantilever: Concentrated Force",
    "group": "Beams",
    "folder": "Cantilevers",
    "file": "samples/Structural/Cantilevers/Concentrated Force.cpd",
@@ -32,12 +32,12 @@
   },
   {
    "id": "structural-cantilevers-concentrated-moment",
-   "title": "Concentrated Moment",
+   "title": "Cantilever: Concentrated Moment",
    "group": "Beams",
    "folder": "Cantilevers",
    "file": "samples/Structural/Cantilevers/Concentrated Moment.cpd",
    "upstream": "Examples/Structural/Cantilevers/Concentrated Moment.cpd",
-   "description": "Concentrated moment M0 applied at the free end, producing a constant bending moment along the beam and zero shear.",
+   "description": "Concentrated moment M_0 applied at the free end, producing a constant bending moment along the beam and zero shear.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -51,12 +51,12 @@
   },
   {
    "id": "structural-cantilevers-linearly-distributed-load",
-   "title": "Linearly Distributed Load",
+   "title": "Cantilever: Linearly Distributed Load",
    "group": "Beams",
    "folder": "Cantilevers",
    "file": "samples/Structural/Cantilevers/Linearly Distributed Load.cpd",
    "upstream": "Examples/Structural/Cantilevers/Linearly Distributed Load.cpd",
-   "description": "Distributed load varying linearly between intensities q1 at the support and q2 at the tip, giving a cubic bending diagram and quadratic shear.",
+   "description": "Distributed load varying linearly between intensities q_1 at the support and q_2 at the tip, giving a cubic bending diagram and quadratic shear.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -70,7 +70,7 @@
   },
   {
    "id": "structural-cantilevers-partially-distributed-load",
-   "title": "Partially Distributed Load",
+   "title": "Cantilever: Partially Distributed Load",
    "group": "Beams",
    "folder": "Cantilevers",
    "file": "samples/Structural/Cantilevers/Partially Distributed Load.cpd",
@@ -89,7 +89,7 @@
   },
   {
    "id": "structural-cantilevers-uniformly-distributed-load",
-   "title": "Uniformly Distributed Load",
+   "title": "Cantilever: Uniformly Distributed Load",
    "group": "Beams",
    "folder": "Cantilevers",
    "file": "samples/Structural/Cantilevers/Uniformly Distributed Load.cpd",
@@ -108,7 +108,7 @@
   },
   {
    "id": "structural-continuous-beam-continuous-beam",
-   "title": "Continuous Beam",
+   "title": "Continuous Beam: Force Method under Uniform Load",
    "group": "Beams",
    "folder": "Continuous Beam",
    "file": "samples/Structural/Continuous Beam/Continuous Beam.cpd",
@@ -121,32 +121,13 @@
    "assets": []
   },
   {
-   "id": "structural-deflections-cantilever-with-concentrated-load",
-   "title": "Cantilever with Concentrated Load",
-   "group": "Beams",
-   "folder": "Deflections",
-   "file": "samples/Structural/Deflections/Cantilever with Concentrated Load.cpd",
-   "upstream": "Examples/Structural/Deflections/Cantilever with Concentrated Load.cpd",
-   "description": "Rotation \\varphi(x) and deflection d(x) along a cantilever loaded by a tip force F, recovering the textbook tip values \\varphi{max} = F l^2 / (2 E I) and d{max} = F l^3 / (3 E I).",
-   "codes": [],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "assets": [
-    {
-     "key": "/Images/mechanics/beams/deflection-cantilever-force.png",
-     "url": "samples/Images/mechanics/beams/deflection-cantilever-force.png"
-    }
-   ]
-  },
-  {
    "id": "structural-deflections-cantilever-with-unifrom-load",
-   "title": "Cantilever with Unifrom Load",
+   "title": "Deflection: Cantilever under Uniform Load",
    "group": "Beams",
    "folder": "Deflections",
    "file": "samples/Structural/Deflections/Cantilever with Unifrom Load.cpd",
    "upstream": "Examples/Structural/Deflections/Cantilever with Unifrom Load.cpd",
-   "description": "Cantilever under a full-span uniform load q, integrating the curvature to obtain \\varphi(x) and d(x) with the tip deflection d{max} = q l^4 / (8 E I).",
+   "description": "Cantilever under a full-span uniform load q, integrating the curvature to obtain φ(x) and d(x) with the tip deflection d_max = q l^4 / (8 E I).",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -159,32 +140,32 @@
    ]
   },
   {
-   "id": "structural-deflections-simply-supported-beam-with-concentrated-load",
-   "title": "Simply Supported Beam with Concentrated Load",
+   "id": "structural-deflections-cantilever-with-concentrated-load",
+   "title": "Deflection: Cantilever with a Tip Load",
    "group": "Beams",
    "folder": "Deflections",
-   "file": "samples/Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd",
-   "upstream": "Examples/Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd",
-   "description": "Simply supported beam with a mid-span point force F, giving the maximum deflection d{max} = F l^3 / (48 E I) and the support rotation \\varphi{max} = F l^2 / (16 E I).",
+   "file": "samples/Structural/Deflections/Cantilever with Concentrated Load.cpd",
+   "upstream": "Examples/Structural/Deflections/Cantilever with Concentrated Load.cpd",
+   "description": "Rotation φ(x) and deflection d(x) along a cantilever loaded by a tip force F, recovering the textbook tip values φ_max = F l^2 / (2 E I) and d_max = F l^3 / (3 E I).",
    "codes": [],
    "ui": false,
    "scripts": false,
    "read": false,
    "assets": [
     {
-     "key": "/Images/mechanics/beams/deflection-simply-supported-beam-force.png",
-     "url": "samples/Images/mechanics/beams/deflection-simply-supported-beam-force.png"
+     "key": "/Images/mechanics/beams/deflection-cantilever-force.png",
+     "url": "samples/Images/mechanics/beams/deflection-cantilever-force.png"
     }
    ]
   },
   {
    "id": "structural-deflections-simply-supported-beam-with-unifrom-load",
-   "title": "Simply Supported Beam with Unifrom Load",
+   "title": "Deflection: Simply Supported Beam under Uniform Load",
    "group": "Beams",
    "folder": "Deflections",
    "file": "samples/Structural/Deflections/Simply Supported Beam with Unifrom Load.cpd",
    "upstream": "Examples/Structural/Deflections/Simply Supported Beam with Unifrom Load.cpd",
-   "description": "Simply supported beam under a full-span uniform load q, recovering the serviceability-relevant mid-span deflection d{max} = 5 q l^4 / (384 E I) and the support rotation \\varphi{max} = q l^3 / (24 E I).",
+   "description": "Simply supported beam under a full-span uniform load q, recovering the serviceability-relevant mid-span deflection d_max = 5 q l^4 / (384 E I) and the support rotation φ_max = q l^3 / (24 E I).",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -197,13 +178,32 @@
    ]
   },
   {
+   "id": "structural-deflections-simply-supported-beam-with-concentrated-load",
+   "title": "Deflection: Simply Supported Beam with a Mid-Span Load",
+   "group": "Beams",
+   "folder": "Deflections",
+   "file": "samples/Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd",
+   "upstream": "Examples/Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd",
+   "description": "Simply supported beam with a mid-span point force F, giving the maximum deflection d_max = F l^3 / (48 E I) and the support rotation φ_max = F l^2 / (16 E I).",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": [
+    {
+     "key": "/Images/mechanics/beams/deflection-simply-supported-beam-force.png",
+     "url": "samples/Images/mechanics/beams/deflection-simply-supported-beam-force.png"
+    }
+   ]
+  },
+  {
    "id": "structural-fully-restrained-beams-concentrated-force",
-   "title": "Concentrated Force",
+   "title": "Fully Restrained Beam: Concentrated Force",
    "group": "Beams",
    "folder": "Fully Restrained Beams",
    "file": "samples/Structural/Fully Restrained Beams/Concentrated Force.cpd",
    "upstream": "Examples/Structural/Fully Restrained Beams/Concentrated Force.cpd",
-   "description": "Fixed-end moments MA = F a b^2 / l^2 and MB = F a^2 b / l^2 for a clamped-clamped beam carrying a point force F at distance a from the left support.",
+   "description": "Fixed-end moments M_A = F a b^2 / l^2 and M_B = F a^2 b / l^2 for a clamped-clamped beam carrying a point force F at distance a from the left support.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -217,7 +217,7 @@
   },
   {
    "id": "structural-fully-restrained-beams-concentrated-moment",
-   "title": "Concentrated Moment",
+   "title": "Fully Restrained Beam: Concentrated Moment",
    "group": "Beams",
    "folder": "Fully Restrained Beams",
    "file": "samples/Structural/Fully Restrained Beams/Concentrated Moment.cpd",
@@ -236,12 +236,12 @@
   },
   {
    "id": "structural-fully-restrained-beams-linearly-distributed-load",
-   "title": "Linearly Distributed Load",
+   "title": "Fully Restrained Beam: Linearly Distributed Load",
    "group": "Beams",
    "folder": "Fully Restrained Beams",
    "file": "samples/Structural/Fully Restrained Beams/Linearly Distributed Load.cpd",
    "upstream": "Examples/Structural/Fully Restrained Beams/Linearly Distributed Load.cpd",
-   "description": "Trapezoidal load between intensities q1 and q2, with the support moments split as (3 q1 + 2 q2) l^2 / 60 and (2 q1 + 3 q2) l^2 / 60.",
+   "description": "Trapezoidal load between intensities q_1 and q_2, with the support moments split as (3 q_1 + 2 q_2) l^2 / 60 and (2 q_1 + 3 q_2) l^2 / 60.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -255,7 +255,7 @@
   },
   {
    "id": "structural-fully-restrained-beams-partially-distributed-load",
-   "title": "Partially Distributed Load",
+   "title": "Fully Restrained Beam: Partially Distributed Load",
    "group": "Beams",
    "folder": "Fully Restrained Beams",
    "file": "samples/Structural/Fully Restrained Beams/Partially Distributed Load.cpd",
@@ -274,12 +274,12 @@
   },
   {
    "id": "structural-fully-restrained-beams-uniformly-distributed-load",
-   "title": "Uniformly Distributed Load",
+   "title": "Fully Restrained Beam: Uniformly Distributed Load",
    "group": "Beams",
    "folder": "Fully Restrained Beams",
    "file": "samples/Structural/Fully Restrained Beams/Uniformly Distributed Load.cpd",
    "upstream": "Examples/Structural/Fully Restrained Beams/Uniformly Distributed Load.cpd",
-   "description": "Full-span uniform load q, recovering MA = MB = q l^2 / 12, VA = VB = q l / 2 and the mid-span M{max} = q l^2 / 24.",
+   "description": "Full-span uniform load q, recovering M_A = M_B = q l^2 / 12, V_A = V_B = q l / 2 and the mid-span M_max = q l^2 / 24.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -293,7 +293,7 @@
   },
   {
    "id": "structural-propped-cantilevers-concentrated-force",
-   "title": "Concentrated Force",
+   "title": "Propped Cantilever: Concentrated Force",
    "group": "Beams",
    "folder": "Propped Cantilevers",
    "file": "samples/Structural/Propped Cantilevers/Concentrated Force.cpd",
@@ -312,7 +312,7 @@
   },
   {
    "id": "structural-propped-cantilevers-concentrated-moment",
-   "title": "Concentrated Moment",
+   "title": "Propped Cantilever: Concentrated Moment",
    "group": "Beams",
    "folder": "Propped Cantilevers",
    "file": "samples/Structural/Propped Cantilevers/Concentrated Moment.cpd",
@@ -331,12 +331,12 @@
   },
   {
    "id": "structural-propped-cantilevers-linearly-distributed-load",
-   "title": "Linearly Distributed Load",
+   "title": "Propped Cantilever: Linearly Distributed Load",
    "group": "Beams",
    "folder": "Propped Cantilevers",
    "file": "samples/Structural/Propped Cantilevers/Linearly Distributed Load.cpd",
    "upstream": "Examples/Structural/Propped Cantilevers/Linearly Distributed Load.cpd",
-   "description": "Propped cantilever under a trapezoidal load defined by end intensities q1 and q2, locating the in-span peak from the zero of the shear V(x).",
+   "description": "Propped cantilever under a trapezoidal load defined by end intensities q_1 and q_2, locating the in-span peak from the zero of the shear V(x).",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -358,7 +358,7 @@
   },
   {
    "id": "structural-propped-cantilevers-partially-distributed-load",
-   "title": "Partially Distributed Load",
+   "title": "Propped Cantilever: Partially Distributed Load",
    "group": "Beams",
    "folder": "Propped Cantilevers",
    "file": "samples/Structural/Propped Cantilevers/Partially Distributed Load.cpd",
@@ -377,12 +377,12 @@
   },
   {
    "id": "structural-propped-cantilevers-uniformly-distributed-load",
-   "title": "Uniformly Distributed Load",
+   "title": "Propped Cantilever: Uniformly Distributed Load",
    "group": "Beams",
    "folder": "Propped Cantilevers",
    "file": "samples/Structural/Propped Cantilevers/Uniformly Distributed Load.cpd",
    "upstream": "Examples/Structural/Propped Cantilevers/Uniformly Distributed Load.cpd",
-   "description": "Full-span uniform load q on a propped cantilever, giving the textbook results MA = q l^2 / 8, VA = 5 q l / 8 and M{max} = 9 q l^2 / 128 at x = 5 l / 8.",
+   "description": "Full-span uniform load q on a propped cantilever, giving the textbook results M_A = q l^2 / 8, V_A = 5 q l / 8 and M_max = 9 q l^2 / 128 at x = 5 l / 8.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -396,12 +396,12 @@
   },
   {
    "id": "structural-simply-supported-beams-concentrated-force",
-   "title": "Concentrated Force",
+   "title": "Simply Supported Beam: Concentrated Force",
    "group": "Beams",
    "folder": "Simply Supported Beams",
    "file": "samples/Structural/Simply Supported Beams/Concentrated Force.cpd",
    "upstream": "Examples/Structural/Simply Supported Beams/Concentrated Force.cpd",
-   "description": "Single point force F at distance a from the left support, with reactions VA = F (l - a) / l, VB = -F a / l and the bending peak M{max} = F (l - a) a / l at the load.",
+   "description": "Single point force F at distance a from the left support, with reactions V_A = F (l - a) / l, V_B = -F a / l and the bending peak M_max = F (l - a) a / l at the load.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -415,7 +415,7 @@
   },
   {
    "id": "structural-simply-supported-beams-concentrated-moment",
-   "title": "Concentrated Moment",
+   "title": "Simply Supported Beam: Concentrated Moment",
    "group": "Beams",
    "folder": "Simply Supported Beams",
    "file": "samples/Structural/Simply Supported Beams/Concentrated Moment.cpd",
@@ -434,12 +434,12 @@
   },
   {
    "id": "structural-simply-supported-beams-linearly-distributed-load",
-   "title": "Linearly Distributed Load",
+   "title": "Simply Supported Beam: Linearly Distributed Load",
    "group": "Beams",
    "folder": "Simply Supported Beams",
    "file": "samples/Structural/Simply Supported Beams/Linearly Distributed Load.cpd",
    "upstream": "Examples/Structural/Simply Supported Beams/Linearly Distributed Load.cpd",
-   "description": "Trapezoidal load defined by end intensities q1 and q2, locating the in-span peak from the zero of V(x) and falling back to the uniform and triangular special cases.",
+   "description": "Trapezoidal load defined by end intensities q_1 and q_2, locating the in-span peak from the zero of V(x) and falling back to the uniform and triangular special cases.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -453,7 +453,7 @@
   },
   {
    "id": "structural-simply-supported-beams-partially-distributed-load",
-   "title": "Partially Distributed Load",
+   "title": "Simply Supported Beam: Partially Distributed Load",
    "group": "Beams",
    "folder": "Simply Supported Beams",
    "file": "samples/Structural/Simply Supported Beams/Partially Distributed Load.cpd",
@@ -472,12 +472,12 @@
   },
   {
    "id": "structural-simply-supported-beams-uniformly-distributed-load",
-   "title": "Uniformly Distributed Load",
+   "title": "Simply Supported Beam: Uniformly Distributed Load",
    "group": "Beams",
    "folder": "Simply Supported Beams",
    "file": "samples/Structural/Simply Supported Beams/Uniformly Distributed Load.cpd",
    "upstream": "Examples/Structural/Simply Supported Beams/Uniformly Distributed Load.cpd",
-   "description": "Full-span uniform load q, recovering the textbook results M{max} = q l^2 / 8 and V{max} = q l / 2.",
+   "description": "Full-span uniform load q, recovering the textbook results M_max = q l^2 / 8 and V_max = q l / 2.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -496,7 +496,7 @@
    "folder": "Reinforced Concrete",
    "file": "samples/Structural/Reinforced Concrete/Areas of Reinforcement Bars.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete/Areas of Reinforcement Bars.cpd",
-   "description": "Lookup table that returns the total reinforcement area As for a chosen bar diameter and bar count, with the cells highlighting the picked combination on hover.",
+   "description": "Lookup table that returns the total reinforcement area A_s for a chosen bar diameter and bar count, with the cells highlighting the picked combination on hover.",
    "codes": [],
    "ui": false,
    "scripts": true,
@@ -515,7 +515,7 @@
    "folder": "Reinforced Concrete",
    "file": "samples/Structural/Reinforced Concrete/Bending Capacity of Tee Section.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete/Bending Capacity of Tee Section.cpd",
-   "description": "Bending capacity M{Rd} of a T-cross-section with given reinforcement: rectangular stress block, neutral-axis depth from horizontal equilibrium and lever arm to the resultant of the compressed concrete.",
+   "description": "Bending capacity M_Rd of a T-cross-section with given reinforcement: rectangular stress block, neutral-axis depth from horizontal equilibrium and lever arm to the resultant of the compressed concrete.",
    "codes": [
     "EN 1992",
     "EN 1992-1-1"
@@ -537,7 +537,7 @@
    "folder": "Reinforced Concrete",
    "file": "samples/Structural/Reinforced Concrete/Bending Design of Rectangular Section.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete/Bending Design of Rectangular Section.cpd",
-   "description": "Required tension reinforcement As of a rectangular section under a design moment M{Ed}, with compression reinforcement added when the relative neutral-axis depth exceeds the ductility limit.",
+   "description": "Required tension reinforcement A_s of a rectangular section under a design moment M_Ed, with compression reinforcement added when the relative neutral-axis depth exceeds the ductility limit.",
    "codes": [
     "EN 1992",
     "EN 1992-1-1"
@@ -559,7 +559,7 @@
    "folder": "Reinforced Concrete",
    "file": "samples/Structural/Reinforced Concrete/Bending Design of Tee Section.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete/Bending Design of Tee Section.cpd",
-   "description": "Required tension reinforcement As of a T-section under a design moment M{Ed}, switching between rectangular flange-only behaviour and T-section behaviour according to the position of the neutral axis.",
+   "description": "Required tension reinforcement A_s of a T-section under a design moment M_Ed, switching between rectangular flange-only behaviour and T-section behaviour according to the position of the neutral axis.",
    "codes": [
     "EN 1992",
     "EN 1992-1-1"
@@ -699,7 +699,7 @@
    "folder": "Reinforced Concrete",
    "file": "samples/Structural/Reinforced Concrete/Shear Design of Rectangular Section.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete/Shear Design of Rectangular Section.cpd",
-   "description": "Shear design of a rectangular section under EN 1992-1-1: shear strength without links V{Rd,c}, required link area for a strut angle \\theta and check of the maximum strut compression.",
+   "description": "Shear design of a rectangular section under EN 1992-1-1: shear strength without links V_Rd,c, required link area for a strut angle θ and check of the maximum strut compression.",
    "codes": [
     "EN 1992",
     "EN 1992-1-1"
@@ -792,7 +792,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-fully-restrained-slab-panel",
-   "title": "Fully Restrained Slab Panel",
+   "title": "Two-Way Slab Panel: All Edges Restrained",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Fully Restrained Slab Panel.cpd",
@@ -817,8 +817,34 @@
    ]
   },
   {
+   "id": "structural-reinforced-concrete-plates-simply-supported-slab-panel",
+   "title": "Two-Way Slab Panel: All Edges Simply Supported",
+   "group": "Reinforced Concrete",
+   "folder": "Reinforced Concrete - Plates",
+   "file": "samples/Structural/Reinforced Concrete - Plates/Simply Supported Slab Panel.cpd",
+   "upstream": "Examples/Structural/Reinforced Concrete - Plates/Simply Supported Slab Panel.cpd",
+   "description": "Two-way slab panel simply supported on all four edges, the limiting case of the family with the highest span moments and no support reinforcement requirement.",
+   "codes": [
+    "EN 1992",
+    "EN 1992-1-1"
+   ],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": [
+    {
+     "key": "/Images/structures/rc/spans/ss-span-cl.png",
+     "url": "samples/Images/structures/rc/spans/ss-span-cl.png"
+    },
+    {
+     "key": "/Images/structures/rc/spans/ss-span.png",
+     "url": "samples/Images/structures/rc/spans/ss-span.png"
+    }
+   ]
+  },
+  {
    "id": "structural-reinforced-concrete-plates-restrained-adjacent-edges",
-   "title": "Restrained Adjacent Edges",
+   "title": "Two-Way Slab Panel: Restrained Adjacent Edges",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Adjacent Edges.cpd",
@@ -844,7 +870,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-both-longer-edges",
-   "title": "Restrained Both Longer Edges",
+   "title": "Two-Way Slab Panel: Restrained Both Longer Edges",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Both Longer Edges.cpd",
@@ -870,7 +896,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-both-shorter-edges",
-   "title": "Restrained Both Shorter Edges",
+   "title": "Two-Way Slab Panel: Restrained Both Shorter Edges",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Both Shorter Edges.cpd",
@@ -896,7 +922,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-longer-edge",
-   "title": "Restrained Longer Edge",
+   "title": "Two-Way Slab Panel: Restrained Longer Edge",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Longer Edge.cpd",
@@ -922,7 +948,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-panel-with-unrestrained-longer-edge",
-   "title": "Restrained Panel with Unrestrained Longer Edge",
+   "title": "Two-Way Slab Panel: Restrained Panel with Unrestrained Longer Edge",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Panel with Unrestrained Longer Edge.cpd",
@@ -948,7 +974,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-panel-with-unrestrained-shorter-edge",
-   "title": "Restrained Panel with Unrestrained Shorter Edge",
+   "title": "Two-Way Slab Panel: Restrained Panel with Unrestrained Shorter Edge",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Panel with Unrestrained Shorter Edge.cpd",
@@ -974,7 +1000,7 @@
   },
   {
    "id": "structural-reinforced-concrete-plates-restrained-shorter-edge",
-   "title": "Restrained Shorter Edge",
+   "title": "Two-Way Slab Panel: Restrained Shorter Edge",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Plates",
    "file": "samples/Structural/Reinforced Concrete - Plates/Restrained Shorter Edge.cpd",
@@ -999,34 +1025,8 @@
    ]
   },
   {
-   "id": "structural-reinforced-concrete-plates-simply-supported-slab-panel",
-   "title": "Simply Supported Slab Panel",
-   "group": "Reinforced Concrete",
-   "folder": "Reinforced Concrete - Plates",
-   "file": "samples/Structural/Reinforced Concrete - Plates/Simply Supported Slab Panel.cpd",
-   "upstream": "Examples/Structural/Reinforced Concrete - Plates/Simply Supported Slab Panel.cpd",
-   "description": "Two-way slab panel simply supported on all four edges, the limiting case of the family with the highest span moments and no support reinforcement requirement.",
-   "codes": [
-    "EN 1992",
-    "EN 1992-1-1"
-   ],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "assets": [
-    {
-     "key": "/Images/structures/rc/spans/ss-span-cl.png",
-     "url": "samples/Images/structures/rc/spans/ss-span-cl.png"
-    },
-    {
-     "key": "/Images/structures/rc/spans/ss-span.png",
-     "url": "samples/Images/structures/rc/spans/ss-span.png"
-    }
-   ]
-  },
-  {
    "id": "structural-reinforced-concrete-punching-corner-column",
-   "title": "Corner Column",
+   "title": "Punching Shear: Corner Column",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Punching",
    "file": "samples/Structural/Reinforced Concrete - Punching/Corner Column.cpd",
@@ -1056,7 +1056,7 @@
   },
   {
    "id": "structural-reinforced-concrete-punching-edge-column",
-   "title": "Edge Column",
+   "title": "Punching Shear: Edge Column",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Punching",
    "file": "samples/Structural/Reinforced Concrete - Punching/Edge Column.cpd",
@@ -1086,7 +1086,7 @@
   },
   {
    "id": "structural-reinforced-concrete-punching-internal-column",
-   "title": "Internal Column",
+   "title": "Punching Shear: Internal Column",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Punching",
    "file": "samples/Structural/Reinforced Concrete - Punching/Internal Column.cpd",
@@ -1116,12 +1116,12 @@
   },
   {
    "id": "structural-reinforced-concrete-seismic-detailing-beam-detailing-for-dcm",
-   "title": "Beam Detailing for DCM",
+   "title": "Seismic Detailing (DCM): Beam",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Seismic Detailing",
    "file": "samples/Structural/Reinforced Concrete - Seismic Detailing/Beam Detailing for DCM.cpd",
    "upstream": "Examples/Structural/Reinforced Concrete - Seismic Detailing/Beam Detailing for DCM.cpd",
-   "description": "Eurocode 8 detailing of a primary seismic beam for medium ductility class: critical region length l{cr}, longitudinal ratio limits, spacing of closed stirrups and lap-splice requirements.",
+   "description": "Eurocode 8 detailing of a primary seismic beam for medium ductility class: critical region length l_cr, longitudinal ratio limits, spacing of closed stirrups and lap-splice requirements.",
    "codes": [
     "EN 1992",
     "EN 1992-1-1",
@@ -1140,7 +1140,7 @@
   },
   {
    "id": "structural-reinforced-concrete-seismic-detailing-column-detailing-for-dcm",
-   "title": "Column Detailing for DCM",
+   "title": "Seismic Detailing (DCM): Column",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Seismic Detailing",
    "file": "samples/Structural/Reinforced Concrete - Seismic Detailing/Column Detailing for DCM.cpd",
@@ -1168,7 +1168,7 @@
   },
   {
    "id": "structural-reinforced-concrete-seismic-detailing-shear-wall-detailing-for-dcm",
-   "title": "Shear Wall Detailing for DCM",
+   "title": "Seismic Detailing (DCM): Shear Wall",
    "group": "Reinforced Concrete",
    "folder": "Reinforced Concrete - Seismic Detailing",
    "file": "samples/Structural/Reinforced Concrete - Seismic Detailing/Shear Wall Detailing for DCM.cpd",
@@ -1219,7 +1219,7 @@
   },
   {
    "id": "structural-steel-i-section-properties-and-drawing",
-   "title": "I-Section Properties and Drawing",
+   "title": "I-Section Properties from a Catalogue, with Drawing",
    "group": "Steel",
    "folder": "Steel",
    "file": "samples/Structural/Steel/I-Section Properties and Drawing.cpd",
@@ -1246,7 +1246,7 @@
   },
   {
    "id": "structural-steel-i-section-properties-excel",
-   "title": "I-Section Properties Excel",
+   "title": "I-Section Properties from an Excel Catalogue",
    "group": "Steel",
    "folder": "Steel",
    "file": "samples/Structural/Steel/I-Section Properties Excel.cpd",
@@ -1273,7 +1273,7 @@
   },
   {
    "id": "structural-loads-optimization-of-foundation-pad-dimensions",
-   "title": "Optimization of Foundation Pad Dimensions",
+   "title": "Pad Footing: Optimised Plan Dimensions",
    "group": "Loads",
    "folder": "Loads",
    "file": "samples/Structural/Loads/Optimization of Foundation Pad Dimensions.cpd",
@@ -1287,12 +1287,12 @@
   },
   {
    "id": "structural-loads-snow-drift",
-   "title": "Snow Drift",
+   "title": "Snow Drift at a Taller Building (EN 1991-1-3)",
    "group": "Loads",
    "folder": "Loads",
    "file": "samples/Structural/Loads/Snow Drift.cpd",
    "upstream": "Examples/Structural/Loads/Snow Drift.cpd",
-   "description": "Eurocode EN 1991-1-3 snow drift on a roof abutting a taller construction: drift length ls, sliding coefficient \\mus and wind coefficient \\muw from the geometry of the higher and lower roofs.",
+   "description": "Eurocode EN 1991-1-3 snow drift on a roof abutting a taller construction: drift length l_s, sliding coefficient μ_s and wind coefficient μ_w from the geometry of the higher and lower roofs.",
    "codes": [
     "EN 1991",
     "EN 1991-1-3"
@@ -1309,12 +1309,12 @@
   },
   {
    "id": "structural-loads-snow-load",
-   "title": "Snow Load",
+   "title": "Snow Load on Monopitch and Duopitch Roofs (EN 1991-1-3)",
    "group": "Loads",
    "folder": "Loads",
    "file": "samples/Structural/Loads/Snow Load.cpd",
    "upstream": "Examples/Structural/Loads/Snow Load.cpd",
-   "description": "Eurocode EN 1991-1-3 snow load on monopitch and duopitch roofs: shape coefficient \\mu1 selected from the pitch angle and combined with exposure and thermal factors.",
+   "description": "Eurocode EN 1991-1-3 snow load on monopitch and duopitch roofs: shape coefficient μ_1 selected from the pitch angle and combined with exposure and thermal factors.",
    "codes": [
     "EN 1991",
     "EN 1991-1-3"
@@ -1331,7 +1331,7 @@
   },
   {
    "id": "structural-loads-wind-load",
-   "title": "Wind Load",
+   "title": "Wind Load on a Duopitch Building (EN 1991-1-4)",
    "group": "Loads",
    "folder": "Loads",
    "file": "samples/Structural/Loads/Wind Load.cpd",
@@ -1384,46 +1384,8 @@
    ]
   },
   {
-   "id": "structural-frames-frame",
-   "title": "Frame",
-   "group": "Frames",
-   "folder": "Frames",
-   "file": "samples/Structural/Frames/Frame.cpd",
-   "upstream": "Examples/Structural/Frames/Frame.cpd",
-   "description": "Plane frame analysis with prismatic arbitrary cross-sections, assembling local 6x6 stiffness matrices with axial, bending and shear contributions and solving the global system by Cholesky decomposition.",
-   "codes": [],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "assets": [
-    {
-     "key": "/svg_drawing.cpd",
-     "url": "samples/Structural/Frames/svg_drawing.cpd"
-    }
-   ]
-  },
-  {
-   "id": "structural-frames-frame-var",
-   "title": "Frame-Var",
-   "group": "Frames",
-   "folder": "Frames",
-   "file": "samples/Structural/Frames/Frame-Var.cpd",
-   "upstream": "Examples/Structural/Frames/Frame-Var.cpd",
-   "description": "Plane frame with linearly tapered members: each element stiffness coefficient is obtained by integrating 1 / EA(x), x / EI(x) and 1 / GAQ(x) along the element length.",
-   "codes": [],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "assets": [
-    {
-     "key": "/svg_drawing.cpd",
-     "url": "samples/Structural/Frames/svg_drawing.cpd"
-    }
-   ]
-  },
-  {
    "id": "structural-frames-multi-story-frame",
-   "title": "Multi-Story Frame",
+   "title": "Multi-Storey RC Frame Analysis",
    "group": "Frames",
    "folder": "Frames",
    "file": "samples/Structural/Frames/Multi-Story Frame.cpd",
@@ -1449,8 +1411,46 @@
    ]
   },
   {
+   "id": "structural-frames-frame",
+   "title": "Plane Frame Analysis: Prismatic Members",
+   "group": "Frames",
+   "folder": "Frames",
+   "file": "samples/Structural/Frames/Frame.cpd",
+   "upstream": "Examples/Structural/Frames/Frame.cpd",
+   "description": "Plane frame analysis with prismatic arbitrary cross-sections, assembling local 6x6 stiffness matrices with axial, bending and shear contributions and solving the global system by Cholesky decomposition.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": [
+    {
+     "key": "/svg_drawing.cpd",
+     "url": "samples/Structural/Frames/svg_drawing.cpd"
+    }
+   ]
+  },
+  {
+   "id": "structural-frames-frame-var",
+   "title": "Plane Frame Analysis: Tapered Members",
+   "group": "Frames",
+   "folder": "Frames",
+   "file": "samples/Structural/Frames/Frame-Var.cpd",
+   "upstream": "Examples/Structural/Frames/Frame-Var.cpd",
+   "description": "Plane frame with linearly tapered members: each element stiffness coefficient is obtained by integrating 1 / EA(x), x / EI(x) and 1 / GA_Q(x) along the element length.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": [
+    {
+     "key": "/svg_drawing.cpd",
+     "url": "samples/Structural/Frames/svg_drawing.cpd"
+    }
+   ]
+  },
+  {
    "id": "structural-structural-dynamics-beam-impact-analysis-animated",
-   "title": "Beam Impact Analysis Animated",
+   "title": "Drop-Weight Impact on an RC Beam (Animated)",
    "group": "Dynamics",
    "folder": "Structural Dynamics",
    "file": "samples/Structural/Structural Dynamics/Beam Impact Analysis Animated.cpd",
@@ -1469,7 +1469,7 @@
   },
   {
    "id": "structural-structural-dynamics-free-vibrations-of-steel-pole",
-   "title": "Free Vibrations of Steel Pole",
+   "title": "Free Vibrations of a Tapered Steel Pole",
    "group": "Dynamics",
    "folder": "Structural Dynamics",
    "file": "samples/Structural/Structural Dynamics/Free Vibrations of Steel Pole.cpd",
@@ -1482,22 +1482,8 @@
    "assets": []
   },
   {
-   "id": "structural-structural-dynamics-free-vibrations-of-steel-pole-animated",
-   "title": "Free Vibrations of Steel Pole Animated",
-   "group": "Dynamics",
-   "folder": "Structural Dynamics",
-   "file": "samples/Structural/Structural Dynamics/Free Vibrations of Steel Pole Animated.cpd",
-   "upstream": "Examples/Structural/Structural Dynamics/Free Vibrations of Steel Pole Animated.cpd",
-   "description": "Same tapered steel pole as the static variant, with the lower mode shapes animated in pure SVG by frame switching driven by a small inline jQuery script.",
-   "codes": [],
-   "ui": false,
-   "scripts": true,
-   "read": false,
-   "assets": []
-  },
-  {
    "id": "structural-structural-dynamics-free-vibrations-of-steel-pole-plotly-animated",
-   "title": "Free Vibrations of Steel Pole Plotly Animated",
+   "title": "Free Vibrations of a Tapered Steel Pole (Plotly Animation)",
    "group": "Dynamics",
    "folder": "Structural Dynamics",
    "file": "samples/Structural/Structural Dynamics/Free Vibrations of Steel Pole Plotly Animated.cpd",
@@ -1510,8 +1496,22 @@
    "assets": []
   },
   {
+   "id": "structural-structural-dynamics-free-vibrations-of-steel-pole-animated",
+   "title": "Free Vibrations of a Tapered Steel Pole (SVG Animation)",
+   "group": "Dynamics",
+   "folder": "Structural Dynamics",
+   "file": "samples/Structural/Structural Dynamics/Free Vibrations of Steel Pole Animated.cpd",
+   "upstream": "Examples/Structural/Structural Dynamics/Free Vibrations of Steel Pole Animated.cpd",
+   "description": "Same tapered steel pole as the static variant, with the lower mode shapes animated in pure SVG by frame switching driven by a small inline jQuery script.",
+   "codes": [],
+   "ui": false,
+   "scripts": true,
+   "read": false,
+   "assets": []
+  },
+  {
    "id": "structural-nonlinear-material-and-geometric-nonlinear-analysis-of-prestressed-asymmetric-biot-truss",
-   "title": "Material and Geometric Nonlinear Analysis of Prestressed Asymmetric Biot Truss",
+   "title": "Prestressed Biot Truss: Material and Geometric Nonlinearity",
    "group": "Nonlinear",
    "folder": "Nonlinear",
    "file": "samples/Structural/Nonlinear/Material and Geometric Nonlinear Analysis of Prestressed Asymmetric Biot Truss.cpd",
@@ -1534,7 +1534,7 @@
   },
   {
    "id": "structural-nonlinear-nonlinear-analysis-of-a-von-mises-truss-animated",
-   "title": "Nonlinear Analysis of a Von-Mises Truss Animated",
+   "title": "Von Mises Truss: Nonlinear Analysis (Animated)",
    "group": "Nonlinear",
    "folder": "Nonlinear",
    "file": "samples/Structural/Nonlinear/Nonlinear Analysis of a Von-Mises Truss Animated.cpd",
@@ -1558,7 +1558,7 @@
    "folder": "Soil Mechanics",
    "file": "samples/Structural/Soil Mechanics/Soil Stress and Deformations.cpd",
    "upstream": "Examples/Structural/Soil Mechanics/Soil Stress and Deformations.cpd",
-   "description": "Stresses and settlement in an elastic half-space under a trapezoidal surface pressure on a rectangular footprint, obtained by numerical integration of the Boussinesq point-load kernel for \\sigmaz, \\tau{xz} and \\tau{yz}.",
+   "description": "Stresses and settlement in an elastic half-space under a trapezoidal surface pressure on a rectangular footprint, obtained by numerical integration of the Boussinesq point-load kernel for σ_z, τ_xz and τ_yz.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1595,12 +1595,12 @@
   },
   {
    "id": "engineering-elastic-analysis-deep-beam",
-   "title": "Deep Beam",
+   "title": "Deep Beam: Elastic Series Solution",
    "group": "Maths & plotting",
    "folder": "Elastic Analysis",
    "file": "samples/Engineering/Elastic Analysis/Deep Beam.cpd",
    "upstream": "Examples/Engineering/Elastic Analysis/Deep Beam.cpd",
-   "description": "Plane-stress analysis of a simply-supported deep beam under a partial uniform load, using a sine-series decomposition of the load and reaction. Recovers σx, σy and τ{xy} for arbitrary length, height, load span and support width — an analytical baseline for FE checks.",
+   "description": "Plane-stress analysis of a simply-supported deep beam under a partial uniform load, using a sine-series decomposition of the load and reaction. Recovers σ_x, σ_y and τ_xy for arbitrary length, height, load span and support width — an analytical baseline for FE checks.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1614,12 +1614,12 @@
   },
   {
    "id": "engineering-elastic-analysis-rectangular-slab",
-   "title": "Rectangular Slab",
+   "title": "Rectangular Plate: Navier Solution",
    "group": "Maths & plotting",
    "folder": "Elastic Analysis",
    "file": "samples/Engineering/Elastic Analysis/Rectangular Slab.cpd",
    "upstream": "Examples/Engineering/Elastic Analysis/Rectangular Slab.cpd",
-   "description": "Navier double-trig-series solution for a thin rectangular plate on simple supports under uniform load. Returns maximum deflection and bending moments Mx, My for arbitrary plan dimensions, thickness and elastic constants — a quick parametric check against slab FEA.",
+   "description": "Navier double-trig-series solution for a thin rectangular plate on simple supports under uniform load. Returns maximum deflection and bending moments M_x, M_y for arbitrary plan dimensions, thickness and elastic constants — a quick parametric check against slab FEA.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1638,7 +1638,7 @@
    "folder": "Elastic Analysis",
    "file": "samples/Engineering/Elastic Analysis/Saint-Venant Torsion.cpd",
    "upstream": "Examples/Engineering/Elastic Analysis/Saint-Venant Torsion.cpd",
-   "description": "Closed-form Saint-Venant torsion of a rectangular cross-section, evaluating the shear-stress field τ{zx}, τ{zy} and torsional rigidity from a single Fourier series. A hand-check baseline for FE torsion models and for simplified rectangular-section design formulas.",
+   "description": "Closed-form Saint-Venant torsion of a rectangular cross-section, evaluating the shear-stress field τ_zx, τ_zy and torsional rigidity from a single Fourier series. A hand-check baseline for FE torsion models and for simplified rectangular-section design formulas.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1652,12 +1652,12 @@
   },
   {
    "id": "engineering-finite-elements-deep-beam-fea",
-   "title": "Deep Beam FEA",
+   "title": "Deep Beam: Finite Element Analysis",
    "group": "Maths & plotting",
    "folder": "Finite Elements",
    "file": "samples/Engineering/Finite Elements/Deep Beam FEA.cpd",
    "upstream": "Examples/Engineering/Finite Elements/Deep Beam FEA.cpd",
-   "description": "Plane-stress FEA of a deep beam using rectangular 8-DOF elements, with a partial uniform load and elastic supports modelled by a distributed-stiffness function. Recovers the σx, σy and τ{xy} stress fields and the deflected shape on a parametric mesh.",
+   "description": "Plane-stress FEA of a deep beam using rectangular 8-DOF elements, with a partial uniform load and elastic supports modelled by a distributed-stiffness function. Recovers the σ_x, σ_y and τ_xy stress fields and the deflected shape on a parametric mesh.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1680,7 +1680,7 @@
    "folder": "Finite Elements",
    "file": "samples/Engineering/Finite Elements/Flat Slab FEA.cpd",
    "upstream": "Examples/Engineering/Finite Elements/Flat Slab FEA.cpd",
-   "description": "Multi-span flat-slab analysis with the 16-DOF Bogner–Fox–Schmit plate element using numerical Gauss integration of the stiffness matrix. Handles arbitrary column grids and returns deflection together with the Mx and My bending-moment fields.",
+   "description": "Multi-span flat-slab analysis with the 16-DOF Bogner–Fox–Schmit plate element using numerical Gauss integration of the stiffness matrix. Handles arbitrary column grids and returns deflection together with the M_x and M_y bending-moment fields.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1726,7 +1726,7 @@
    "folder": "Finite Elements",
    "file": "samples/Engineering/Finite Elements/Rectangular Slab FEA.cpd",
    "upstream": "Examples/Engineering/Finite Elements/Rectangular Slab FEA.cpd",
-   "description": "Single-panel simply-supported rectangular slab solved with the 16-DOF Bogner–Fox–Schmit plate element under uniform load. Returns deflection plus the bending moments Mx and My on a user-defined mesh — a compact testbed for convergence studies.",
+   "description": "Single-panel simply-supported rectangular slab solved with the 16-DOF Bogner–Fox–Schmit plate element under uniform load. Returns deflection plus the bending moments M_x and M_y on a user-defined mesh — a compact testbed for convergence studies.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1744,12 +1744,12 @@
   },
   {
    "id": "engineering-getting-started-calculating",
-   "title": "Calculating",
+   "title": "Getting Started: Calculating",
    "group": "Maths & plotting",
    "folder": "Getting Started",
    "file": "samples/Engineering/Getting Started/Calculating.cpd",
    "upstream": "Examples/Engineering/Getting Started/Calculating.cpd",
-   "description": "",
+   "description": "First steps: arithmetic, comparisons and calculations with variables.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1758,7 +1758,7 @@
   },
   {
    "id": "engineering-getting-started-functions",
-   "title": "Functions",
+   "title": "Getting Started: Functions and Plots",
    "group": "Maths & plotting",
    "folder": "Getting Started",
    "file": "samples/Engineering/Getting Started/Functions.cpd",
@@ -1772,7 +1772,7 @@
   },
   {
    "id": "engineering-getting-started-unit-conversion",
-   "title": "Unit Conversion",
+   "title": "Getting Started: Units and Conversion",
    "group": "Maths & plotting",
    "folder": "Getting Started",
    "file": "samples/Engineering/Getting Started/Unit Conversion.cpd",
@@ -1791,21 +1791,7 @@
    "folder": "Interpolation",
    "file": "samples/Engineering/Interpolation/Double Interpolation.cpd",
    "upstream": "Examples/Engineering/Interpolation/Double Interpolation.cpd",
-   "description": "Bilinear-style table lookup that chains 1D Hermite splines along both axes to interpolate a tabulated T(i,\\, j) surface. The canonical pattern for evaluating two-input design tables on intermediate values.",
-   "codes": [],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "assets": []
-  },
-  {
-   "id": "engineering-interpolation-interpolation",
-   "title": "Interpolation",
-   "group": "Maths & plotting",
-   "folder": "Interpolation",
-   "file": "samples/Engineering/Interpolation/Interpolation.cpd",
-   "upstream": "Examples/Engineering/Interpolation/Interpolation.cpd",
-   "description": "Compares take(), line() and spline() on a single dataset, then derives wind-load height factors kz for two terrain categories by interpolating tabulated code values. A compact reference for picking the right scheme when working with discrete engineering tables.",
+   "description": "Bilinear-style table lookup that chains 1D Hermite splines along both axes to interpolate a tabulated T(i, j) surface. The canonical pattern for evaluating two-input design tables on intermediate values.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1820,6 +1806,20 @@
    "file": "samples/Engineering/Interpolation/Interpolation of Functions.cpd",
    "upstream": "Examples/Engineering/Interpolation/Interpolation of Functions.cpd",
    "description": "Reconstructs an exponential and a trigonometric function from coarse samples using nearest-value, linear and Hermite-spline interpolation. A side-by-side accuracy comparison that quickly reveals overshoot, kinks and where the smooth spline pays off.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": []
+  },
+  {
+   "id": "engineering-interpolation-interpolation",
+   "title": "Interpolation with take, line and spline",
+   "group": "Maths & plotting",
+   "folder": "Interpolation",
+   "file": "samples/Engineering/Interpolation/Interpolation.cpd",
+   "upstream": "Examples/Engineering/Interpolation/Interpolation.cpd",
+   "description": "Compares take(), line() and spline() on a single dataset, then derives wind-load height factors k_z for two terrain categories by interpolating tabulated code values. A compact reference for picking the right scheme when working with discrete engineering tables.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1875,7 +1875,7 @@
    "folder": "Matrices",
    "file": "samples/Engineering/Matrices/Matrix Math Functions.cpd",
    "upstream": "Examples/Engineering/Matrices/Matrix Math Functions.cpd",
-   "description": "Linear-algebra primitives: Hadamard product, determinant, inverse, transpose, trace, rank, Lp and Frobenius norms, plus solver and decomposition helpers.",
+   "description": "Linear-algebra primitives: Hadamard product, determinant, inverse, transpose, trace, rank, L_p and Frobenius norms, plus solver and decomposition helpers.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1903,7 +1903,7 @@
    "folder": "Matrices",
    "file": "samples/Engineering/Matrices/Matrix Structural Functions.cpd",
    "upstream": "Examples/Engineering/Matrices/Matrix Structural Functions.cpd",
-   "description": "Structural plumbing for matrices: n{rows}, n{cols}, resize, join, reshape, submatrix and the slicing helpers that feed the rest of the toolkit.",
+   "description": "Structural plumbing for matrices: n_rows, n_cols, resize, join, reshape, submatrix and the slicing helpers that feed the rest of the toolkit.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1973,7 +1973,7 @@
    "folder": "Numerical",
    "file": "samples/Engineering/Numerical/Monte Carlo Pi.cpd",
    "upstream": "Examples/Engineering/Numerical/Monte Carlo Pi.cpd",
-   "description": "Estimates \\pi by sampling random points in the unit square and counting those falling inside the quarter circle. Includes a live SVG plot of the sample cloud coloured by inside-versus-outside membership, so accuracy and variance can be eyeballed at any sample size.",
+   "description": "Estimates π by sampling random points in the unit square and counting those falling inside the quarter circle. Includes a live SVG plot of the sample cloud coloured by inside-versus-outside membership, so accuracy and variance can be eyeballed at any sample size.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -1982,7 +1982,7 @@
   },
   {
    "id": "engineering-numerical-newton-s-method-animated",
-   "title": "Newton's Method Animated",
+   "title": "Newton's Method (Animated)",
    "group": "Maths & plotting",
    "folder": "Numerical",
    "file": "samples/Engineering/Numerical/Newton's Method Animated.cpd",
@@ -2001,7 +2001,7 @@
    "folder": "Numerical",
    "file": "samples/Engineering/Numerical/Numerical Differentiation.cpd",
    "upstream": "Examples/Engineering/Numerical/Numerical Differentiation.cpd",
-   "description": "Compares the Slope operator (Richardson extrapolation) against Derivative (complex-step method) on e^x and \\sin(x^2) at large arguments. Exposes the round-off blow-up of finite differences and the machine-precision accuracy of the complex-step trick.",
+   "description": "Compares the Slope operator (Richardson extrapolation) against Derivative (complex-step method) on e^x and sin(x^2) at large arguments. Exposes the round-off blow-up of finite differences and the machine-precision accuracy of the complex-step trick.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -2015,7 +2015,7 @@
    "folder": "Numerical",
    "file": "samples/Engineering/Numerical/Numerical Integration.cpd",
    "upstream": "Examples/Engineering/Numerical/Numerical Integration.cpd",
-   "description": "Evaluates \\int{-1}^{1}\\sqrt{1-x^2}\\, dx with three quadrature rules — Boole (Newton-Cotes), Gauss-Legendre and tanh-sinh — at five nodes. Tabulates the relative error of each scheme against the analytical result \\pi/2.",
+   "description": "Evaluates ∫_-1^1√1-x^2 dx with three quadrature rules — Boole (Newton-Cotes), Gauss-Legendre and tanh-sinh — at five nodes. Tabulates the relative error of each scheme against the analytical result π/2.",
    "codes": [],
    "ui": false,
    "scripts": false,
@@ -2029,7 +2029,7 @@
    "folder": "Numerical",
    "file": "samples/Engineering/Numerical/Rayleigh Quotient Iteration.cpd",
    "upstream": "Examples/Engineering/Numerical/Rayleigh Quotient Iteration.cpd",
-   "description": "Computes the dominant eigenpair of a 3\\times 3 symmetric matrix via Rayleigh-quotient iteration. Each step solves a shifted linear system, normalises the iterate and rebuilds the eigenvalue from the quotient, achieving cubic convergence within a handful of steps.",
+   "description": "Computes the dominant eigenpair of a 3× 3 symmetric matrix via Rayleigh-quotient iteration. Each step solves a shifted linear system, normalises the iterate and rebuilds the eigenvalue from the quotient, achieving cubic convergence within a handful of steps.",
    "codes": [],
    "ui": false,
    "scripts": false,

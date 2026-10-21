@@ -28,6 +28,70 @@ const GROUPS = {
     Steel: 'Steel', Loads: 'Loads', Frames: 'Frames', 'Structural Dynamics': 'Dynamics', Nonlinear: 'Nonlinear',
     'Soil Mechanics': 'Soil Mechanics',
 };
+// Display titles. Upstream's file names repeat across folders ("Concentrated Force" in four
+// beam folders), carry typos ("Unifrom") or say little ("Frame"); the copies keep upstream's
+// names and paths, only the title shown changes.
+const SUPPORT_PREFIX = {
+    Cantilevers: 'Cantilever', 'Fully Restrained Beams': 'Fully Restrained Beam',
+    'Propped Cantilevers': 'Propped Cantilever', 'Simply Supported Beams': 'Simply Supported Beam',
+    'Reinforced Concrete - Plates': 'Two-Way Slab Panel', 'Reinforced Concrete - Punching': 'Punching Shear',
+};
+const TITLES = {
+    'Structural/Continuous Beam/Continuous Beam.cpd': 'Continuous Beam: Force Method under Uniform Load',
+    'Structural/Deflections/Cantilever with Concentrated Load.cpd': 'Deflection: Cantilever with a Tip Load',
+    'Structural/Deflections/Cantilever with Unifrom Load.cpd': 'Deflection: Cantilever under Uniform Load',
+    'Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd': 'Deflection: Simply Supported Beam with a Mid-Span Load',
+    'Structural/Deflections/Simply Supported Beam with Unifrom Load.cpd': 'Deflection: Simply Supported Beam under Uniform Load',
+    'Structural/Reinforced Concrete - Plates/Fully Restrained Slab Panel.cpd': 'Two-Way Slab Panel: All Edges Restrained',
+    'Structural/Reinforced Concrete - Plates/Simply Supported Slab Panel.cpd': 'Two-Way Slab Panel: All Edges Simply Supported',
+    'Structural/Reinforced Concrete - Seismic Detailing/Beam Detailing for DCM.cpd': 'Seismic Detailing (DCM): Beam',
+    'Structural/Reinforced Concrete - Seismic Detailing/Column Detailing for DCM.cpd': 'Seismic Detailing (DCM): Column',
+    'Structural/Reinforced Concrete - Seismic Detailing/Shear Wall Detailing for DCM.cpd': 'Seismic Detailing (DCM): Shear Wall',
+    'Structural/Steel/I-Section Properties and Drawing.cpd': 'I-Section Properties from a Catalogue, with Drawing',
+    'Structural/Steel/I-Section Properties Excel.cpd': 'I-Section Properties from an Excel Catalogue',
+    'Structural/Frames/Frame.cpd': 'Plane Frame Analysis: Prismatic Members',
+    'Structural/Frames/Frame-Var.cpd': 'Plane Frame Analysis: Tapered Members',
+    'Structural/Frames/Multi-Story Frame.cpd': 'Multi-Storey RC Frame Analysis',
+    'Structural/Structural Dynamics/Beam Impact Analysis Animated.cpd': 'Drop-Weight Impact on an RC Beam (Animated)',
+    'Structural/Structural Dynamics/Free Vibrations of Steel Pole.cpd': 'Free Vibrations of a Tapered Steel Pole',
+    'Structural/Structural Dynamics/Free Vibrations of Steel Pole Animated.cpd': 'Free Vibrations of a Tapered Steel Pole (SVG Animation)',
+    'Structural/Structural Dynamics/Free Vibrations of Steel Pole Plotly Animated.cpd': 'Free Vibrations of a Tapered Steel Pole (Plotly Animation)',
+    'Structural/Nonlinear/Nonlinear Analysis of a Von-Mises Truss Animated.cpd': 'Von Mises Truss: Nonlinear Analysis (Animated)',
+    'Structural/Nonlinear/Material and Geometric Nonlinear Analysis of Prestressed Asymmetric Biot Truss.cpd': 'Prestressed Biot Truss: Material and Geometric Nonlinearity',
+    'Structural/Loads/Optimization of Foundation Pad Dimensions.cpd': 'Pad Footing: Optimised Plan Dimensions',
+    'Structural/Loads/Snow Drift.cpd': 'Snow Drift at a Taller Building (EN 1991-1-3)',
+    'Structural/Loads/Snow Load.cpd': 'Snow Load on Monopitch and Duopitch Roofs (EN 1991-1-3)',
+    'Structural/Loads/Wind Load.cpd': 'Wind Load on a Duopitch Building (EN 1991-1-4)',
+    'Engineering/Getting Started/Calculating.cpd': 'Getting Started: Calculating',
+    'Engineering/Getting Started/Functions.cpd': 'Getting Started: Functions and Plots',
+    'Engineering/Getting Started/Unit Conversion.cpd': 'Getting Started: Units and Conversion',
+    'Engineering/Elastic Analysis/Deep Beam.cpd': 'Deep Beam: Elastic Series Solution',
+    'Engineering/Elastic Analysis/Rectangular Slab.cpd': 'Rectangular Plate: Navier Solution',
+    'Engineering/Interpolation/Interpolation.cpd': 'Interpolation with take, line and spline',
+    'Engineering/Numerical/Newton\'s Method Animated.cpd': "Newton's Method (Animated)",
+    'Engineering/Finite Elements/Deep Beam FEA.cpd': 'Deep Beam: Finite Element Analysis',
+};
+const DESCRIPTIONS = {
+    'Engineering/Getting Started/Calculating.cpd': 'First steps: arithmetic, comparisons and calculations with variables.',
+};
+
+/** $...$ maths in a description as readable text: subscripts and common symbols, no TeX. */
+function plainMath(tex) {
+    const SYMBOLS = {
+        varphi: 'φ', phi: 'φ', pi: 'π', mu: 'μ', tau: 'τ', sigma: 'σ', alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ',
+        Delta: 'Δ', lambda: 'λ', theta: 'θ', varepsilon: 'ε', epsilon: 'ε', eta: 'η', rho: 'ρ', omega: 'ω', xi: 'ξ',
+        nu: 'ν', kappa: 'κ', psi: 'ψ', chi: 'χ', zeta: 'ζ', times: '×', cdot: '·', sqrt: '√', int: '∫', sum: 'Σ',
+        le: '≤', ge: '≥', leq: '≤', geq: '≥', approx: '≈', infty: '∞', pm: '±', partial: '∂', ell: 'l',
+    };
+    return tex
+        .replace(/\\(?:,|;|!|quad|qquad| )/g, ' ')
+        .replace(/\\(?:mathrm|text|mathbf|mathit|operatorname)\{([^}]*)\}/g, '$1')
+        .replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, '($1)/($2)')
+        .replace(/\\([A-Za-z]+)/g, (m, w) => SYMBOLS[w] ?? w)
+        .replace(/_\{([^}]*)\}/g, '_$1').replace(/\^\{([^}]*)\}/g, '^$1')
+        .replace(/[{}]/g, '');
+}
+
 const GROUP_ORDER = ['Beams', 'Reinforced Concrete', 'Steel', 'Loads', 'Frames', 'Dynamics', 'Nonlinear', 'Soil Mechanics', 'Maths & plotting'];
 
 const cpdFiles = (dir) => readdirSync(dir).filter((f) => f.endsWith('.cpd')).map((f) => join(dir, f));
@@ -57,8 +121,9 @@ function description(text) {
     const m = /^'\s*<!--([\s\S]*?)-->/m.exec(text);
     if (!m) return '';
     return m[1].split('\n').map((l) => l.replace(/^'/, '')).join(' ')
-        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/<[^>]+>/g, '').replace(/\$([^$]+)\$/g, '$1')
-        .replace(/[`*_]/g, '').replace(/\s+/g, ' ').trim();
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/<[^>]+>/g, '')
+        .replace(/\$([^$]+)\$/g, (x, tex) => plainMath(tex))
+        .replace(/`/g, '').replace(/\*\*?([^*]+)\*\*?/g, '$1').replace(/\s+/g, ' ').trim();
 }
 
 /** Files a worksheet uses, as written in it: images, included sheets, #read sources. */
@@ -110,7 +175,7 @@ for (const [top, folder] of folders) {
         if (included.has(file)) continue;
         const text = readFileSync(file, 'utf8').replace(/^\uFEFF/, '');
         const rel = relative(examples, file).split('\\').join('/');
-        const title = basename(file, '.cpd');
+        const title = TITLES[rel] ?? (SUPPORT_PREFIX[folder] ? `${SUPPORT_PREFIX[folder]}: ${basename(file, '.cpd')}` : basename(file, '.cpd'));
         // Assets, following included sheets for their own references.
         const assets = new Map();
         const missing = [];
@@ -143,7 +208,7 @@ for (const [top, folder] of folders) {
             folder,
             file: copy(file),
             upstream: `Examples/${rel}`,
-            description: description(text),
+            description: DESCRIPTIONS[rel] ?? description(text),
             codes: designCodes(text),
             ui: /^#UI\b/m.test(text),
             scripts: /<script\b/i.test(text),
@@ -153,6 +218,14 @@ for (const [top, folder] of folders) {
         });
         notice.push(`- \`Examples/${rel}\``);
     }
+}
+const seen = new Map();
+for (const s of samples) {
+    if (seen.has(s.title)) throw new Error(`Two samples have the title "${s.title}": ${seen.get(s.title)} and ${s.upstream}`);
+    seen.set(s.title, s.upstream);
+}
+for (const rel of [...Object.keys(TITLES), ...Object.keys(DESCRIPTIONS)]) {
+    if (!samples.some((s) => s.upstream === `Examples/${rel}`) && !excluded.some((e) => e.file === rel)) throw new Error(`Override for a sheet that is not a sample: ${rel}`);
 }
 samples.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group) || a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title));
 writeFileSync(join(out, 'manifest.json'), JSON.stringify({ groups: GROUP_ORDER.filter((g) => samples.some((s) => s.group === g)), samples }, null, 1) + '\n');
