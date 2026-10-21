@@ -9,6 +9,14 @@
       />
     </div>
 
+    <!-- Sections a host app adds (provide('calcpadExtensions', { insertSections })). -->
+    <component
+      :is="section"
+      v-for="(section, i) in extensions.insertSections ?? []"
+      :key="'ext-' + i"
+      @insert-text="(text: string) => emit('insertText', text)"
+    />
+
     <!-- Symbols Palette -->
     <div v-if="symbolGroups.length > 0" class="symbols-palette">
       <div class="symbols-palette-header" @click="symbolsPaletteOpen = !symbolsPaletteOpen">
@@ -82,7 +90,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, inject } from 'vue'
+import type { Component } from 'vue'
 import type { InsertItem } from '../types'
 import { replaceParameterPlaceholders } from '../../text/snippet-insert'
 
@@ -98,6 +107,8 @@ const emit = defineEmits<{
   insertText: [text: string]
   insertImage: []
 }>()
+
+const extensions = inject<{ insertSections?: Component[] }>('calcpadExtensions', {})
 
 // State
 const searchTerm = ref('')

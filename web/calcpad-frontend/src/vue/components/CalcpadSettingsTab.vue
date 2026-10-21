@@ -623,6 +623,9 @@
         No settings found for "{{ searchQuery.trim() }}"
       </div>
 
+      <!-- Sections a host app adds (provide('calcpadExtensions', { settingsSections })). -->
+      <component :is="section" v-for="(section, i) in extensions.settingsSections ?? []" :key="'ext-' + i" />
+
       <div v-if="appVersion" class="about-footer">
         <span class="app-version">CalcpadCE v{{ appVersion }}</span>
       </div>
@@ -631,7 +634,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed, reactive } from 'vue'
+import { ref, watch, computed, reactive, inject } from 'vue'
+import type { Component } from 'vue'
 import type { WritableComputedRef } from 'vue'
 import type { PdfSettings, Settings, ThemeInfo, VersionConfig } from '../types'
 import { DEFAULT_PDF_SETTINGS, DEFAULT_VERSION_CONFIG } from '../types'
@@ -671,6 +675,8 @@ interface Props {
   appVersion?: string
   pdfSettings?: PdfSettings
 }
+
+const extensions = inject<{ settingsSections?: Component[] }>('calcpadExtensions', {})
 
 const props = withDefaults(defineProps<Props>(), {
   settings: () => getDefaultSettings(),

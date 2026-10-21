@@ -4,6 +4,8 @@
 import { FileLibrary } from './library';
 import type { WasmTransport } from './transport';
 import { type TabsLike, WebFiles } from './web-files';
+import LibrariesSettings from './LibrariesSettings.vue';
+import LibrariesInsert from './LibrariesInsert.vue';
 
 interface Host {
     /** The active editor group's tabs (main.ts keeps them on window.calcpadTabs). */
@@ -25,4 +27,9 @@ export function installWebFiles(transport: WasmTransport, host: Host): WebFiles 
     files.install();
     (window as unknown as { calcpadFiles: unknown }).calcpadFiles = { files, library };
     return files;
+}
+
+/** The sections the browser build adds to the sidebar (see CalcpadSettingsTab/CalcpadInsertTab). */
+export function webExtensions() {
+    return { settingsSections: [LibrariesSettings], insertSections: [LibrariesInsert] };
 }

@@ -60,7 +60,7 @@ import './styles/app.css';
 import './editor/workers';
 // calcpad-rs: answer the Calcpad.Server API with the in-page wasm engine.
 import { installWasmTransport } from './wasm/transport';
-import { installWebFiles } from './wasm/setup';
+import { installWebFiles, webExtensions } from './wasm/setup';
 
 /** Runtime check: are we running inside a Tauri webview? */
 const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
@@ -1619,6 +1619,8 @@ async function bootstrap(): Promise<void> {
         isWebOrDesktop: true,
     };
     const sidebarApp = createApp(CalcpadAppVue, { versionConfig, appVersion });
+    // calcpad-rs: Settings > Libraries and Insert > Libraries (the worksheet script allowlist).
+    if (!isTauri) sidebarApp.provide('calcpadExtensions', webExtensions());
     const sidebarInstance = sidebarApp.mount('#vue-sidebar') as {
         switchTab?: (id: string) => void;
         switchView?: (id: string) => void;
