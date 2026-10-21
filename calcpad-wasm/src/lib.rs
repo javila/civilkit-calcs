@@ -21,7 +21,7 @@ use std::rc::Rc;
 use calcpad_core::calcpad_error::{CalcpadError, CalcpadErrorSource};
 use calcpad_core::data_files::{normalize_join, posix_directory_name, DataFiles};
 use calcpad_core::netfmt::html_encode;
-use calcpad_core::parsers::expression_parser::{base64_encode, ExpressionParser};
+use calcpad_core::parsers::expression_parser::{base64_decode, base64_encode, ExpressionParser};
 use calcpad_core::parsers::macro_parser::{FileProvider, MacroParser};
 use calcpad_core::settings::{ColorScales, LightDirections, MathSettings, PlotSettings};
 use calcpad_core::validator::is_keyword;
@@ -100,7 +100,33 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
         return status_json(400, "Content is required");
     }
     WRITTEN.with(|w| w.borrow_mut().clear());
+    // Files this request brings along (a sample previewed before it is opened): visible to
+    // #include and #read for this render only, and never replacing a file the page has.
+    let mut borrowed = Vec::new();
+    if let Some(extra) = prop(&req, "extraFiles").and_then(Json::as_object) {
+        for (path, data) in extra {
+            let (Some(b64), key) = (data.as_str(), normalize(path)) else {
+                continue;
+            };
+            let Some(bytes) = base64_decode(b64) else {
+                continue;
+            };
+            FILES.with(|f| {
+                let mut f = f.borrow_mut();
+                if !f.contains_key(&key) {
+                    f.insert(key.clone(), bytes);
+                    borrowed.push(key);
+                }
+            });
+        }
+    }
     let (mut html, errors) = convert_inner(&r, unwrap || r.force_unwrapped_code);
+    FILES.with(|f| {
+        let mut f = f.borrow_mut();
+        for key in &borrowed {
+            f.remove(key);
+        }
+    });
     if unwrap {
         html = process_data_text_links(&html);
     }
@@ -784,5 +810,20 @@ mod tests {
             .unwrap()
             .to_string();
         assert!(!html.contains(UI_ASSETS_MARKER) && !html.contains("uiValueChange"));
+    }
+
+    #[test]
+    fn extra_files_serve_one_render_only() {
+        let lib = base64_encode(b"k = 5\n");
+        let req = format!(
+            r##"{{"content":"#include lib.cpd\nk*2","extraFiles":{{"/lib.cpd":"{}"}}}}"##,
+            lib
+        );
+        let v: Json = serde_json::from_str(&convert(&req, false)).unwrap();
+        assert_eq!(v["errors"].as_array().unwrap().len(), 0, "{}", v["errors"]);
+        assert!(v["html"].as_str().unwrap().contains("= 10"));
+        // Gone afterwards.
+        let v: Json = serde_json::from_str(&convert(r##"{"content":"#include lib.cpd\nk*2"}"##, false)).unwrap();
+        assert!(!v["errors"].as_array().unwrap().is_empty());
     }
 }

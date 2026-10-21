@@ -167,6 +167,37 @@ export interface WasmTransport {
     setFiles(files: EngineFile[]): Promise<void>;
     /** Called with the files a render's #write/#append produced. */
     onFilesWritten: ((files: EngineFile[]) => void) | null;
+    /** A library file by its path ("/Images/a.png"), for the images a worksheet shows. */
+    resolveFile: ((path: string) => Uint8Array | undefined) | null;
+}
+
+const IMAGE_TYPES: Record<string, string> = {
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', svg: 'image/svg+xml', webp: 'image/webp', bmp: 'image/bmp',
+};
+
+/** The library path of a relative reference, rooted at "/" as the engine resolves it. */
+function libraryKey(ref: string): string {
+    const parts: string[] = [];
+    for (const p of ref.replace(/\\/g, '/').split('/')) {
+        if (p === '' || p === '.') continue;
+        if (p === '..') parts.pop(); else parts.push(p);
+    }
+    return '/' + parts.join('/');
+}
+
+/** Relative <img src> that names a library file becomes a data: URL of that file. */
+function libraryImages(html: string, resolve: (path: string) => Uint8Array | undefined): string {
+    return html.replace(/(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']+)\2/gi, (m, pre: string, q: string, src: string) => {
+        if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(src)) return m;
+        const type = IMAGE_TYPES[src.split('?')[0].split('.').pop()?.toLowerCase() ?? ''];
+        let name = src;
+        try { name = decodeURI(src); } catch { /* a malformed escape: use the text as written */ }
+        const data = type ? resolve(libraryKey(name)) : undefined;
+        if (!data) return m;
+        let bin = '';
+        for (let i = 0; i < data.length; i += 0x8000) bin += String.fromCharCode(...data.subarray(i, i + 0x8000));
+        return `${pre}${q}data:${type};base64,${btoa(bin)}${q}`;
+    });
 }
 
 /** Installs the adapter. Call once, before the editor makes its first request. */
@@ -182,6 +213,7 @@ export function installWasmTransport(): WasmTransport {
             await engine.setFiles(files);
         },
         onFilesWritten: null,
+        resolveFile: null,
     };
 
     const handle = async (url: URL, method: string, body: string | null, signal?: AbortSignal | null): Promise<Response> => {
@@ -201,6 +233,7 @@ export function installWasmTransport(): WasmTransport {
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
+            if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             // Worksheet scripts: only listed library files, checked by hash; no network access.
             html = applyScriptPolicy(html, libraries(), window.location.origin);
             if (out.files?.length && transport.onFilesWritten) {

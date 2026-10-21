@@ -6,6 +6,7 @@ import type { WasmTransport } from './transport';
 import { type TabsLike, WebFiles } from './web-files';
 import LibrariesSettings from './LibrariesSettings.vue';
 import LibrariesInsert from './LibrariesInsert.vue';
+import { installEmptyEditorLink, SamplesBrowser } from './samples';
 
 interface Host {
     /** The active editor group's tabs (main.ts keeps them on window.calcpadTabs). */
@@ -17,15 +18,20 @@ interface Host {
 
 export function installWebFiles(transport: WasmTransport, host: Host): WebFiles {
     const library = new FileLibrary(transport);
+    const samples = new SamplesBrowser({ library, tabs: host.tabs, log: host.appendOutput });
     const files = new WebFiles({
         library,
         tabs: host.tabs,
         log: host.appendOutput,
         print: () => host.bridge.handleMessage({ type: 'generatePdf', variant: 'report' }),
+        openSamples: () => void samples.open(),
     });
+    // Images a worksheet names (Images/..., ./x.png) are shown from the library.
+    transport.resolveFile = (key) => library.get(key)?.data;
+    installEmptyEditorLink(host.tabs, () => void samples.open());
     transport.onFilesWritten = written => void files.onFilesWritten(written);
     files.install();
-    (window as unknown as { calcpadFiles: unknown }).calcpadFiles = { files, library };
+    (window as unknown as { calcpadFiles: unknown }).calcpadFiles = { files, library, samples };
     return files;
 }
 

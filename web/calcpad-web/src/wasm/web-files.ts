@@ -35,6 +35,8 @@ export interface WebFilesOptions {
     log: (level: 'info' | 'warn' | 'error', message: string) => void;
     /** Prints the active worksheet's report (the Export tab's Save PDF). */
     print: () => void;
+    /** Opens the Samples browser. */
+    openSamples?: () => void;
 }
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
@@ -366,6 +368,7 @@ export class WebFiles {
         };
         const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
         item('New worksheet', () => this.newWorksheet());
+        if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());
         item('Open...', () => void this.open(), `${mod}+O`);
         item('Save', () => void this.save(), `${mod}+S`);
         item('Save As...', () => void this.save(true), `${mod}+Shift+S`);
