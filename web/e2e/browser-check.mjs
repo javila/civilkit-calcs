@@ -741,11 +741,11 @@ check(pr.status === 200 && JSON.parse(pr.text).content === '#if 1 > 0\n\tx = 1\n
 const sn = await hlApi('snippets', null, 'GET');
 const snj = sn.status === 200 ? JSON.parse(sn.text) : {};
 check(snj.count > 1000 && snj.snippets?.some((x) => x.insert === 'sin(\u00a7)'), `snippets: the library has ${snj.count} entries`);
-const listing = await page.evaluate(async () => {
+const codeView = await page.evaluate(async () => {
     const r = await fetch('/api/calcpad/convert?unwrap=true', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: 'a = 1\nb = a + 2m' }) });
     return r.text();
 });
-check(listing.includes('<span class="variable">a</span>') && listing.includes('<span class="const">2</span><span class="units">m</span>'), 'the unwrapped code view is highlighted with the tokenizer (loaded on demand into the engine worker)');
+check(codeView.includes('<span class="variable">a</span>') && codeView.includes('<span class="const">2</span><span class="units">m</span>'), 'the unwrapped code view is highlighted with the tokenizer (loaded on demand into the engine worker)');
 const bad = await hlApi('lint', { content: '  ' });
 check(bad.status === 400, 'lint of an empty document answers 400 like the server');
 check(requests.some((r) => r.url.endsWith('/wasm/calcpad_highlighter_wasm_bg.wasm')), 'the highlighter wasm was loaded from /wasm/');
