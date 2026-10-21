@@ -7,7 +7,7 @@ is the specification. calcpad-rs implements only part of it so far:
 - **Implemented:** the parser (`calcpad-core/src/model_bindings.rs`) and the in-app display. A
   bound input carries a **model** tag with its binding path, and a malformed binding shows its
   error in place.
-- **Not implemented:** connecting a model (Studio wiring), fetching values, provenance, the stale
+- **Not implemented:** connecting a model, fetching values, provenance, the stale
   state and refusal. These are specified below so the sheets written now stay valid when they
   arrive.
 
@@ -144,4 +144,3 @@ output is unchanged.
   title noting that no model is connected.
 - **Malformed binding.** The tag reads **model binding error** with the reason.
 - **Unrendered branch.** A binding in a branch that was not rendered is not shown.
-
