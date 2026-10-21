@@ -1,0 +1,151 @@
+[
+  {
+    "id": "jquery",
+    "name": "jQuery",
+    "version": "3.6.3",
+    "files": [
+      {
+        "url": "https://code.jquery.com/jquery-3.6.3.min.js",
+        "integrity": "sha384-Ft/vb48LwsAEtgltj7o+6vtS2esTU9PCpDqcXs4OCVQFZu5BqprHtUCZ4kjK+bpE",
+        "size": 89947
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "d3",
+    "name": "D3",
+    "version": "3.5.17",
+    "files": [
+      {
+        "url": "https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.17/d3.min.js",
+        "integrity": "sha384-N8EP0Yml0jN7e0DcXlZ6rt+iqKU9Ck6f1ZQ+j2puxatnBq4k9E8Q6vqBcY34LNbn",
+        "size": 151725
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "plotly",
+    "name": "Plotly",
+    "version": "2.26.0",
+    "files": [
+      {
+        "url": "https://cdn.plot.ly/plotly-2.26.0.min.js",
+        "integrity": "sha384-xuh4dD2xC9BZ4qOrUrLt8psbgevXF2v+K+FrXxV4MlJHnWKgnaKoh74vd/6Ik8uF",
+        "size": 3596753
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "three-classic",
+    "name": "three.js with OrbitControls",
+    "version": "0.145",
+    "files": [
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.145/build/three.min.js",
+        "integrity": "sha384-+SwWbnsGY/t3OXVAS6HjMD17NY002cJxCjst/IgjKrteM33IUnwAA2E1g9GAJH2f",
+        "size": 602604
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.145/examples/js/controls/OrbitControls.js",
+        "integrity": "sha384-JgJ+i2aY66WOpoy8gaHf9qPa7F0njVMMU5PHiyp3XNS/xUhDow/9zampfl1dXLAz",
+        "size": 25787
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "three-esm",
+    "name": "three.js (ES module)",
+    "version": "0.160.0",
+    "files": [
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.160.0/+esm",
+        "integrity": "sha384-F/XuN365kPVWH3cB6RbISl6QebUyKtLbzb6okj0ue+i7k6NoQIGQ7Gxjyfa77pQB",
+        "size": 667705,
+        "module": true
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "dxf-viewer",
+    "name": "dxf-viewer (ES module)",
+    "version": "1.0.46",
+    "files": [
+      {
+        "url": "https://cdn.jsdelivr.net/npm/dxf-viewer@1.0.46/+esm",
+        "integrity": "sha384-cPjiwRhvOfU4KEBpKeawon8W++SYPzK6yq34ZT8//NwtSaAa3yKv89WZ9Fyw/pO+",
+        "size": 500064,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/earcut@3.0.2/+esm",
+        "integrity": "sha384-HoYRPg3khazp7MFlwVd9OKCDW6bY2NlBiI8Hud/S/L2eOVZYxy0NsFk0/f/i99ok",
+        "size": 7063,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/loglevel@1.9.2/+esm",
+        "integrity": "sha384-Jy9f8oovHNxW0IntYtVHem/QIw7BkihJsESE6eGW23+r6cNf3pBbUdgdLghOurNQ",
+        "size": 3588,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/+esm",
+        "integrity": "sha384-Zj9tcAApFWO76gp+Pqc1QRw9JM9Bq/KrEjMfxveg4UYI1uGa4bkE3lmwBXnlD0wE",
+        "size": 199351,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.161.0/+esm",
+        "integrity": "sha384-kpQeiiARF+zw6Ob9UZaNuMhaLGIT9lRmt2MbMCStERulALqOqvZoYdn7lmrHqvN/",
+        "size": 672131,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.161.0/src/extras/ShapeUtils.js/+esm",
+        "integrity": "sha384-fLT+6XVkq41Zof5f85qRWT1M64gNicu7sPsLRect0MgnNVYzDmqtbj73nzzIsX6g",
+        "size": 6907,
+        "module": true
+      },
+      {
+        "url": "https://cdn.jsdelivr.net/npm/three@0.161.0/src/extras/core/ShapePath.js/+esm",
+        "integrity": "sha384-l+EDImMo2ytx402Tooqq9MWbL/eo7zLA5XHAMKD9FAfhemDug95nSClwAyOQRZTC",
+        "size": 63703,
+        "module": true
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "dxf-writer",
+    "name": "dxf-writer (ES module)",
+    "version": "1.18.4",
+    "files": [
+      {
+        "url": "https://cdn.jsdelivr.net/npm/dxf-writer@1.18.4/+esm",
+        "integrity": "sha384-r5PCxqdJENQ3+pnPa6igIiw3O9ieeCnT85BRrmdjUEINLi7g+8EA0WnvsHgkldK2",
+        "size": 16706,
+        "module": true
+      }
+    ],
+    "builtin": true
+  },
+  {
+    "id": "model-viewer",
+    "name": "model-viewer",
+    "version": "3.0.1",
+    "files": [
+      {
+        "url": "https://ajax.googleapis.com/ajax/libs/model-viewer/3.0.1/model-viewer.min.js",
+        "integrity": "sha384-n6C2YWCEy7oVX1Wzhw7HHsk4yfzlMv1l86ERnJER+keO6yQS2cWUyCmffjBSjcpq",
+        "size": 843686,
+        "module": true
+      }
+    ],
+    "builtin": true
+  }
+]

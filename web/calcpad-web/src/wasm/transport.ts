@@ -15,6 +15,8 @@
 
 import { reportHeadMarkup } from './report-fonts';
 import { uiAssetsMarkup } from './ui-assets';
+import { libraries } from './library-list';
+import { applyScriptPolicy } from './script-policy';
 
 const API_PREFIX = '/api/calcpad/';
 /** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
@@ -199,6 +201,8 @@ export function installWasmTransport(): WasmTransport {
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
+            // Worksheet scripts: only listed library files, checked by hash; no network access.
+            html = applyScriptPolicy(html, libraries(), window.location.origin);
             if (out.files?.length && transport.onFilesWritten) {
                 transport.onFilesWritten(out.files.map(f => ({ path: f.path, data: fromBase64(f.data) })));
             }
