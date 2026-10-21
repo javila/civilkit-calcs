@@ -5,6 +5,7 @@
 //! interior mutability and the nested classes are modules with `impl MathParser` blocks.
 pub mod compiler;
 pub mod custom_function;
+pub mod data;
 pub mod evaluator;
 pub mod input;
 pub mod keyword_args;

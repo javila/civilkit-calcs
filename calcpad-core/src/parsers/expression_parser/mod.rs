@@ -2,6 +2,8 @@
 //! .Condition.cs, .Loops.cs, .ParseModes.cs). The worksheet driver: splits lines into
 //! comments and expressions, runs directives, conditions and loops, and writes HTML.
 pub mod condition;
+mod data_exchange;
+pub use data_exchange::{base64_decode, base64_encode, MAX_EMBEDDED_DATA_SIZE};
 pub mod loops;
 mod ui;
 
@@ -258,6 +260,12 @@ pub struct ExpressionParser {
     pub enable_ui: bool,
     /// Values entered into `#UI` controls, keyed by `data-ui-var` (e.g. "L:1").
     pub ui_overrides: Option<HashMap<String, String>>,
+    /// Full path of the worksheet; relative `#read`/`#write` paths resolve against its folder.
+    pub source_file_path: Option<String>,
+    /// Whether `#write`/`#append` write their file (they are reported either way).
+    pub allow_data_write: bool,
+    /// The files `#read`/`#write`/`#append` use.
+    pub data_files: crate::data_files::DataFilesRef,
     pub html_result: String,
     /// The first out of scope feature hit while parsing, if any.
     pub out_of_scope: Option<String>,
@@ -321,6 +329,9 @@ impl ExpressionParser {
             show_error_lines: true,
             enable_ui: false,
             ui_overrides: None,
+            source_file_path: None,
+            allow_data_write: true,
+            data_files: crate::data_files::default_files(),
             html_result: String::new(),
             out_of_scope: None,
             error_count: 0,
@@ -1352,13 +1363,8 @@ impl ExpressionParser {
                     self.is_markdown_on = true;
                 }
             }
-            Keyword::Read | Keyword::Write | Keyword::Append => {
-                if self.calculate && self.condition.is_satisfied() || !self.calculate && self.is_visible {
-                    self.p().note_out_of_scope("#read/#write data exchange");
-                    let msg = crate::parsers::math_parser::input::out_of_scope("#read/#write/#append").message;
-                    self.append_error(s, &msg);
-                }
-            }
+            Keyword::Read => self.parse_keyword_read(s)?,
+            Keyword::Write | Keyword::Append => self.parse_keyword_write(s, kw)?,
             Keyword::Phasor => self.p().phasor.set(true),
             Keyword::Complex => self.p().phasor.set(false),
             Keyword::Settings => self.parse_keyword_settings(s),
