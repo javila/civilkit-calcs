@@ -134,7 +134,7 @@ function getSampleContent(): string {
 
 a = 3
 b = 4
-c = √(a² + b²)
+c = sqrt(a^2 + b^2)
 `;
 }
 
