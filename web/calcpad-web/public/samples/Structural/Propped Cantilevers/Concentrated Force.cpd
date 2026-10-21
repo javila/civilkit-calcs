@@ -2,9 +2,9 @@
 '<div style="max-width:180mm;">
 '<img style="width:210pt;" alt="propped-cantilever-beam-concentrated-force.png" class="side" src="../../Images/mechanics/beams/propped-cantilever-beam-concentrated-force.png">
 '<p><b>Input data</b></p>
-'Beam Length -'l = ? {10}'m
-'Load -'F = ? {10}'kN
-'Distances -'a = ? {4}'m,
+#UI 'Beam Length -'l = 10'm
+#UI 'Load -'F = 10'kN
+#UI 'Distances -'a = 4'm,
 #post
 b = l - a'm,'k = b/l
 '<p><b>Internal forces</b></p>
@@ -19,7 +19,7 @@ V_B = F - V_A'kN
 PlotWidth = 600
 PlotHeight = 150
 #show
-'Calculate internal forces at'x_1 = ? {1}'m
+#UI 'Calculate internal forces at'x_1 = 1'm
 #pre
 
 #post

@@ -179,6 +179,31 @@ Found on the way: the workbook writer ordered a row's cells by comparing their r
 text, so a 27th column ("AA1") went in front of "B1" and the sheet was invalid. It now compares
 column numbers, which also fixes `#write` past column Z.
 
+## D8. The bundled samples declare their inputs with #UI (modification of upstream's examples)
+
+**CalcpadCE:** many of its example worksheets write inputs as stored fields,
+`name = ? {default}`. Its linter warns about them (CPD-3419, "declare the input with #UI
+instead"), and the migration guide says to write `#UI name = default`.
+
+**calcpad-rs:** the copies in `web/calcpad-web/public/samples` are written with `#UI`. The
+rewrite is `web/calcpad-web/src/wasm/legacy-input.ts`, run by `tools/gen_samples.mjs`, and
+the same function is the editor's "Convert to #UI" quick fix on that warning. A field is
+rewritten when it is a plain number (no exponent, which `#UI` rejects) assigned with `=` to a
+name; `? {` and `}` go, the default, the name and the unit written after the brace stay, and
+`#UI ` is put in front of the line (labels before and between fields are what `#UI` lines
+allow, docs/new-ui-mode.md). Lines that are another directive, or hold an expression
+assignment next to the field (`#UI` rejects those), keep the stored field.
+
+The generator renders the original and the converted sheet with the engine (included sheets
+too) and keeps a line converted only when its rendered paragraph is the same once the input
+widget markup (`<u class="input-N">v</u>`) is dropped. A line goes back to upstream's text when
+the converted sheet reports an error or the paragraph differs. An input shows its digits as
+typed (`0.60`), a `#UI` value is shown as a number (`0.6`), which is why two lines of the
+seismic detailing sheets stay as upstream wrote them. The sheets with `#UI` lines open in the
+input form (Settings > Open #UI Documents in Input Mode) and carry the "input form" tag in the
+Samples browser. Result: 61 of the 101 samples converted (574 fields); 23 fields in 14 sheets
+remain.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

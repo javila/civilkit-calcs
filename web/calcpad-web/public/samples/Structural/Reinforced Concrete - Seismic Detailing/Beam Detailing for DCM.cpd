@@ -3,18 +3,18 @@
 '<div style="max-width:180mm">
 '<img style="width:375pt;" style="max-width:100%;" src="../../Images/structures/rc/detailing/beam.png" alt="beam.png">
 '<p><b>Beam dimensions</b></p>
-'Cross section - 'b_w = ? {350}'mm, 'h_w = ? {650}'mm
-'Clear beam span -'l_cl = ? {5000}'mm
-'Slab depth -'h_f = ? {130}'mm
+#UI 'Cross section - 'b_w = 350'mm, 'h_w = 650'mm
+#UI 'Clear beam span -'l_cl = 5000'mm
+#UI 'Slab depth -'h_f = 130'mm
 #post
 'Cross section area -'A_c = b_w*h_w'mm²
 #show
-'Dimensions of columns -'b_c = ? {500}'mm,'h_c = ? {500}'mm
-'Maximum seismic axial load in beam -'N_Ed = ? {0}'kN
+#UI 'Dimensions of columns -'b_c = 500'mm,'h_c = 500'mm
+#UI 'Maximum seismic axial load in beam -'N_Ed = 0'kN
 
 '<p><b>Concrete</b></p>
-'Characteristic compressive cylinder strength -'f_ck = ? {25}'MPa
-'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = ? {1}
+#UI 'Characteristic compressive cylinder strength -'f_ck = 25'MPa
+#UI 'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = 1
 #post
 'Design compressive cylinder strength -'f_cd = α_cc*f_ck/γ_c'MPa
 'Mean value of axial tensile strength -'f_ctm = 0.30*f_ck^(2/3)'MPa
@@ -43,8 +43,8 @@ b_w,max = min(b_c + h_w;2*b_c)'mm
 '<tr><th>With transverse beam</th><td>'b_c + 4*h_f'mm</td><td>'b_c + 8*h_f'mm</td></tr></table>
 #show
 '<p><b>Longitudinal reinforcement</b></p>
-'<p id="C" style="display:none;">'C = ? {0}'</p>
-'Characteristic yield strength -'f_yk = ? {500}'MPa
+#UI '<p id="C" style="display:none;">'C = 0'</p>
+#UI 'Characteristic yield strength -'f_yk = 500'MPa
 #pre
 '<p>Steel class - <select data-target="C">
 '<option value="0"> Class B </option>
@@ -65,9 +65,9 @@ b_w,max = min(b_c + h_w;2*b_c)'mm
 'Modulus of elasticity -'E_s = 200000'MPa
 #show
 '<p><b>Bottom reinforcement in critical regions</b></p>
-'Bar diameter -'d_bL1 = ? {16}'mm
-'Effective cross section depth -'d_1 = ? {590}'mm
-'Reinforcement area -'A_s1 = ? {1005}'mm²
+#UI 'Bar diameter -'d_bL1 = 16'mm
+#UI 'Effective cross section depth -'d_1 = 590'mm
+#UI 'Reinforcement area -'A_s1 = 1005'mm²
 #post
 'Reinforcement ratio -'ρ_1 = A_s1/(b_w*d_1)
 '<p class="ref">[§ 5.4.3.1.2 (5)]</p>
@@ -102,15 +102,15 @@ l_b,min = max(0.6*l_b,rqd;10*d_bL1;100)'mm
 l_bd = round(max(l_bd_;l_b,min))'mm
 #show
 '<p><b>Top reinforcement at supports</b></p>
-'Bar diameter -'d_bL2 = ? {20}'mm
-'Effective cross section depth -'d_2 = ? {590}'mm
-'Reinforcement area -'A_s2 = ? {1571}'mm²
+#UI 'Bar diameter -'d_bL2 = 20'mm
+#UI 'Effective cross section depth -'d_2 = 590'mm
+#UI 'Reinforcement area -'A_s2 = 1571'mm²
 #post
 'Reinforcement ratio -'ρ_2 = A_s2/(b_w*d_2)
 #show
-'Fundamental period of first vibration mode -'T_1 = ? {0.55}'s
+#UI 'Fundamental period of first vibration mode -'T_1 = 0.55's
 'Upper limit period of constant spectral acceleration -'T_C = ? {0.60}'s
-'Basic behavior factor value -'q_0 = ? {3.9}
+#UI 'Basic behavior factor value -'q_0 = 3.9
 #post
 'Curvature ductility factor
 '<p class="ref">[§ 5.2.3.4 (3)]</p>
@@ -154,7 +154,7 @@ l_bd = round(max(l_bd_;l_b,min))'mm
 #show
 '<p class="ref">[§ 5.6.2.2 (2), a)]</p>
 '<p><b>For interior beam-column joints</b></p>
-'Minimal normalized design axial force at column -'ν_d = ? {0.14}'(<var>ν</var><sub>d</sub> = <var>N</var><sub>Еd</sub> / <var>f</var><sub>cd</sub><var>A</var><sub>c</sub>)
+#UI 'Minimal normalized design axial force at column -'ν_d = 0.14'(<var>ν</var><sub>d</sub> = <var>N</var><sub>Еd</sub> / <var>f</var><sub>cd</sub><var>A</var><sub>c</sub>)
 #post
 d_bL,max = h_c*7.5*f_ctm/(γ_Rd*f_yd)*(1 + 0.8*ν_d)/(1 + 0.75*k_D*ρ_1/ρ_max)'mm
 #if d_bL > d_bL,max
@@ -165,7 +165,7 @@ d_bL,max = h_c*7.5*f_ctm/(γ_Rd*f_yd)*(1 + 0.8*ν_d)/(1 + 0.75*k_D*ρ_1/ρ_max)'
 #show
 '<p class="ref">[§ 5.6.2.2 (2), b)]</p>
 '<p><b>For exterior beam-column joints</b></p>
-'Minimal normalized design axial force at column -'ν_d = ? {0.07}
+#UI 'Minimal normalized design axial force at column -'ν_d = 0.07
 #post
 d_bL,max = h_c*7.5*f_ctm/(γ_Rd*f_yd)*(1 + 0.8*ν_d)'mm
 #if d_bL > d_bL,max
@@ -177,8 +177,8 @@ d_bL,max = h_c*7.5*f_ctm/(γ_Rd*f_yd)*(1 + 0.8*ν_d)'mm
 #show
 
 '<p><b>Transverse reinforcement</b></p>
-'Hoop diameter -'d_bw = ? {6}'mm
-'Characteristic yield strength -'f_ywk = ? {500}'MPa
+#UI 'Hoop diameter -'d_bw = 6'mm
+#UI 'Characteristic yield strength -'f_ywk = 500'MPa
 #post
 'Design yield strength -'f_ywd = f_ywk/γ_s'MPa
 '<p class="ref">[§ 5.4.3.1.2 (6), a)]</p>

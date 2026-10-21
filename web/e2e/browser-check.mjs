@@ -746,6 +746,25 @@ const codeView = await page.evaluate(async () => {
     return r.text();
 });
 check(codeView.includes('<span class="variable">a</span>') && codeView.includes('<span class="const">2</span><span class="units">m</span>'), 'the unwrapped code view is highlighted with the tokenizer (loaded on demand into the engine worker)');
+// Quick fix on the deprecated stored input warning (CPD-3419).
+await setEditor("'Load -'q = ? {5}'kN/m\nb = q*2kN");
+const legacyMarker = await page.waitForFunction(() => (window).monaco.editor.getModelMarkers({}).some((m) => (m.code?.value ?? m.code) === 'CPD-3419' && m.startLineNumber === 1), null, { timeout: 30000 }).then(() => true, () => false);
+check(legacyMarker, 'a stored input field "? {5}" is marked CPD-3419 in the editor');
+if (legacyMarker) {
+    await page.evaluate(() => { const e = (window).calcpadActiveEditor; e.focus(); e.setPosition({ lineNumber: 1, column: 14 }); });
+    await page.keyboard.press('ControlOrMeta+Period');
+    const item = page.getByText('Convert to #UI', { exact: true }).first();
+    const offered = await item.waitFor({ timeout: 8000 }).then(() => true, () => false);
+    check(offered, 'the quick fix "Convert to #UI" is offered on that warning');
+    if (offered) {
+        await page.keyboard.press('Enter');
+        await page.waitForTimeout(300);
+        const fixed = await page.evaluate(() => (window).calcpadActiveEditor.getValue());
+        check(fixed === "#UI 'Load -'q = 5'kN/m\nb = q*2kN", `the quick fix writes the #UI declaration (${JSON.stringify(fixed)})`);
+    } else {
+        await page.keyboard.press('Escape');
+    }
+}
 const bad = await hlApi('lint', { content: '  ' });
 check(bad.status === 400, 'lint of an empty document answers 400 like the server');
 check(requests.some((r) => r.url.endsWith('/wasm/calcpad_highlighter_wasm_bg.wasm')), 'the highlighter wasm was loaded from /wasm/');

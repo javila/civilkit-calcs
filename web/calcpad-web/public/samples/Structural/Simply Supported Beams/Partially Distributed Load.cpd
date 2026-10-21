@@ -2,9 +2,9 @@
 '<div style = "max-width:180mm;">
 '<img style="width:190pt;" alt = "simply-supported-beam-distributed-load-partial.png" class="side" src = "../../Images/mechanics/beams/simply-supported-beam-distributed-load-partial.png">
 '<p><b>Input data</b></p>
-'Beam length -'l = ? {5}'m
-'Load -'q = ? {10}'kN/m
-'Distances -'a = ? {1}'m,'b = ? {2}'m
+#UI 'Beam length -'l = 5'm
+#UI 'Load -'q = 10'kN/m
+#UI 'Distances -'a = 1'm,'b = 2'm
 #post
 c = l - (a + b)'m
 #if '<!--'c < 0'-->
@@ -22,7 +22,7 @@ c = l - (a + b)'m
 	PlotWidth = 600
 	PlotHeight = 150
 	#show
-	'Calculate internal forces at'x_1 = ? {1.5}'m
+	#UI 'Calculate internal forces at'x_1 = 1.5'm
 	#pre
 
 	#post

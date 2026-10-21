@@ -1,9 +1,16 @@
 # Samples
 
 These worksheets, and the images, included sheets and data files they use, are copied
-unchanged from the CalcpadCE repository (https://github.com/imartincei/CalcpadCE, commit
+from the CalcpadCE repository (https://github.com/imartincei/CalcpadCE, commit
 0cf438f, folder `Examples/`), MIT licence, Copyright (c) 2026 CalcpadCE Contributors.
-The copies keep upstream's folder layout under this folder. Worksheets:
+The copies keep upstream's folder layout under this folder.
+
+The copies differ from upstream in one way: a deprecated stored input field
+`name = ? {default}` (CalcpadCE's linter warns CPD-3419) is written as the `#UI`
+declaration its migration guide gives, `#UI name = default`, keeping the name, the value
+and the unit. tools/gen_samples.mjs does it (src/wasm/legacy-input.ts) and only keeps a
+converted sheet when the engine renders it exactly like the original, apart from the
+input widget markup (DEVIATIONS.md, D8). Worksheets:
 
 - `Examples/Structural/Cantilevers/Concentrated Force.cpd`
 - `Examples/Structural/Cantilevers/Concentrated Moment.cpd`

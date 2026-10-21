@@ -188,7 +188,7 @@
 '<option value=174>HE 1000 B
 '<option value=175>HE 1000 M
 '</select></p>
-'<p id="section" style="display:none;">'id = ? {22}'</p>
+#UI '<p id="section" style="display:none;">'id = 22'</p>
 #hide
 #read IPE from Steel Sections EN.xlsx@EN_IPE!B5
 #read HE from Steel Sections EN.xlsx@EN_HE!B5

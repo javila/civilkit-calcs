@@ -34,6 +34,7 @@ import { setupDiagnostics } from './editor/diagnostics';
 import { registerCompletionProvider } from './editor/completions';
 import { registerIncludeCompletionProvider } from './editor/include-completions';
 import { registerHoverProvider } from './editor/hover';
+import { registerLegacyInputFix } from './editor/legacy-input-fix';
 import {
     registerDefinitionProvider,
     registerIncludeLinkProvider,
@@ -1254,6 +1255,7 @@ async function bootstrap(): Promise<void> {
         });
     }
     registerHoverProvider(editorBridge);
+    registerLegacyInputFix();
     registerDefinitionProvider(editorBridge, getFileContext, resolveIncludeUri);
     registerIncludeLinkProvider(resolveIncludeUri);
     registerReferenceProvider(editorBridge, getFileContext, openIncludeFile);

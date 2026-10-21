@@ -3,13 +3,13 @@
 #rad
 '<h3>Input data</h3>
 '<table><tr><td>
-'Beam length -'l = ? {4}m
-'Height -'h = ? {2}m
+#UI 'Beam length -'l = 4m
+#UI 'Height -'h = 2m
 'Load -'q = ? {100}*(kN/m)
-'Length of load -'b = ? {0.8}m
-'Distance to load start -'a = ? {1.6}m
-'Length of support -'d = ? {0.4}m
-'Number of iterations -'N = ? {21}
+#UI 'Length of load -'b = 0.8m
+#UI 'Distance to load start -'a = 1.6m
+#UI 'Length of support -'d = 0.4m
+#UI 'Number of iterations -'N = 21
 '</td><td><img src="../../Images/mechanics/elastic/deep-beam-fea.png" style="height:160pt; width:150pt; margin-left:50pt;"></td></tr></table>
 #hide
 c = a + b

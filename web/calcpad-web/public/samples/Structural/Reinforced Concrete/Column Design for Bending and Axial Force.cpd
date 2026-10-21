@@ -3,7 +3,7 @@
 '<div style="max-width:180mm">
 '<img class="side" style="width:150pt;"src="../../Images/structures/rc/design/column-design.png" alt="column-design.png">
 '<h4>Cross section dimensions</h4>
-'Width -'b = ? {300}'mm, Height -'h = ? {700}'mm
+#UI 'Width -'b = 300'mm, Height -'h = 700'mm
 #post
 'Cross section area -'A_c = b*h'mm²
 #show
@@ -19,11 +19,11 @@
 #show
 '<h4>Section design loads</h4>
 '<table>
-'<tr><td>№ 1 - </td><td>'M_Ed_1 = ? {100}'kN·m, </td><td>'N_Ed_1 = ? {500}'kN</td></tr>
-'<tr><td>№ 2 - </td><td>'M_Ed_2 = ? {100}'kN·m, </td><td>'N_Ed_2 = ? {1000}'kN</td></tr>
-'<tr><td>№ 3 - </td><td>'M_Ed_3 = ? {100}'kN·m, </td><td>'N_Ed_3 = ? {1500}'kN</td></tr>
-'<tr><td>№ 4 - </td><td>'M_Ed_4 = ? {100}'kN·m, </td><td>'N_Ed_4 = ? {2000}'kN</td></tr>
-'<tr><td>№ 5 - </td><td>'M_Ed_5 = ? {100}'kN·m, </td><td>'N_Ed_5 = ? {2500}'kN</td></tr>
+#UI '<tr><td>№ 1 - </td><td>'M_Ed_1 = 100'kN·m, </td><td>'N_Ed_1 = 500'kN</td></tr>
+#UI '<tr><td>№ 2 - </td><td>'M_Ed_2 = 100'kN·m, </td><td>'N_Ed_2 = 1000'kN</td></tr>
+#UI '<tr><td>№ 3 - </td><td>'M_Ed_3 = 100'kN·m, </td><td>'N_Ed_3 = 1500'kN</td></tr>
+#UI '<tr><td>№ 4 - </td><td>'M_Ed_4 = 100'kN·m, </td><td>'N_Ed_4 = 2000'kN</td></tr>
+#UI '<tr><td>№ 5 - </td><td>'M_Ed_5 = 100'kN·m, </td><td>'N_Ed_5 = 2500'kN</td></tr>
 '</table>
 #pre
 'All input values for M<sub>Ed</sub> and N<sub>Ed</sub> must be positive!
@@ -32,8 +32,8 @@
 '<h4>Material properties</h4>
 '<p class="ref" style="float:right">[EN 1992-1-1, Table 3.1]</p>
 '<p><b>Concrete</b></p>
-'Characteristic compressive cylinder strength -'f_ck = ? {20}'MPa
-'Partial safety factor for concrete -'γ_c = 1.5','α_cc = ? {0.85}
+#UI 'Characteristic compressive cylinder strength -'f_ck = 20'MPa
+#UI 'Partial safety factor for concrete -'γ_c = 1.5','α_cc = 0.85
 #post
 'Mean value of cylinder compressive strength -'f_cm = f_ck + 8'MPa
 'Design compressive cylinder strength -'f_cd = α_cc*f_ck/γ_c'MPa
@@ -41,7 +41,7 @@
 'Secant modulus of elasticity -'E_cm = 22*(f_cm/10)^0.3'GPa
 #show
 '<p><b>Steel</b></p>
-'Characteristic yield strength -'f_yk = ? {500}'MPa
+#UI 'Characteristic yield strength -'f_yk = 500'MPa
 #post
 'Partial safety factor for steel -'γ_s = 1.15
 'Design yield strength -'f_yd = f_yk/γ_s'MPa
@@ -61,15 +61,15 @@ $Plot{σ_s(ε/1000) @ ε = -10 : 10}
 '</td></tr></table>
 #show
 '<h4>Imperfections and second order effects</h4>
-'Ratio of quasi-permanent bending moment: M<sub>0Eqp</sub>/M<sub>0Ed</sub> ='K_G = ? {0.75}
+#UI 'Ratio of quasi-permanent bending moment: M<sub>0Eqp</sub>/M<sub>0Ed</sub> ='K_G = 0.75
 #post
 'M<sub>0Eqp</sub> is the first order bending moment in quasi-permanent load combination (SLS)
 'M<sub>0Ed</sub> is the first order bending moment in design load combination (ULS)
 #show
-'Long term creep factor - φ(∞,t<sub>0</sub>) ='φ = ? {2.5}
-'Column height -'L = ? {4000}'mm
+#UI 'Long term creep factor - φ(∞,t<sub>0</sub>) ='φ = 2.5
+#UI 'Column height -'L = 4000'mm
 'Effective column  height -'L_o = ? {2}*L'mm
-'Number of vertical elements -'m = ? {1}
+#UI 'Number of vertical elements -'m = 1
 #hide
 α_n_ = 2/sqr(L/1000)
 α_n = max(2/3; min(α_n_; 1))

@@ -2,8 +2,8 @@
 '<div style="max-width:180mm">
 '<img class="side" style="width:210pt;" alt="fixed-beam-concentrated-moment.png" src="../../Images/mechanics/beams/fixed-beam-concentrated-moment.png">
 '<p><b>Input data</b></p>
-'Beam length -'l = ? {10}'m
-'Load -'M = ? {10}'kN·m
+#UI 'Beam length -'l = 10'm
+#UI 'Load -'M = 10'kN·m
 'Distances -'a = ? {4}'m,'b = l - a'm
 #post
 '<p><b>Internal forces</b></p>
@@ -20,7 +20,7 @@ M_b = V*b - M_B'kN·m
 PlotWidth = 600
 PlotHeight = 150
 #show
-'Calculate internal forces at'x_1 = ? {1}'m
+#UI 'Calculate internal forces at'x_1 = 1'm
 #pre
 
 #post

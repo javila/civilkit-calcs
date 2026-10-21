@@ -5,17 +5,17 @@
 '
 '
 '<h4>Dimensions of the building</h4>
-'Width -'B = ? {12}'m
-'Length -'L = ? {30}'m
-'Height at roof ridge -'h_1 = ? {9}'m
-'Height at roof eaves -'h_2 = ? {8}'m
+#UI 'Width -'B = 12'm
+#UI 'Length -'L = 30'm
+#UI 'Height at roof ridge -'h_1 = 9'm
+#UI 'Height at roof eaves -'h_2 = 8'm
 'Pitch angle
 α = atan((h_1 - h_2)*2/B)'°
 'Spacing between:
-'&nbsp;&nbsp;&nbsp;&nbsp; - frames -'a = ? {6}'m
-'&nbsp;&nbsp;&nbsp;&nbsp; - wind columns -'b = ? {4}'m
-'&nbsp;&nbsp;&nbsp;&nbsp; - side beams -'c_s = ? {2}'m
-'&nbsp;&nbsp;&nbsp;&nbsp; - purlins -'c_p = ? {1}'m
+#UI '&nbsp;&nbsp;&nbsp;&nbsp; - frames -'a = 6'm
+#UI '&nbsp;&nbsp;&nbsp;&nbsp; - wind columns -'b = 4'm
+#UI '&nbsp;&nbsp;&nbsp;&nbsp; - side beams -'c_s = 2'm
+#UI '&nbsp;&nbsp;&nbsp;&nbsp; - purlins -'c_p = 1'm
 #post
 '(If the above distances are &le; 0, the corresponding loads will not be calculated)
 #if c_s > 0
@@ -28,7 +28,7 @@
 '
 #show
 '<h4>Basic velocity pressure</h4>
-'Fundamental value of the basic wind velocity -'v_b_0 = ? {26}'kN/m²
+#UI 'Fundamental value of the basic wind velocity -'v_b_0 = 26'kN/m²
 #post
 'Directional factor -'C_dir = 1.0
 'Seasonal factor -'C_season = 1.0
@@ -36,7 +36,7 @@
 'Basic wind velocity -'v_b = C_dir*C_season*v_b_0'm/s
 'Orography factor -'C_0 = 1.0
 #pre
-'<p id="C" style="display:none;">'C = ? {4}'</p>
+#UI '<p id="C" style="display:none;">'C = 4'</p>
 '<p class="ref">[EN 1991-1-4, Table 4.1]</p>
 'Terrain categories
 '<p><select data-target="C">
@@ -95,7 +95,7 @@ q_p = C_e*q_b'kN/m²
 'Size factor - 'C_s = 1', Dynamic factor - 'C_d = 1
 'Structural factor - 'C_s*C_d
 #show
-'Internal pressure coefficient -'C_pi = ? {-0.3}
+#UI 'Internal pressure coefficient -'C_pi = -0.3
 '<p class="ref">[EN 1991-1-4 Fig.7.13, Note 2]</p>
 '(should be taken the relevant value of -0.3 and +0.2)
 #post

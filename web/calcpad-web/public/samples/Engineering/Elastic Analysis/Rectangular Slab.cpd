@@ -1,13 +1,13 @@
 '<!-- [Navier double-trig-series solution](https://en.wikipedia.org/wiki/Bending_of_plates#Bending_of_rectangular_plates) for a thin rectangular plate on simple supports under uniform load.
 'Returns maximum deflection and bending moments $M_x$, $M_y$ for arbitrary plan dimensions, thickness and elastic constants — a quick parametric check against slab FEA. -->
 '<h3>Input data</h3>
-'Dimensions in plan -'a = ? {6}m','b = ? {4}m
+#UI 'Dimensions in plan -'a = 6m','b = 4m
 '<table><tr><td>
-'Slab thickness -'t = ? {0.1}m
+#UI 'Slab thickness -'t = 0.1m
 'Distributed load -'q = ? {10}*(kN/m^2)
-'Elastic modulus -'E = ? {35000}MPa
-'Poisson`s ratio -'ν = ? {0.15}
-'Number of iterations -'N = ? {5}
+#UI 'Elastic modulus -'E = 35000MPa
+#UI 'Poisson`s ratio -'ν = 0.15
+#UI 'Number of iterations -'N = 5
 '</td><td><img src="../../Images/mechanics/elastic/slab.png" style="height:110pt; width:145pt; margin-left:40pt;"></td></tr></table>
 #rad
 #post

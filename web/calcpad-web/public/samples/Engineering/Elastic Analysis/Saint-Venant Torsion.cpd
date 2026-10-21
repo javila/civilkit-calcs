@@ -4,8 +4,8 @@
 '<table><tr><td>
 'Dimensions of cross section
 a = ? {50}cm','b = ? {30}*(cm/2)
-'Torsional moment -'M_t = ? {20}kNm
-'Number of iterations -'n = ? {10}
+#UI 'Torsional moment -'M_t = 20kNm
+#UI 'Number of iterations -'n = 10
 '</td><td><img src="../../Images/mechanics/elastic/torsion.png" style="height:110pt; width:152pt; margin-left:50pt;"></td></tr></table>
 #post
 '<h3>Analysis</h3>

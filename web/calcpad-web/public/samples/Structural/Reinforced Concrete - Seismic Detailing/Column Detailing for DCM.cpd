@@ -3,15 +3,15 @@
 '<div style="max-width:180mm">
 '<img class="side" style="width:220pt;" src="../../Images/structures/rc/detailing/column-section.png" alt="column-section.png">
 '<p><b>Column dimensions</b></p>
-'Cross section -'b_c = ? {500}'mm,'h_c = ? {500}'mm
-'Clear storey height -'l_cl = ? {2850}'mm
+#UI 'Cross section -'b_c = 500'mm,'h_c = 500'mm
+#UI 'Clear storey height -'l_cl = 2850'mm
 'Cross section area -'A_c = b_c*h_c'mm²
-'Maximum seismic axial load -'N_Ed = ? {983.8}'kN
+#UI 'Maximum seismic axial load -'N_Ed = 983.8'kN
 
 '<p class="ref">[EN 1992-1-1, Table 3.1]</p>
 '<p><b>Concrete</b></p>
-'Characteristic compressive cylinder strength -'f_ck = ? {25}'MPa
-'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = ? {1}
+#UI 'Characteristic compressive cylinder strength -'f_ck = 25'MPa
+#UI 'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = 1
 '<img class="side" style="width:130pt;" src="../../Images/structures/rc/detailing/column-view.png" alt="column-view.png">
 #post
 'Mean value of axial tensile strength
@@ -23,8 +23,8 @@ f_cd = α_cc*f_ck/γ_c'MPa
 #show
 
 '<p><b>Longitudinal reinforcement</b></p>
-'<p id="C" style="display:none;">'C = ? {0}'</p>
-'Characteristic yield strength -'f_yk = ? {500}'MPa
+#UI '<p id="C" style="display:none;">'C = 0'</p>
+#UI 'Characteristic yield strength -'f_yk = 500'MPa
 #pre
 '<p>Steel class - <select data-target="C">
 '<option value="0"> Class B </option>
@@ -44,7 +44,7 @@ f_cd = α_cc*f_ck/γ_c'MPa
 'Design yield strength -'f_yd = f_yk/γ_s'MPa
 'Modulus of elasticity -'E_s = 200000'MPa
 #show
-'Bar diameter -'d_bL = ? {28}'mm
+#UI 'Bar diameter -'d_bL = 28'mm
 #post
 '<p class="ref">[BS EN 1992-1-1, § 9.5.2 (1)/NA.1]</p>
 'Minimum bar diameter -'d_bL,min = 12'mm
@@ -52,8 +52,8 @@ f_cd = α_cc*f_ck/γ_c'MPa
 	'<p class="err">The bar diameter is less than the minimum:'d_bL'mm &lt;'d_bL,min'mm</p>
 #end if
 #show
-'Bar count -'n_b = ? {12}
-'Bar count along "<var>h</var><sub>c</sub>" -'n_b1 = ? {4}
+#UI 'Bar count -'n_b = 12
+#UI 'Bar count along "<var>h</var><sub>c</sub>" -'n_b1 = 4
 #post
 'Bar count along "<var>b</var><sub>c</sub>" -'n_b2 = n_b/2 - n_b1 + 2
 #if n_b < 4
@@ -125,8 +125,8 @@ l_1 = max(0;l_cl - l_cr - l_0)'mm
 #show
 
 '<p><b>Transverse reinforcement</b></p>
-'Hoop diameter -'d_bw = ? {10}'mm
-'Characteristic yield strength -'f_ywk = ? {500}'MPa
+#UI 'Hoop diameter -'d_bw = 10'mm
+#UI 'Characteristic yield strength -'f_ywk = 500'MPa
 #post
 'Design yield strength -'f_ywd = f_ywk/γ_s'MPa
 'Concrete cover to hoops -'c = 40'mm
@@ -233,9 +233,9 @@ A_sw1 = π*d_bw^2/4'mm²
 α = α_n*α_s
 #show
 '<p><b>Analysis results</b></p>
-'Fundamental period of first vibration mode -'T_1 = ? {0.55}'s
-'Upper limit period of constant spectral acceleration -'T_C = ? {0.6}'s
-'Basic behavior factor value -'q_0 = ? {3.9}
+#UI 'Fundamental period of first vibration mode -'T_1 = 0.55's
+#UI 'Upper limit period of constant spectral acceleration -'T_C = 0.6's
+#UI 'Basic behavior factor value -'q_0 = 3.9
 #post
 '<p><b>Curvature ductility factor</b></p>
 '<p class="ref">[§ 5.2.3.4 (3)]</p>

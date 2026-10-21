@@ -2,8 +2,8 @@
 '<div style="max-width:180mm;">
 '<img style="width:210pt;" alt="propped-cantilever-beam-distributed-load.png" class="side" src="../../Images/mechanics/beams/propped-cantilever-beam-distributed-load.png">
 '<p><b>Input data</b></p>
-'Beam Length -'l = ? {10}'m
-'Load -'q = ? {5}'kN/m
+#UI 'Beam Length -'l = 10'm
+#UI 'Load -'q = 5'kN/m
 #post
 '<p><b>Internal forces</b></p>
 'Bending
@@ -18,7 +18,7 @@ V_B = 3*q*l/8'kN
 PlotWidth = 600
 PlotHeight = 150
 #show
-'Calculate internal forces at'x_1 = ? {1}'m
+#UI 'Calculate internal forces at'x_1 = 1'm
 #pre
 
 

@@ -3,13 +3,13 @@
 '<div style="max-width:180mm">
 '<img class="side" src="../../Images/structures/rc/detailing/shear-wall-section.png" alt="shear-wall-section.png" style="width:260pt;">
 '<p><b>Shear wall dimensions</b></p>
-'Length -'l_w = ? {4000}'mm
-'Web thickness -'b_wo = ? {300}'mm
-'Total height -'h_w = ? {19000}'mm
-'Clear storey height -'h_s = ? {3820}'mm
-'Number of storeys -'n_s = ? {6}
+#UI 'Length -'l_w = 4000'mm
+#UI 'Web thickness -'b_wo = 300'mm
+#UI 'Total height -'h_w = 19000'mm
+#UI 'Clear storey height -'h_s = 3820'mm
+#UI 'Number of storeys -'n_s = 6
 'Confined zone dimensions
-b_c = ? {300}'mm,'h_c = ? {875}'mm
+#UI b_c = 300'mm,'h_c = 875'mm
 #post
 'Cross section area
 'Area of confined boundary element
@@ -19,12 +19,12 @@ A_w = (l_w - 2*h_c)*b_wo'mm²
 'Total area
 A_c = A_w + 2*A_f'mm²
 #show
-'Maximum seismic axial load -'N_Ed = ? {2254}'kN
+#UI 'Maximum seismic axial load -'N_Ed = 2254'kN
 
 '<p><b>Concrete</b> &nbsp;&nbsp;[EN 1992-1-1, Table 3.1]</p>
 'Characteristic compressive cylinder strength
-f_ck = ? {25}'MPa
-'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = ? {1}'
+#UI f_ck = 25'MPa
+#UI 'Partial safety factor -'γ_c = 1.5','α_ct = 1','α_cc = 1'
 #post
 'Mean value of axial tensile strength
 f_ctm = 0.30*f_ck^(2/3)'MPa
@@ -39,8 +39,8 @@ f_cd = α_cc*f_ck/γ_c'MPa
 #show
 
 '<p><b>Longitudinal reinforcement</b></p>
-'<p id="C" style="display:none;">'C = ? {0}'</p>
-'Characteristic yield strength -'f_yk = ? {500}'MPa
+#UI '<p id="C" style="display:none;">'C = 0'</p>
+#UI 'Characteristic yield strength -'f_yk = 500'MPa
 #pre
 '<p>Steel class - <select data-target="C">
 '<option value="0"> Class B </option>
@@ -61,7 +61,7 @@ f_cd = α_cc*f_ck/γ_c'MPa
 'Modulus of elasticity -'E_s = 200000'MPa
 #show
 '<p><b>Reinforcement for each confined boundary element</b></p>
-'Bar diameter -'d_bL = ? {25}'mm
+#UI 'Bar diameter -'d_bL = 25'mm
 #post
 '<p class="ref">[BS EN 1992-1-1, § 9.5.2 (1)/NA.1]</p>
 'Minimum bar diameter -'d_bL,min = 12'mm
@@ -69,8 +69,8 @@ f_cd = α_cc*f_ck/γ_c'MPa
 	'<p class="err">The bar diameter is less than the minimum:'d_bL'mm &lt;'d_bL,min'mm. ❌</p>
 #end if
 #show
-'Bar count -'n_b = ? {13}
-'Bar count along "<var>h</var><sub>0</sub>" -'n_b1 = ? {6}
+#UI 'Bar count -'n_b = 13
+#UI 'Bar count along "<var>h</var><sub>0</sub>" -'n_b1 = 6
 #post
 'Bar count along "<var>b</var><sub>0</sub>" -'n_b2 = ceiling(n_b/2 - n_b1 + 2)
 #if n_b < 4
@@ -91,8 +91,8 @@ A_s = n_b*A_s1'mm²
 #end if
 #show
 '<p><b>Vertical web reinforcement</b></p>
-'Bar diameter -'d_bv = ? {10}'mm
-'Bar spacing -'s_v = ? {250}'mm
+#UI 'Bar diameter -'d_bv = 10'mm
+#UI 'Bar spacing -'s_v = 250'mm
 #post
 '<p class="ref">[EN 1992-1-1, § 9.6.2 (3)]</p>
 'Maximum bar spacing
@@ -112,8 +112,8 @@ s_v,max = min(3*b_wo; 400)'mm
 ρ_v,min = 0.005
 #show
 '<p><b>Horizontal web reinforcement</b></p>
-'Bar diameter -'d_bh = ? {12}'mm
-'Bar spacing -'s_h = ? {150}'mm
+#UI 'Bar diameter -'d_bh = 12'mm
+#UI 'Bar spacing -'s_h = 150'mm
 #post
 '<p class="ref">[EN 1992-1-1, § 9.6.3 (2)]</p>
 'Maximum bar spacing -'s_h,max = 400'mm
@@ -131,10 +131,10 @@ s_v,max = min(3*b_wo; 400)'mm
 #show
 
 '<p><b>Transverse reinforcement in confined boundary elements</b></p>
-'Characteristic yield strength -'f_ywk = ? {500}'MPa
+#UI 'Characteristic yield strength -'f_ywk = 500'MPa
 'Design yield strength -'f_ywd = f_ywk/γ_s'MPa
-'Concrete cover to hoops -'c = ? {42}'mm
-'Hoop diameter -'d_bw = ? {8}'mm
+#UI 'Concrete cover to hoops -'c = 42'mm
+#UI 'Hoop diameter -'d_bw = 8'mm
 #post
 '<p class="ref">[EN 1992-1-1, § 9.5.3 (1)]</p>
 'Minimum diameter
@@ -309,10 +309,10 @@ A_sw1 = π*d_bw^2/4'mm²
 #show
 '<p><b>Analysis results</b></p>
 'Fundamental period of first vibration mode -'T_1 = ? {0.6795}'s
-'Upper limit period of constant spectral acceleration -'T_C = ? {0.4}'s
-'Basic behavior factor value -'q_0 = ? {3}
-'Design bending moment -'M_Ed = ? {9591}'kNm
-'Bending moment capacity -'M_Rd = ? {13268}'kNm
+#UI 'Upper limit period of constant spectral acceleration -'T_C = 0.4's
+#UI 'Basic behavior factor value -'q_0 = 3
+#UI 'Design bending moment -'M_Ed = 9591'kNm
+#UI 'Bending moment capacity -'M_Rd = 13268'kNm
 '(The above values refer to the section above the base)
 #post
 '<p><b>Curvature ductility factor</b></p>

@@ -4,20 +4,20 @@
 '<img class="side" style="width:225pt;" src="../../Images/structures/rc/design/punching-corner-column.png" alt="punching-corner-column.png">
 '<h4>Input data</h4>
 '<p><b>Column</b></p>
-'Dimensions - 'c_1 = ? {600}'mm, 'c_2 = ? {300}'mm
+#UI 'Dimensions - 'c_1 = 600'mm, 'c_2 = 300'mm
 '<p><b>Design loads</b></p>
-'Support reaction -'V_Ed = ? {125}'kN
+#UI 'Support reaction -'V_Ed = 125'kN
 '<p><b>Slab</b></p>
-'Depth -'h = ? {200}'mm
-'Concrete cover -'c = ? {20}'mm
-'Longitudinal bars diameter -'d_bL = ? {10}'mm
-'Links diameter -'d_w = ? {6}'mm
+#UI 'Depth -'h = 200'mm
+#UI 'Concrete cover -'c = 20'mm
+#UI 'Longitudinal bars diameter -'d_bL = 10'mm
+#UI 'Links diameter -'d_w = 6'mm
 #post
 'Effective slab depth
 d = h - c - d_bL'mm
 #show
 'Longitudinal reinforcement area
-A_sx = ? {1200}'mm²/m, 'A_sy = ? {600}'mm²/m
+#UI A_sx = 1200'mm²/m, 'A_sy = 600'mm²/m
 #post
 'Reinforcement ratio
 ρ_lx = A_sx/(1000*d)
@@ -26,13 +26,13 @@ A_sx = ? {1200}'mm²/m, 'A_sy = ? {600}'mm²/m
 #show
 '<p><b>Material properties</b></p>
 '<p><b>Concrete</b> [EN 1992-1-1, Table 3.1]</p>
-'Characteristic compressive cylinder strength -'f_ck = ? {25}'MPa
-'Partial safety factor for concrete -'γ_c = 1.5','α_cc = ? {1}
+#UI 'Characteristic compressive cylinder strength -'f_ck = 25'MPa
+#UI 'Partial safety factor for concrete -'γ_c = 1.5','α_cc = 1
 #post
 'Design compressive cylinder strength -'f_cd = α_cc*f_ck/γ_c'MPa
 #show
 '<p><b>Steel</b></p>
-'Characteristic yield strength -'f_yk = ? {500}'MPa
+#UI 'Characteristic yield strength -'f_yk = 500'MPa
 #post
 'Partial safety factor for steel -'γ_s = 1.15
 'Design yield strength -'f_ywd = f_yk/γ_s'MPa

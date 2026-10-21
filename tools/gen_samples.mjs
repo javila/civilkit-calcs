@@ -10,6 +10,7 @@
 // listed in the output.
 // The browser opens a sheet as the desktop app does, converting C-style operators ("%%").
 import { replaceCStyleOperators } from '../web/calcpad-web/src/wasm/c-style.ts';
+import { convertLegacyInputs } from '../web/calcpad-web/src/wasm/legacy-input.ts';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -157,14 +158,50 @@ engine.initSync({ module: readFileSync(join(wasmDir, 'calcpad_wasm_bg.wasm')) })
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 const copied = new Set();
+// Worksheets whose deprecated `name = ? {default}` fields were rewritten as #UI declarations
+// (src/wasm/legacy-input.ts): absolute path -> new text. Only after the render check below
+// found the result unchanged.
+const converted = new Map();
 const copy = (abs) => {
     const rel = relative(examples, abs);
     if (copied.has(rel)) return posix.join('samples', rel.split('\\').join('/'));
     mkdirSync(dirname(join(out, rel)), { recursive: true });
-    copyFileSync(abs, join(out, rel));
+    if (converted.has(abs)) writeFileSync(join(out, rel), converted.get(abs));
+    else copyFileSync(abs, join(out, rel));
     copied.add(rel);
     return posix.join('samples', rel.split('\\').join('/'));
 };
+
+// ---- the #UI conversion's bookkeeping and equivalence test -------------------------------
+const legacy = { converted: [], kept: [], partial: [] };
+/** The page's content with the input widget markup dropped: <u class="input-N">v</u> is v (fields left alone still have it). */
+function renderedBody(html) {
+    let b = html.slice(html.lastIndexOf('<body'));
+    b = b.replace(/<u class="input-\d+">([^<]*)<\/u>/g, '$1');
+    return b.replace(/\s+/g, ' ').replace(/ (?=<\/)/g, '');
+}
+
+/** The source lines whose rendered paragraphs differ between two pages. */
+function differingLines(a, b) {
+    const byLine = (html) => {
+        const m = new Map();
+        for (const part of html.split(/(?=<p id="line-\d+" data-source-line="\d+")/)) {
+            const n = /^<p id="line-\d+" data-source-line="(\d+)"/.exec(part);
+            if (n) m.set(Number(n[1]), (m.get(Number(n[1])) ?? '') + part);
+        }
+        return m;
+    };
+    const x = byLine(a);
+    const y = byLine(b);
+    return [...new Set([...x.keys(), ...y.keys()])].filter((l) => x.get(l) !== y.get(l));
+}
+
+/** Where two rendered pages first differ, for the report. */
+function firstDifference(a, b) {
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    return `...${a.slice(Math.max(0, i - 40), i + 80)} <> ${b.slice(Math.max(0, i - 40), i + 80)}`;
+}
 
 const samples = [];
 const excluded = [];
@@ -203,6 +240,58 @@ for (const [top, folder] of folders) {
             excluded.push({ file: rel, reason: res.error ?? `${errors.length} error(s), first: line ${errors[0].sourceLine}: ${errors[0].message}` });
             continue;
         }
+        // Deprecated `name = ? {default}` fields (linter CPD-3419) become #UI declarations. The
+        // converted sheet (and the sheets it includes) must render exactly as the original, with
+        // only the input widget markup dropped; otherwise the sheet is kept as upstream wrote it.
+        let uiText = text;
+        {
+            const plan = new Map();
+            let fields = 0;
+            let skipped = 0;
+            // A converted line goes back to what upstream wrote when the engine rejects it (a #UI
+            // line that also assigns an expression: "#UI does not support expressions") or when
+            // its rendered paragraph differs (an input shows the digits as typed, "0.60", where a
+            // value is shown as the number, "0.6"). The sheet is then converted again without it.
+            const keep = new Set();
+            let r;
+            let after;
+            for (let round = 0; round < 30; round++) {
+                r = convertLegacyInputs(readFileSync(file, 'utf8'), keep);
+                if (!r.converted) { after = null; break; }
+                for (const [key, abs] of assets) engine.set_file_bytes(key, readFileSync(abs));
+                after = JSON.parse(engine.convert(JSON.stringify({ content: replaceCStyleOperators(r.text.replace(/^\uFEFF/, '')) }), false));
+                engine.clear_files();
+                const errorLines = (after.errors ?? []).filter((e) => e.sourceLine > 0).map((e) => e.sourceLine);
+                const bad = after.status ? [] : errorLines.length ? errorLines : differingLines(renderedBody(res.html), renderedBody(after.html));
+                const fresh = bad.filter((l) => !keep.has(l));
+                if (!fresh.length) break;
+                for (const l of fresh) keep.add(l);
+            }
+            skipped += r.skipped;
+            if (r.converted) { plan.set(file, r.text); fields += r.converted; }
+            for (const abs of [...assets.values()].filter((a) => a.endsWith('.cpd'))) {
+                const ri = convertLegacyInputs(readFileSync(abs, 'utf8'));
+                skipped += ri.skipped;
+                if (ri.converted) { plan.set(abs, ri.text); fields += ri.converted; }
+            }
+            if (fields) {
+                const bytes = (abs) => plan.has(abs) ? Buffer.from(plan.get(abs), 'utf8') : readFileSync(abs);
+                for (const [key, abs] of assets) engine.set_file_bytes(key, bytes(abs));
+                const convertedMain = (plan.get(file) ?? readFileSync(file, 'utf8')).replace(/^\uFEFF/, '');
+                const after = JSON.parse(engine.convert(JSON.stringify({ content: replaceCStyleOperators(convertedMain) }), false));
+                engine.clear_files();
+                const same = !after.status && !(after.errors ?? []).length && renderedBody(res.html) === renderedBody(after.html);
+                if (same) {
+                    for (const [abs, t] of plan) converted.set(abs, t);
+                    uiText = convertedMain;
+                    legacy.converted.push({ file: rel, fields, skipped });
+                } else {
+                    legacy.kept.push({ file: rel, fields, reason: after.status || (after.errors ?? []).length ? `the converted sheet reports errors: ${after.error ?? after.errors[0].message}` : `the rendered result differs: ${firstDifference(renderedBody(res.html), renderedBody(after.html))}` });
+                }
+            } else if (skipped) {
+                legacy.partial.push({ file: rel, skipped });
+            }
+        }
         const id = rel.replace(/\.cpd$/, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
         samples.push({
             id,
@@ -213,7 +302,7 @@ for (const [top, folder] of folders) {
             upstream: `Examples/${rel}`,
             description: DESCRIPTIONS[rel] ?? description(text),
             codes: designCodes(text),
-            ui: /^#UI\b/m.test(text),
+            ui: /^#UI\b/m.test(uiText),
             scripts: /<script\b/i.test(text),
             read: /^#read\b/mi.test(text),
             assets: [...assets].map(([key, abs]) => ({ key, url: copy(abs) })),
@@ -236,9 +325,16 @@ writeFileSync(join(out, 'NOTICE.md'), [
     '# Samples',
     '',
     'These worksheets, and the images, included sheets and data files they use, are copied',
-    'unchanged from the CalcpadCE repository (https://github.com/imartincei/CalcpadCE, commit',
+    'from the CalcpadCE repository (https://github.com/imartincei/CalcpadCE, commit',
     '0cf438f, folder `Examples/`), MIT licence, Copyright (c) 2026 CalcpadCE Contributors.',
-    'The copies keep upstream\'s folder layout under this folder. Worksheets:',
+    'The copies keep upstream\'s folder layout under this folder.',
+    '',
+    'The copies differ from upstream in one way: a deprecated stored input field',
+    '`name = ? {default}` (CalcpadCE\'s linter warns CPD-3419) is written as the `#UI`',
+    'declaration its migration guide gives, `#UI name = default`, keeping the name, the value',
+    'and the unit. tools/gen_samples.mjs does it (src/wasm/legacy-input.ts) and only keeps a',
+    'converted sheet when the engine renders it exactly like the original, apart from the',
+    'input widget markup (DEVIATIONS.md, D8). Worksheets:',
     '',
     ...notice,
     '',
@@ -253,3 +349,8 @@ console.log(`excluded (${excluded.length}):`);
 for (const e of excluded) console.log(`  ${e.file}: ${e.reason}`);
 const missing = samples.filter((s) => s.missingAssets);
 if (missing.length) for (const s of missing) console.log(`  missing assets in ${s.upstream}: ${s.missingAssets.join(', ')}`);
+
+console.log(`#UI conversion: ${legacy.converted.length} sheets converted (${legacy.converted.reduce((n, c) => n + c.fields, 0)} fields), ${legacy.kept.length} kept as upstream wrote them, ${legacy.partial.length} with fields left alone`);
+for (const k of legacy.kept) console.log(`  kept ${k.file}: ${k.reason}`);
+for (const k of legacy.partial) console.log(`  fields left alone in ${k.file}: ${k.skipped}`);
+for (const k of legacy.converted.filter((c) => c.skipped)) console.log(`  converted ${k.file}, fields left alone: ${k.skipped}`);

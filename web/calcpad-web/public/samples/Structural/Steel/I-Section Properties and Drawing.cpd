@@ -189,10 +189,10 @@
 '</select></p>
 #show
 '<table id="section">
-'<tr><td style="padding-right: 10px;">'h = ? {180}'mm, </td><td>'t_w = ? {5.3}'mm </td></tr>
-'<tr><td style="padding-right: 10px;">'b_f1 = ? {91}'mm,</td><td>'t_f1 = ? {8}'mm</td></tr>
-'<tr><td style="padding-right: 10px;">'b_f2 = ? {91}'mm,</td><td>'t_f2 = ? {8}'mm</td></tr>
-'<tr><td style="padding-right: 10px;">'r = ? {9}'mm, </td><td style="display:none">'r_2 = ? {0}'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'h = 180'mm, </td><td>'t_w = 5.3'mm </td></tr>
+#UI '<tr><td style="padding-right: 10px;">'b_f1 = 91'mm,</td><td>'t_f1 = 8'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'b_f2 = 91'mm,</td><td>'t_f2 = 8'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'r = 9'mm, </td><td style="display:none">'r_2 = 0'mm</td></tr>
 '</table>
 h_w = h - t_f1 - t_f2'mm
 #pre
@@ -202,7 +202,7 @@ h_w = h - t_f1 - t_f2'mm
 '<option value="0">Welded</option>
 '</select></p>
 #show
-'<p style="display:none;" id="rolled">'rolled = ? {1}'</p>
+#UI '<p style="display:none;" id="rolled">'rolled = 1'</p>
 #post
 #if rolled
 	'Section type - Rolled
@@ -213,8 +213,8 @@ h_w = h - t_f1 - t_f2'mm
 '
 '
 '<h4>Steel properties</h4>
-'Yield strength - 'f_y = ? {235}'MPa
-'Tensile strength - 'f_u = ? {360}'MPa
+#UI 'Yield strength - 'f_y = 235'MPa
+#UI 'Tensile strength - 'f_u = 360'MPa
 #pre
 
 #post

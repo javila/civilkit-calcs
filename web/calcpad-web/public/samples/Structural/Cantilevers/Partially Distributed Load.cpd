@@ -2,8 +2,8 @@
 '<div style="max-width:180mm;">
 '<img style="width:165pt;" alt="cantilever-beam-distributed-load-partial.png" class="side" src="../../Images/mechanics/beams/cantilever-beam-distributed-load-partial.png">
 '<p><b>Input data</b></p>
-'Beam Length -'l = ? {5}'m
-'Load -'q = ? {5}'kN/m
+#UI 'Beam Length -'l = 5'm
+#UI 'Load -'q = 5'kN/m
 'Distances -'b = ? {3}'m,'a = l - b'm
 #post
 '<p><b>Internal forces</b></p>
@@ -14,7 +14,7 @@
 PlotWidth = 600
 PlotHeight = 150
 #show
-'Calculate internal forces at'x_1 = ? {1}'m
+#UI 'Calculate internal forces at'x_1 = 1'm
 #pre
 
 #post

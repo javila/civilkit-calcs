@@ -20,7 +20,7 @@
    "upstream": "Examples/Structural/Cantilevers/Concentrated Force.cpd",
    "description": "Concentrated force F applied at the free end, giving the linear bending diagram M(x) = -F (l - x) and constant shear V = F.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -39,7 +39,7 @@
    "upstream": "Examples/Structural/Cantilevers/Concentrated Moment.cpd",
    "description": "Concentrated moment M_0 applied at the free end, producing a constant bending moment along the beam and zero shear.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -58,7 +58,7 @@
    "upstream": "Examples/Structural/Cantilevers/Linearly Distributed Load.cpd",
    "description": "Distributed load varying linearly between intensities q_1 at the support and q_2 at the tip, giving a cubic bending diagram and quadratic shear.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -77,7 +77,7 @@
    "upstream": "Examples/Structural/Cantilevers/Partially Distributed Load.cpd",
    "description": "Uniform load q acting on a stretch of length b adjacent to the free end, with the unloaded portion a = l - b kept clear.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -96,7 +96,7 @@
    "upstream": "Examples/Structural/Cantilevers/Uniformly Distributed Load.cpd",
    "description": "Full-span uniform load q giving the textbook support actions M = q l^2 / 2 and V = q l.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -129,7 +129,7 @@
    "upstream": "Examples/Structural/Deflections/Cantilever with Unifrom Load.cpd",
    "description": "Cantilever under a full-span uniform load q, integrating the curvature to obtain φ(x) and d(x) with the tip deflection d_max = q l^4 / (8 E I).",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -148,7 +148,7 @@
    "upstream": "Examples/Structural/Deflections/Cantilever with Concentrated Load.cpd",
    "description": "Rotation φ(x) and deflection d(x) along a cantilever loaded by a tip force F, recovering the textbook tip values φ_max = F l^2 / (2 E I) and d_max = F l^3 / (3 E I).",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -167,7 +167,7 @@
    "upstream": "Examples/Structural/Deflections/Simply Supported Beam with Unifrom Load.cpd",
    "description": "Simply supported beam under a full-span uniform load q, recovering the serviceability-relevant mid-span deflection d_max = 5 q l^4 / (384 E I) and the support rotation φ_max = q l^3 / (24 E I).",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -186,7 +186,7 @@
    "upstream": "Examples/Structural/Deflections/Simply Supported Beam with Concentrated Load.cpd",
    "description": "Simply supported beam with a mid-span point force F, giving the maximum deflection d_max = F l^3 / (48 E I) and the support rotation φ_max = F l^2 / (16 E I).",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -205,7 +205,7 @@
    "upstream": "Examples/Structural/Fully Restrained Beams/Concentrated Force.cpd",
    "description": "Fixed-end moments M_A = F a b^2 / l^2 and M_B = F a^2 b / l^2 for a clamped-clamped beam carrying a point force F at distance a from the left support.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -224,7 +224,7 @@
    "upstream": "Examples/Structural/Fully Restrained Beams/Concentrated Moment.cpd",
    "description": "Fully restrained beam loaded by a concentrated moment M at distance a, with a constant shear V = 6 M a b / l^3 and a step in the bending diagram across the load.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -243,7 +243,7 @@
    "upstream": "Examples/Structural/Fully Restrained Beams/Linearly Distributed Load.cpd",
    "description": "Trapezoidal load between intensities q_1 and q_2, with the support moments split as (3 q_1 + 2 q_2) l^2 / 60 and (2 q_1 + 3 q_2) l^2 / 60.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -262,7 +262,7 @@
    "upstream": "Examples/Structural/Fully Restrained Beams/Partially Distributed Load.cpd",
    "description": "Uniform load q over a stretch of length b between offsets a and c = l - a - b, with a guard against an invalid configuration when a + b > l.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -281,7 +281,7 @@
    "upstream": "Examples/Structural/Fully Restrained Beams/Uniformly Distributed Load.cpd",
    "description": "Full-span uniform load q, recovering M_A = M_B = q l^2 / 12, V_A = V_B = q l / 2 and the mid-span M_max = q l^2 / 24.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -300,7 +300,7 @@
    "upstream": "Examples/Structural/Propped Cantilevers/Concentrated Force.cpd",
    "description": "Force-method solution for a propped cantilever carrying a point force F at distance a from the fixed support, with the in-span peak at the load position.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -319,7 +319,7 @@
    "upstream": "Examples/Structural/Propped Cantilevers/Concentrated Moment.cpd",
    "description": "Propped cantilever loaded by a concentrated moment M at distance a, giving a constant shear and a bending diagram with a jump of M across the load section.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -338,7 +338,7 @@
    "upstream": "Examples/Structural/Propped Cantilevers/Linearly Distributed Load.cpd",
    "description": "Propped cantilever under a trapezoidal load defined by end intensities q_1 and q_2, locating the in-span peak from the zero of the shear V(x).",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -365,7 +365,7 @@
    "upstream": "Examples/Structural/Propped Cantilevers/Partially Distributed Load.cpd",
    "description": "Propped cantilever with a uniform load q acting on a stretch of length b between offsets a and c = l - a - b from the supports.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -384,7 +384,7 @@
    "upstream": "Examples/Structural/Propped Cantilevers/Uniformly Distributed Load.cpd",
    "description": "Full-span uniform load q on a propped cantilever, giving the textbook results M_A = q l^2 / 8, V_A = 5 q l / 8 and M_max = 9 q l^2 / 128 at x = 5 l / 8.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -403,7 +403,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Concentrated Force.cpd",
    "description": "Single point force F at distance a from the left support, with reactions V_A = F (l - a) / l, V_B = -F a / l and the bending peak M_max = F (l - a) a / l at the load.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -422,7 +422,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Concentrated Moment.cpd",
    "description": "Concentrated moment M applied at distance a, giving a constant shear V = M / l and a bending diagram with a step of M at the load section.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -441,7 +441,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Linearly Distributed Load.cpd",
    "description": "Trapezoidal load defined by end intensities q_1 and q_2, locating the in-span peak from the zero of V(x) and falling back to the uniform and triangular special cases.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -460,7 +460,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Partially Distributed Load.cpd",
    "description": "Uniform load q acting on a stretch of length b between offsets a and c = l - a - b, with a guard against an invalid load length when a + b > l.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -479,7 +479,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Concentrated Forces.cpd",
    "description": "Series of n equal forces F spaced at a = l / (n + 1), with M_max taken at mid-span and switching between the odd-n and even-n closed forms.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -498,7 +498,7 @@
    "upstream": "Examples/Structural/Simply Supported Beams/Uniformly Distributed Load.cpd",
    "description": "Full-span uniform load q, recovering the textbook results M_max = q l^2 / 8 and V_max = q l / 2.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -517,7 +517,7 @@
    "upstream": "Examples/Structural/Reinforced Concrete/Areas of Reinforcement Bars.cpd",
    "description": "Lookup table that returns the total reinforcement area A_s for a chosen bar diameter and bar count, with the cells highlighting the picked combination on hover.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": true,
    "read": false,
    "assets": [
@@ -539,7 +539,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -561,7 +561,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -583,7 +583,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -605,7 +605,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -627,7 +627,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -653,7 +653,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -679,7 +679,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -701,7 +701,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -723,7 +723,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -745,7 +745,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": true,
    "read": false,
    "assets": [
@@ -783,7 +783,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": true,
    "read": false,
    "assets": [
@@ -821,7 +821,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -847,7 +847,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -873,7 +873,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -899,7 +899,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -925,7 +925,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -951,7 +951,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -977,7 +977,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1003,7 +1003,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1029,7 +1029,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1055,7 +1055,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1085,7 +1085,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1115,7 +1115,7 @@
     "EN 1992",
     "EN 1992-1-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1147,7 +1147,7 @@
     "EN 1998",
     "EN 1998-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1171,7 +1171,7 @@
     "EN 1998",
     "EN 1998-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1199,7 +1199,7 @@
     "EN 1998",
     "EN 1998-1"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1226,7 +1226,7 @@
     "EN 1993-1-1",
     "EN 1993-1-5"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1249,7 +1249,7 @@
     "EN 1993-1-1",
     "EN 1993-1-5"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1276,7 +1276,7 @@
     "EN 1993-1-1",
     "EN 1993-1-5"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": true,
    "assets": [
@@ -1316,7 +1316,7 @@
     "EN 1991",
     "EN 1991-1-3"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1338,7 +1338,7 @@
     "EN 1991",
     "EN 1991-1-3"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1360,7 +1360,7 @@
     "EN 1991",
     "EN 1991-1-4"
    ],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1621,7 +1621,7 @@
    "upstream": "Examples/Engineering/Elastic Analysis/Deep Beam.cpd",
    "description": "Plane-stress analysis of a simply-supported deep beam under a partial uniform load, using a sine-series decomposition of the load and reaction. Recovers σ_x, σ_y and τ_xy for arbitrary length, height, load span and support width — an analytical baseline for FE checks.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1640,7 +1640,7 @@
    "upstream": "Examples/Engineering/Elastic Analysis/Rectangular Slab.cpd",
    "description": "Navier double-trig-series solution for a thin rectangular plate on simple supports under uniform load. Returns maximum deflection and bending moments M_x, M_y for arbitrary plan dimensions, thickness and elastic constants — a quick parametric check against slab FEA.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [
@@ -1659,7 +1659,7 @@
    "upstream": "Examples/Engineering/Elastic Analysis/Saint-Venant Torsion.cpd",
    "description": "Closed-form Saint-Venant torsion of a rectangular cross-section, evaluating the shear-stress field τ_zx, τ_zy and torsional rigidity from a single Fourier series. A hand-check baseline for FE torsion models and for simplified rectangular-section design formulas.",
    "codes": [],
-   "ui": false,
+   "ui": true,
    "scripts": false,
    "read": false,
    "assets": [

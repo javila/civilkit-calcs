@@ -207,10 +207,10 @@
 '</select></p>
 #show
 '<table id="section">
-'<tr><td style="padding-right: 10px;">'h = ? {550}'mm, </td><td>'t_w = ? {19}'mm </td></tr>
-'<tr><td style="padding-right: 10px;">'b_f1 = ? {200}'mm,</td><td>'t_f1 = ? {30}'mm</td></tr>
-'<tr><td style="padding-right: 10px;">'b_f2 = ? {200}'mm,</td><td>'t_f2 = ? {30}'mm</td></tr>
-'<tr><td style="padding-right: 10px;">'r = ? {19}'mm, </td><td style="display:none">'r_2 = ? {11.9}'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'h = 550'mm, </td><td>'t_w = 19'mm </td></tr>
+#UI '<tr><td style="padding-right: 10px;">'b_f1 = 200'mm,</td><td>'t_f1 = 30'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'b_f2 = 200'mm,</td><td>'t_f2 = 30'mm</td></tr>
+#UI '<tr><td style="padding-right: 10px;">'r = 19'mm, </td><td style="display:none">'r_2 = 11.9'mm</td></tr>
 '</table>
 h_w = h - t_f1 - t_f2'mm
 #pre
@@ -220,7 +220,7 @@ h_w = h - t_f1 - t_f2'mm
 '<option value="0">Welded</option>
 '</select></p>
 #show
-'<p style="display:none;" id="rolled">'rolled = ? {1}'</p>
+#UI '<p style="display:none;" id="rolled">'rolled = 1'</p>
 #post
 #if rolled
 	'Section type - Rolled
@@ -234,8 +234,8 @@ h_w = h - t_f1 - t_f2'mm
 '</td><td>
 '<img alt="I-section.png" width="160" src="./i-section.png">
 '</td></tr></table>
-'Yield strength - 'f_y = ? {235}'MPa
-'Tensile strength - 'f_u = ? {360}'MPa
+#UI 'Yield strength - 'f_y = 235'MPa
+#UI 'Tensile strength - 'f_u = 360'MPa
 'Modulus of elasticity - 'E = 210000'MPa
 'Private factors of safety:
 γ_M0 = 1.05', 'γ_M2 = 1.25

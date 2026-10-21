@@ -69,6 +69,7 @@ async function lintAndMark(
     const markers: monaco.editor.IMarkerData[] = filtered.map(
         (diag: LintDiagnostic) => ({
             severity: mapSeverity(diag.severityId),
+            code: diag.code,
             message: diag.message,
             startLineNumber: diag.line + 1,
             startColumn: diag.column + 1,
