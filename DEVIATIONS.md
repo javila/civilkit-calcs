@@ -58,6 +58,40 @@ so the output is unchanged for every terminating case.
 
 **Stubs changed:** none.
 
+## D3. Worksheet scripts run only from a library list (browser build)
+
+CalcpadCE passes HTML in comments through to the output, including `<script>`, and runs every
+script a worksheet carries, from any address. The browser build gives each rendered page a
+Content-Security-Policy instead (`web/calcpad-web/src/wasm/script-policy.ts`):
+
+* `script-src` allows inline code (worksheet glue) and only the exact file URLs on the library
+  list, never a whole host. Each listed `<script src>` gets `integrity=` (sha384) and
+  `crossorigin="anonymous"`; module files are checked through an import map.
+* A `<script src>` that is not on the list is not loaded and is replaced by a note naming its
+  URL; anything else the policy stops while the page runs (a module import, a script added
+  later, an image from another site) is reported by a note as well. There is no prompt.
+* `connect-src blob:` and `form-action 'none'`: a script cannot send data anywhere. `blob:`
+  is allowed because it is data the page made itself (the DXF examples hand a drawing built in
+  the page to dxf-viewer that way); it cannot reach another host.
+* Images, fonts and styles come only from `data:`, `blob:`, inline styles and the app's origin.
+
+The list starts with the eight libraries the upstream examples use (jQuery 3.6.3, D3 3.5.17,
+Plotly 2.26.0, three.js 0.145 with OrbitControls, three.js 0.160.0 as a module, dxf-viewer
+1.0.46 with its module dependencies, dxf-writer 1.18.4, model-viewer 3.0.1), hashed by
+`tools/gen_library_defaults.mjs` from the files as served. Settings > Libraries removes and
+restores entries and adds new ones after showing the fetched file's size and hash. Effects on
+the upstream examples: `Toc.cpd`'s relative `./toc.js` is not a library and is blocked, the
+texture image in `Parametric 3D Drawing of RC Beam.cpd` comes from another site and is
+blocked, and `Bolt 3D Model.cpd` cannot fetch its `.glb` model.
+
+Because the added `integrity`/`crossorigin` attributes are part of the page (Save HTML keeps
+them too), `3D Plot with Plotly.cpd` in the browser sample no longer matches its stub byte for
+byte: the browser comparison reads 27 of 30, the third difference being those two attributes.
+
+The print frame has no scripts at all: the page is stripped of script, frame, object and
+embed elements, `on*` attributes and `javascript:` URLs, and the frame is sandboxed with
+`allow-same-origin allow-modals` (`print.ts`).
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

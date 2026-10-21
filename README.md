@@ -91,6 +91,10 @@ What works in the browser:
 * PDF by printing: Print PDF and Export > Save PDF print the report through the browser's
   print dialog, with the paper size, orientation and margins of the PDF settings;
 * Save HTML.
+* worksheet scripts (Calcpad passes `<script>` in comments through) load only the libraries
+  on Settings > Libraries, from their exact CDN addresses with SRI hashes, and cannot make
+  network requests; anything else is blocked with a note in the preview (DEVIATIONS.md, D3).
+  Insert > Libraries adds a listed library's script tag.
 
 What does not: Word export, compiled `.cpdz` worksheets and portable packages need
 Calcpad.Server and say so. Linting, semantic highlighting, go-to-definition/rename, prettify
