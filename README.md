@@ -1,77 +1,96 @@
-# calcpad-rs
+# CivilKit Calcs
 
-A Rust port of the [CalcpadCE](https://github.com/imartincei/CalcpadCE) calculation engine
-(Calcpad.Core), ported from commit `0cf438f`. It covers the scalar engine (real and complex
-values, units, operators, functions, custom functions, solve blocks, the directives and
-settings), vectors and matrices including the high performance (HP) types and their
-solvers, `$Plot`/`$Map` SVG plots and charts, the markdown modes (a port of the Markdig
-subset that CalcpadCE uses), `#UI` input forms, and `#read`/`#write`/`#append` with CSV,
-text and Excel (.xlsx/.xlsm) files. The editor's language services (Calcpad.Highlighter:
-tokenizer, linter, content resolution, definitions, prettifier and the snippet library) are
-ported as `calcpad-highlighter`.
+CivilKit Calcs is a browser-based engineering calculation sheet. You write a worksheet in the
+CalcpadCE language (equations with units, vectors and matrices, plots, input forms, text and
+tables), and the page calculates it, shows a formatted report, and exports it to PDF (by
+printing), Word and Excel. Everything runs in the page: the calculation engine is Rust compiled to
+WebAssembly, and no calculation request leaves the browser.
 
-Word export (calcpad-docx, a port of Calcpad.OpenXml's Word path) is in the CLI
-(`Cli input.cpd output.docx`) and the browser (Export > Save Word). Not ported: raster
-(SkiaSharp) plot output, `#ProjectPath` and `#LibraryPath` path roots, and compiled `.cpdz`
-worksheets. Raster plots report "not supported" errors.
+* Live demo: https://mageaustralia.github.io/civilkit-calcs/ (placeholder until the first deploy)
+* Source: https://github.com/mageaustralia/civilkit-calcs
+* Version: see [CHANGELOG.md](CHANGELOG.md). Releases are numbered YY.M.N (26.10.1 is the first release of
+  October 2026) and tagged `v26.10.1`.
+
+Status: early. The project is not affiliated with the authors of CalcpadCE.
+
+## Credit: this is a derivative of CalcpadCE
+
+CivilKit Calcs is built on [CalcpadCE](https://github.com/imartincei/CalcpadCE), the MIT-licensed
+continuation of Calcpad by Nedelcho Ganchovski (Proektsoft) and contributors. This repository
+contains:
+
+* CalcpadCE's web frontend (`web/`, imported from `Calcpad.Web/frontend`, with changes), which
+  provides the editor, sidebar, settings, the worksheet language's editor support and the report view;
+* the CalcpadCE worksheet language and its example worksheets (the 101 bundled samples are copies
+  of CalcpadCE's `Examples/`, see `web/calcpad-web/public/samples/NOTICE.md`);
+* Rust reimplementations of CalcpadCE's calculation engine (Calcpad.Core), its editor language
+  services (Calcpad.Highlighter: tokenizer, linter, prettifier, snippet library) and its Word
+  export path (Calcpad.OpenXml). They follow the upstream module structure so that upstream
+  changes can be followed file by file, and they are tested against upstream's own test classes
+  and its expected-output files (see Tests below).
+
+The upstream copyright and licence are kept in [LICENSE](LICENSE) and [NOTICE](NOTICE). The upstream
+versions this work tracks are listed in NOTICE: the frontend 8.0.0-beta3-preview, the engine ported
+from commit `0cf438f`. CalcpadCE's own version is tracked there, separately from the CivilKit Calcs version.
+
+## What we changed
+
+* **Engine:** the Rust engine, compiled to WebAssembly, replaces the .NET engine and the server it
+  runs in. The page answers the server API itself (`web/calcpad-web/src/wasm/transport.ts`).
+  The engine wasm is 1.74 MB raw and 656 KB gzipped; it is built at opt-level `s`, which ran a heavy
+  `$Map` sheet 1.5 times faster than the size-optimised build.
+* **Editor services in a second wasm:** the highlighter, linter, prettifier, go-to-definition and
+  the snippet library are a separate module (`calcpad-highlighter-wasm`, 351 KB gzipped) that loads
+  on first use.
+* **Word export:** `Export > Save Word` builds the .docx in the page (module `calcpad-docx-wasm`,
+  loaded on first use). Equations are written as Office Math.
+* **Excel export:** a Report sheet that mirrors the worksheet (headings and text, each equation as
+  a row of name, expression, expression with values, value and unit, tables as cell ranges,
+  `$Plot` as native editable charts with their data on a Plot data sheet, other drawings as
+  pictures), then a Variables sheet, one sheet per vector or matrix, and an Inputs sheet.
+* **`#UI` input forms:** entries, drop-downs, radio buttons, checkboxes and data grids. A chosen
+  select, radio or checkbox is carried into the report, PDF and Word output.
+* **Dark theme:** the preview keeps form controls, drawings and plots readable.
+* **Samples browser:** 101 worksheets, all copied from CalcpadCE's examples (structural and maths),
+  with groups, search and a preview. We rewrote their deprecated `? {default}` input fields as
+  `#UI` declarations, and kept a conversion only where the engine renders it like the original.
+* **Ribbon interface:** a tabbed ribbon (ten tabs, a quick-access strip) in place of the menu bar. Each
+  palette opens a Common section above the whole snippet library, which the ribbon reads from the same
+  highlighter call as the sidebar's Insert tab (1166 snippets, all reachable from the ribbon).
+* **Model bindings:** a worksheet input can carry a `civilkit: bind` comment that ties it to a
+  quantity of a structural model. The parser and the in-app display exist; connecting a model does
+  not yet. The generic specification is in [docs/model-bindings.md](docs/model-bindings.md).
+* **Worksheet scripts:** scripts in worksheets run only from a library list, under a
+  Content Security Policy, with the print frame sandboxed (DEVIATIONS.md, D3).
+* **Known deviations** from CalcpadCE's behaviour are listed one by one, with the test that pins
+  each, in [DEVIATIONS.md](DEVIATIONS.md). Not supported: raster (SkiaSharp) plots,
+  `#ProjectPath`/`#LibraryPath` path roots, and compiled `.cpdz` worksheets.
+
+What has and has not been checked for the exports: the Excel workbook was checked by opening it in
+openpyxl and in LibreOffice; it has not been opened in Microsoft Excel. The Word document was
+checked in LibreOffice only; it has not been opened in Microsoft Word. Printing to PDF goes through
+the browser's print dialog and has the browser's header and footer.
 
 ## Layout
 
-* `calcpad-core`: the engine. No threads; `#include` goes through the
-  `parsers::macro_parser::FileProvider` trait and `#read`/`#write` through
-  `data_files::DataFiles` (the disk natively, the page's files in the browser).
-  `openxml` reads and writes the cell ranges of Excel workbooks (zip and XML, no SDK). Module names follow the Calcpad.Core folders
-  (`base_types`, `calculator`, `output`, `parsers::math_parser`, `parsers::expression_parser`,
-  ...), so a C# file can be found next to its port.
+* `calcpad-core`: the engine. No threads; `#include` goes through a file-provider trait and
+  `#read`/`#write` through `data_files::DataFiles` (the disk natively, the page's files in the
+  browser). `openxml` reads and writes Excel cell ranges (zip and XML, no SDK). Module names follow
+  the Calcpad.Core folders.
 * `calcpad-cli`: the `Cli` binary, compatible with the batch mode of Calcpad.Cli
-  (`Cli input.cpd output.html -b -s`).
-* `calcpad-highlighter`: the port of Calcpad.Highlighter, with the same folder names
-  (`tokenizer`, `content_resolution`, `linter`, `html_comment`, `snippets`, `prettifier`,
-  `parsing`). `api` answers the Calcpad.Server endpoints `highlight`, `lint`, `definitions`,
-  `symbol-at-position`, `prettify` and `snippets` (request JSON to response JSON, UTF-16
-  columns); `#include` files come from an in-memory file system (`api::MemoryFiles`) or, for
-  native hosts, `content_resolution::IncludeProvider`. The snippet data is
-  `snippets/snippets.json`, generated once from the C# object initializers.
-* `calcpad-highlighter-wasm`: WebAssembly bindings of `calcpad-highlighter`, a second wasm
-  that the page loads on first use (the editor's lint, highlight and snippet requests) and
-  that the engine worker loads to colour the code view.
-* `calcpad-wasm`: WebAssembly bindings (wasm-bindgen). `convert` answers what
-  Calcpad.Server's `POST /api/calcpad/convert` answers (the HTML page and the
-  `X-Calcpad-Errors` list); `#include` files come from an in-memory map the page fills.
-* `web/`: the CalcpadCE web editor (`Calcpad.Web/frontend`, MIT, see `web/LICENSE`), with
-  its HTTP transport answered in the page by the wasm engine
-  (`web/calcpad-web/src/wasm/transport.ts`). No calculation request leaves the page.
-* `tools/`: generators for messages and exception constructors, the xunit transcriber, the
-  stub comparison harness and `build_wasm.sh`.
+  (`Cli input.cpd output.html -b -s`, also `.docx` and `.xlsx` outputs).
+* `calcpad-highlighter` and `calcpad-highlighter-wasm`: the editor language services and their
+  WebAssembly binding. The snippet data is `calcpad-highlighter/src/snippets/snippets.json`.
+* `calcpad-wasm`: the engine's WebAssembly binding (wasm-bindgen).
+* `calcpad-docx` and `calcpad-docx-wasm`: the Word and Excel writers and their binding.
+* `web/`: the web app. `web/calcpad-frontend` is the shared frontend, `web/calcpad-web` the page
+  (Vue, Monaco), `web/e2e` the browser checks.
+* `tools/`: generators, the test runner, `build_wasm.sh`, `set_version.mjs`.
+* `docs/`: [DEPLOY.md](docs/DEPLOY.md) and the model-bindings specification.
 
-## Gates
+## Build and run
 
-```sh
-cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-```
-
-`calcpad-highlighter/tests` transcribes CalcpadCE's `Calcpad.Tests/Highlighter` xunit classes
-(plus `UnwrappedListingHighlightTests` in `calcpad-wasm/tests`); `tests/data` holds the
-`valid/` and `errors/` worksheets of the upstream linter corpus.
-
-`cargo test` runs the transcribed CalcpadCE xunit tests (`calcpad-core/tests/xunit_*.rs`,
-regenerated with `tools/transcribe_all.sh`; `ui_directive.rs` and `data_exchange.rs` are
-transcribed by hand) and the deviation tests. The HP comparison classes are heavy, so on a
-busy machine run the suite through `python3 -I tools/run_tests.py [--minutes N]`, which
-stops every test process when the time limit passes and reports a run that ended early.
-
-Conformance against the committed `*.html.stub` files (uses the upstream
-`compare_renderings.py` for discovery, the denylist and number reconciliation):
-
-```sh
-python3 -m venv .venv && .venv/bin/pip install beautifulsoup4==4.14.3
-cargo build --release
-.venv/bin/python -I tools/compare_stubs.py --ref ../calcpad-ref [--filter path] [--diff]
-```
-
-## Browser build
-
-Needs the `wasm32-unknown-unknown` target, the wasm-bindgen CLI 0.2.122 (the version the
+Needs Rust with the `wasm32-unknown-unknown` target, the wasm-bindgen CLI 0.2.122 (the version the
 crate pins), node 22 and, optionally, `wasm-opt`.
 
 ```sh
@@ -80,75 +99,48 @@ cd web && npm install && npm run build    # web/calcpad-web/dist
 npm run preview -- --port 4173            # then open http://localhost:4173/
 ```
 
-`tools/build_wasm.sh` builds both modules (`engine` or `highlighter` builds one). The
-highlighter is a separate wasm because the two in one module are 775 KB gzipped (the engine
-alone is 512 KB, the highlighter alone 351 KB, without wasm-opt).
+`npm run dev` serves the same with hot reload. The production build is static files only; it
+runs from any folder of any static host. To build for a fixed path, set the base:
+`CALCS_BASE=/calcs/ npm run build` (see [docs/DEPLOY.md](docs/DEPLOY.md)).
 
-`npm run dev` serves the same with hot reload. The end-to-end check (headless Chromium via
-Playwright: typing, a 30 worksheet sample through Export > Save HTML, network capture, the
-server-only exports) and its stub comparison:
+The command line engine: `cargo build --release`, then `target/release/Cli input.cpd output.html`.
+
+## Tests
 
 ```sh
-cd web && npx playwright install chromium && node e2e/browser-check.mjs && node e2e/c-style-check.mjs
-cd .. && .venv/bin/python -I tools/compare_browser.py --ref ../calcpad-ref
+cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
-The production build (`web/calcpad-web/dist`) is static files only and runs from any
-folder of any static host; nothing it calculates goes over the network.
+`cargo test` runs the xunit classes of CalcpadCE transcribed to Rust (`calcpad-core/tests/xunit_*.rs`,
+regenerated with `tools/transcribe_all.sh`), the highlighter's transcribed tests and linter corpus,
+and the deviation tests. The HP comparison classes are heavy; on a busy machine run
+`python3 -I tools/run_tests.py [--minutes N]`, which stops every test process when the time limit
+passes. Conformance against upstream's expected-output files (`*.html.stub`):
 
-What works in the browser:
+```sh
+python3 -m venv .venv && .venv/bin/pip install beautifulsoup4==4.14.3
+cargo build --release
+.venv/bin/python -I tools/compare_stubs.py --ref ../calcpad-ref [--filter path] [--diff]
+```
 
-* the editor, preview, unwrapped view, report view, Variables and TOC panels;
-* `#UI` input forms (entries, dropdowns, radio buttons, checkboxes and datagrids): enter
-  values in the Input view, the report uses them, Save values writes them into the document;
-* Samples (File > Samples, or the link on an empty editor): 101 of CalcpadCE's structural and
-  maths examples (`tools/gen_samples.mjs`, attribution in `public/samples/NOTICE.md`) with
-  groups, search, a design code filter and a preview; Open makes an untitled copy and puts the
-  sample's images and data files into the library;
-* File menu (menu bar, top): new, open (picker or drag and drop), save and save as (in
-  place where the browser has the File System Access API, otherwise a download), recent
-  worksheets, Ctrl+O / Ctrl+S / Ctrl+Shift+S;
-* a file library for `#include` and `#read`: every opened worksheet and every added or
-  dropped file (CSV, text, .xlsx/.xlsm) is kept in the browser (IndexedDB) and resolved at
-  "/<name>";
-* `#read` from CSV, text and Excel files, `#write`/`#append` to CSV and Excel: the written
-  file joins the library and downloads whenever its content changes;
-* PDF by printing: Print PDF and Export > Save PDF print the report through the browser's
-  print dialog, with the paper size, orientation and margins of the PDF settings;
-* Save HTML.
-* worksheet scripts (Calcpad passes `<script>` in comments through) load only the libraries
-  on Settings > Libraries, from their exact CDN addresses with SRI hashes, and cannot make
-  network requests; anything else is blocked with a note in the preview (DEVIATIONS.md, D3).
-  Insert > Libraries adds a listed library's script tag.
+Browser checks (headless Chromium via Playwright, against the built `dist`):
 
-* The bundled samples declare their inputs with `#UI` instead of upstream's deprecated `name = ? {default}` fields, rewritten by `tools/gen_samples.mjs` and checked against the original's rendering (DEVIATIONS.md, D8); the editor offers the same rewrite as a quick fix ("Convert to #UI") on the linter's warning.
-* File > Export Excel saves the worksheet as a workbook: a Report sheet that mirrors the page
-  (headings and text, each equation as a row of name, expression, expression with the values,
-  value and unit, tables as cell ranges, each `$Plot` as a native editable chart with its data on a "Plot data" sheet, other drawings as pictures), then all variables
-  with values and units, a sheet per vector or matrix, and the inputs (calcpad-rs's own,
-  DEVIATIONS.md, D7; built by calcpad-docx-wasm, also `Cli input.cpd output.xlsx`).
-* Save Word writes the .docx in the page: the engine renders the equations as Office Math and
-  calcpad-docx-wasm, a separate module loaded on the first export (about 680 KB gzipped, with
-  DejaVu Sans fetched for the text of plots), builds the document (DEVIATIONS.md, D6).
+```sh
+cd web && npx playwright install chromium
+node e2e/browser-check.mjs        # worksheets through the UI, input forms, files, exports, scripts, printing
+node e2e/ribbon-check.mjs --url http://127.0.0.1:4173/ --lint
+node e2e/verify-ribbon-snippets.mjs --cli ../target/release/Cli
+node ../tools/set_version.mjs --check
+```
 
-What does not: compiled `.cpdz` worksheets and portable packages need Calcpad.Server and say
-so. Linting, semantic highlighting, go-to-definition/rename, prettify, the snippet library and
-the colouring of the code view come from `calcpad-highlighter-wasm`, a second wasm module (see
-DEVIATIONS.md, H1 to H10 for where it differs). The PDF has the browser's header and footer,
-not Calcpad.Server's.
+## Contributing
 
-## Status
-
-* Tests: 4828 pass (the transcribed xunit classes, UiDirectiveTests and the Data tests, the
-  deviation and unit tests); 2 raster plot tests are ignored.
-* Stubs (369 worksheets): 351 PASS, 16 PNG-PIXEL (`$Map` rasters with equal pixels but a
-  different deflate stream), 1 NOISE, 1 FAIL (libm last digit), none out of scope. See
-  `tools/classify_failures.py`, PORT_LOG.md and DEVIATIONS.md.
-* Browser: 30 worksheets through the UI, 28 match the stubs; the other two differ only by
-  one trailing empty paragraph, a Calcpad.Server versus Calcpad.Cli input difference (see
-  DEVIATIONS.md). The `.wasm` is 1.30 MB (517 KB gzipped).
+Issues and pull requests are welcome. Keep changes to the engine behind a test; where behaviour
+differs from CalcpadCE, record it in DEVIATIONS.md with the test that pins it. Run the gates above
+before sending a change. To bump the version, see [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Licence
 
-MIT, see LICENSE and NOTICE. The original work is
-Copyright (c) 2026 CalcpadCE Contributors and Copyright (c) 2014-2026 Nedelcho Ganchovski.
+MIT. See [LICENSE](LICENSE) (the upstream licence text and copyright lines are kept, with ours
+added), [NOTICE](NOTICE) and [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). Bundled fonts,
+the spreadsheet widget and the sample worksheets carry their own licence files next to them.
