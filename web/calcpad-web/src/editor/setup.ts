@@ -1,5 +1,6 @@
 import * as monaco from 'monaco-editor';
 import { calcpadLanguageConfiguration, calcpadMonarchLanguage } from './language';
+import { registerSheetLanguage } from './sheet-language';
 import { calcpadDarkTheme, calcpadLightTheme } from './theme';
 
 /**
@@ -11,6 +12,7 @@ export function registerCalcpadLanguage(): void {
     monaco.languages.register({ id: 'calcpad', extensions: ['.cpd', '.cpdz'] });
     monaco.languages.setLanguageConfiguration('calcpad', calcpadLanguageConfiguration);
     monaco.languages.setMonarchTokensProvider('calcpad', calcpadMonarchLanguage);
+    registerSheetLanguage();
 }
 
 export function registerCalcpadTheme(): void {

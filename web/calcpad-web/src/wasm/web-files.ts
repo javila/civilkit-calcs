@@ -14,6 +14,8 @@
 // downloaded when their content changes.
 
 import { replaceCStyleOperators } from './c-style';
+import { isSheetText, withMarker } from './sheet';
+import { newSheet } from './sheet-ui';
 import type { FileLibrary } from './library';
 import { dbRequest, libraryPath, STORE_HANDLES } from './library';
 import type { EngineFile } from './transport';
@@ -50,8 +52,8 @@ export interface WebFilesOptions {
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
 const MAX_RECENT = 10;
-const WORKSHEET_EXT = /\.cpd$/i;
-const ACCEPT_ALL = '.cpd,.txt,.csv,.xlsx,.xlsm,.xmcd,.mcdx';
+const WORKSHEET_EXT = /\.(cpd|sheet)$/i;
+const ACCEPT_ALL = '.cpd,.sheet,.txt,.csv,.xlsx,.xlsm,.xmcd,.mcdx';
 const IMPORT_EXT = /\.(xmcd|mcdx)$/i;
 
 type Handle = FileSystemFileHandle;
@@ -191,7 +193,7 @@ export class WebFiles {
                     multiple: true,
                     types: [{
                         description: 'Calcpad worksheets and data',
-                        accept: { 'text/plain': ['.cpd', '.txt', '.csv'], 'application/vnd.ms-excel': ['.xlsx', '.xlsm'], 'application/xml': ['.xmcd', '.mcdx'] },
+                        accept: { 'text/plain': ['.cpd', '.sheet', '.txt', '.csv'], 'application/vnd.ms-excel': ['.xlsx', '.xlsm'], 'application/xml': ['.xmcd', '.mcdx'] },
                     }],
                 });
             } catch {
@@ -237,7 +239,8 @@ export class WebFiles {
             return;
         }
         // As the desktop app opens a file: C-style operator shortcuts ("%%", "==") become Calcpad's.
-        tabs.openFile(path, replaceCStyleOperators(content));
+        // A sheet keeps its own operators; a .sheet file gets the marker line the editor goes by.
+        tabs.openFile(path, /\.sheet$/i.test(path) ? withMarker(content) : isSheetText(content) ? content : replaceCStyleOperators(content));
     }
 
     async openRecent(entry: RecentEntry): Promise<void> {
@@ -270,12 +273,14 @@ export class WebFiles {
         let path = tab.filePath;
         let handle = path ? this.handles.get(path) : undefined;
         if (saveAs || !path) {
-            const suggested = path ? baseName(path) : `${tab.title.replace(/\.cpd$/i, '')}.cpd`;
+            const isSheet = isSheetText(content);
+            const ext = isSheet ? 'sheet' : 'cpd';
+            const suggested = path ? baseName(path) : `${tab.title.replace(/\.(cpd|sheet)$/i, '')}.${ext}`;
             if (picker.showSaveFilePicker) {
                 try {
                     handle = await picker.showSaveFilePicker({
                         suggestedName: suggested,
-                        types: [{ description: 'Calcpad worksheet', accept: { 'text/plain': ['.cpd'] } }],
+                        types: [isSheet ? { description: 'Sheet (Markdown style)', accept: { 'text/plain': ['.sheet'] } } : { description: 'Calcpad worksheet', accept: { 'text/plain': ['.cpd'] } }],
                     });
                 } catch {
                     return false; // cancelled
@@ -285,7 +290,7 @@ export class WebFiles {
                 const name = window.prompt('Save as', suggested);
                 if (!name) return false;
                 handle = undefined;
-                path = libraryPath(/\.\w+$/.test(name) ? name : `${name}.cpd`);
+                path = libraryPath(/\.\w+$/.test(name) ? name : `${name}.${ext}`);
             }
         }
         if (handle) {
@@ -402,6 +407,7 @@ body{display:flex;flex-direction:column}
         };
         const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
         item('New', () => this.newWorksheet());
+        item('New sheet (Markdown style)', () => newSheet(this.o.tabs()));
         item('Open...', () => void this.open(), `${mod}+O`);
         if (this.o.importer) item('Import worksheet...', () => void this.o.importer!.pick());
         if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());

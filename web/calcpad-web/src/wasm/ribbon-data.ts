@@ -539,6 +539,11 @@ export const RIBBON: RibbonTab[] = [
                 action('x-samples', 'Samples', 'samples', 'Browse the sample worksheets', 'samples'),
                 action('x-library', 'Library', 'recent', 'Recent worksheets and the #include and #read library', 'filemenu'),
             ] },
+            { name: 'Sheet syntax', buttons: [
+                action('x-newsheet', 'New sheet', 'file', 'New sheet (Markdown style): prose, name: value lines and LaTeX that compile to Calcpad', 'newsheet'),
+                action('x-compiled', 'Show compiled', 'list', 'Show the Calcpad the active sheet compiles to', 'showcompiled'),
+                action('x-convert', 'Convert to Calcpad', 'report', 'Replace the active sheet with its compiled Calcpad', 'convertsheet'),
+            ] },
             { name: 'Insert panel', buttons: [
                 action('x-insert', 'Insert tab', 'plus', 'Symbols, functions and snippets in the sidebar', 'tab:insert'),
                 action('x-settings', 'Settings', 'settings', 'Settings', 'settings'),

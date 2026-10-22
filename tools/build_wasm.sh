@@ -4,9 +4,10 @@
 #   calcpad-docx-wasm         the Word export (loaded on demand)
 #   calcpad-highlighter-wasm  the editor's highlighting, linting and snippets (loaded on first use)
 #   calcpad-import-xmcd-wasm  the worksheet importer (loaded when a worksheet is imported)
+#   calcpad-sheet-wasm        the sheet syntax compiler (loaded when a sheet is opened)
 # Requires the wasm32-unknown-unknown target, the wasm-bindgen CLI (same version as the
 # wasm-bindgen crate) and, optionally, wasm-opt (binaryen).
-# Usage: tools/build_wasm.sh [engine|docx|highlighter|import]   (default: all)
+# Usage: tools/build_wasm.sh [engine|docx|highlighter|import|sheet]   (default: all)
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p target/tmp && export TMPDIR="$PWD/target/tmp"
@@ -14,12 +15,13 @@ OUT=web/calcpad-web/public/wasm
 # Panic messages embed source paths; keep the builder's home folder out of the shipped modules.
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/build"
 
-for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_xmcd_wasm; do
+for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_xmcd_wasm calcpad_sheet_wasm; do
   case $m in
     calcpad_wasm) crate=calcpad-wasm; profile=wasm ;;
     calcpad_docx_wasm) crate=calcpad-docx-wasm; profile=wasm-size ;;
     calcpad_highlighter_wasm) crate=calcpad-highlighter-wasm; profile=wasm-size ;;
     calcpad_import_xmcd_wasm) crate=calcpad-import-xmcd-wasm; profile=wasm-size ;;
+    calcpad_sheet_wasm) crate=calcpad-sheet-wasm; profile=wasm-size ;;
   esac
   case "${1:-all}" in
     all) ;;
@@ -27,6 +29,7 @@ for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_
     docx) [ $m = calcpad_docx_wasm ] || continue ;;
     highlighter) [ $m = calcpad_highlighter_wasm ] || continue ;;
     import) [ $m = calcpad_import_xmcd_wasm ] || continue ;;
+    sheet) [ $m = calcpad_sheet_wasm ] || continue ;;
   esac
   cargo build -p $crate --target wasm32-unknown-unknown --profile $profile
   wasm-bindgen target/wasm32-unknown-unknown/$profile/$m.wasm --target web --no-typescript --out-dir "$OUT"

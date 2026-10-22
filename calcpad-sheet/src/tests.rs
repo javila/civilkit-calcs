@@ -3,7 +3,7 @@ use serde_json::Value;
 
 const SAMPLES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../web/calcpad-web/public/samples/Sheet syntax/"
+    "/../web/calcpad-web/public/sheet-samples/"
 );
 
 fn sample(name: &str) -> String {
@@ -145,6 +145,9 @@ fn mixing_sample() {
 fn every_sample_compiles_cleanly() {
     for e in std::fs::read_dir(SAMPLES).unwrap() {
         let p = e.unwrap().path();
+        if p.extension().is_none_or(|x| x != "sheet") {
+            continue;
+        }
         let src = std::fs::read_to_string(&p).unwrap();
         assert!(is_sheet(&src), "{p:?} has the marker");
         let (c, _, errs) = render(&src);

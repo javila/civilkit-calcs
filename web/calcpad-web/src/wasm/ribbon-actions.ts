@@ -3,6 +3,7 @@
 // after the colon as their argument.
 import type { WebFiles } from './web-files';
 import { getResolvedAppTheme } from '../editor/app-theme';
+import { convertToCalcpad, newSheet, showCompiled } from './sheet-ui';
 
 export interface RibbonCtx {
     files: WebFiles;
@@ -84,6 +85,9 @@ function dialog(title: string, paragraphs: string[]): void {
 type Handler = (c: RibbonCtx, arg: string) => void;
 export const ACTIONS: Record<string, Handler> = {
     new: c => c.files.newWorksheet(),
+    newsheet: c => newSheet(c.files.o.tabs()),
+    showcompiled: c => void showCompiled(c.editor()),
+    convertsheet: c => void convertToCalcpad(c.editor()),
     open: c => void c.files.open(),
     save: c => void c.files.save(),
     saveas: c => void c.files.save(true),

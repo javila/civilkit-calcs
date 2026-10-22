@@ -1,4 +1,6 @@
 import * as monaco from 'monaco-editor';
+import { SHEET_LANGUAGE, syncModelLanguage } from '../editor/sheet-language';
+import { isSheetText } from '../wasm/sheet';
 
 export interface TabState {
     id: string;
@@ -246,6 +248,7 @@ export class TabManager {
             viewState: null,
             dirty: model.getAlternativeVersionId() !== doc.savedVersionId,
             contentSub: model.onDidChangeContent(() => {
+                syncModelLanguage(model);
                 this.recomputeDirty(id);
                 for (const l of this.contentListeners) l(id);
             }),
@@ -424,7 +427,7 @@ export class TabManager {
         // can distinguish tabs. Path includes the tab id so the URI is stable
         // across rename and unique even when two tabs hold the same file path.
         const uri = monaco.Uri.parse(`inmemory:///${id}.cpd`);
-        const model = monaco.editor.createModel(opts.content, 'calcpad', uri);
+        const model = monaco.editor.createModel(opts.content, isSheetText(opts.content) ? SHEET_LANGUAGE : 'calcpad', uri);
         // Models created this way start with Monaco's global bracket-pair-colorization
         // default (enabled), independent of the `bracketPairColorization: { enabled: false }`
         // passed to individual editor instances in setup.ts - that option only takes effect

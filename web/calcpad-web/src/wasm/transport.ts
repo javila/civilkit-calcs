@@ -11,6 +11,8 @@
 //   snippets
 //   docx                                    calcpad-docx-wasm (Word export, loaded on demand)
 //   xlsx                                    calcpad-rs's own: the variables as an Excel workbook
+//   sheets                                  a request whose content is a sheet (sheet.ts) is compiled to
+//                                           Calcpad first, and line numbers in the answer are mapped back
 //   cpdz, portable, log-level, pdf          501: these need Calcpad.Server. PDF is printed by
 //                                           the browser instead (message-bridge.ts)
 
@@ -18,6 +20,9 @@ import { reportHeadMarkup } from './report-fonts';
 import { uiAssetsMarkup } from './ui-assets';
 import { libraries } from './library-list';
 import { applyScriptPolicy } from './script-policy';
+import { compileSheet, isSheetRequest, remapErrors, remapHtml, sheetLine } from './sheet';
+import type { SheetCompiled } from './sheet';
+import { hasTex, renderTex } from './sheet-tex';
 
 const API_PREFIX = '/api/calcpad/';
 /** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
@@ -278,6 +283,44 @@ class HighlighterWorker {
     }
 }
 
+/** A request body whose content is a sheet: the body with the compiled content, and the compile. */
+async function sheetBody(body: string | null, plainTex = false): Promise<{ body: string; sheet: SheetCompiled } | null> {
+    if (!body) return null;
+    let req: Record<string, unknown>;
+    try { req = JSON.parse(body) as Record<string, unknown>; } catch { return null; }
+    const key = Object.keys(req).find(k => k.toLowerCase() === 'content');
+    const path = Object.keys(req).find(k => k.toLowerCase() === 'sourcefilepath');
+    if (!key || typeof req[key] !== 'string') return null;
+    const content = req[key] as string;
+    if (!isSheetRequest(content, path ? String(req[path] ?? '') : '')) return null;
+    const sheet = await compileSheet(content, plainTex);
+    req[key] = sheet.text;
+    return { body: JSON.stringify(req), sheet };
+}
+
+interface LintDiag { line: number; column: number; endColumn: number; severityId: number; code?: string; message: string }
+
+/** Lint of a sheet: the engine's markers on the compiled text, moved to sheet lines, plus the compiler's own. */
+function sheetLint(out: string, sheet: SheetCompiled, source: string): string {
+    const lines = source.split('\n');
+    let diags: LintDiag[] = [];
+    try { diags = (JSON.parse(out) as { diagnostics?: LintDiag[] }).diagnostics ?? []; } catch { /* none */ }
+    const seen = new Set<string>();
+    const mapped: LintDiag[] = [];
+    for (const d of diags) {
+        const line = (sheet.map[d.line] ?? d.line);
+        const len = (lines[line] ?? '').replace(/\r$/, '').length;
+        const m = { ...d, line, column: 0, endColumn: Math.max(1, len) };
+        const key = `${line}|${d.message}`;
+        if (!seen.has(key)) { seen.add(key); mapped.push(m); }
+    }
+    for (const c of sheet.diagnostics) {
+        const len = (lines[c.line] ?? '').replace(/\r$/, '').length;
+        mapped.push({ line: c.line, column: 0, endColumn: Math.max(1, len), severityId: c.severity === 'error' ? 0 : 1, code: 'SHEET', message: c.message });
+    }
+    return JSON.stringify({ diagnostics: mapped });
+}
+
 function notAvailable(what: string, reason: string): Response {
     return new Response(`${what} is not available in the browser build of CivilKit Calcs: ${reason}.`, {
         status: 501,
@@ -357,7 +400,18 @@ export function installWasmTransport(): WasmTransport {
         }
         if (endpoint in HIGHLIGHTER_METHODS && method === 'POST') {
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
-            const out = await highlighter.call(HIGHLIGHTER_METHODS[endpoint], body, signal);
+            const sh = await sheetBody(body);
+            if (sh && (endpoint === 'prettify' || endpoint === 'symbol-at-position' || endpoint === 'highlight')) {
+                // Positions in the compiled text mean nothing in the sheet.
+                return new Response(endpoint === 'highlight' ? '{"tokens":[]}' : '{}', { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+            }
+            let out = await highlighter.call(HIGHLIGHTER_METHODS[endpoint], sh ? sh.body : body, signal);
+            if (sh && endpoint === 'lint') {
+                out = sheetLint(out, sh.sheet, (JSON.parse(body) as { content: string }).content);
+            } else if (sh && endpoint === 'definitions') {
+                // Every zero based line number in the answer is an output line.
+                out = out.replace(/("(?:line|lineNumber|startLine|endLine)"\s*:\s*)(\d+)/g, (_m, a: string, n: string) => a + String(sheetLine(sh.sheet, Number(n) + 1) - 1));
+            }
             // Where the server answers a status, the module answers {"status": n, "error": "..."}.
             if (out.startsWith('{"status":')) {
                 const err = JSON.parse(out) as { status?: number; error?: string };
@@ -371,12 +425,18 @@ export function installWasmTransport(): WasmTransport {
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
             const unwrap = url.searchParams.get('unwrap') === 'true';
-            const out = JSON.parse(await engine.convert(body, unwrap, signal)) as {
+            const sh = await sheetBody(body);
+            const out = JSON.parse(await engine.convert(sh ? sh.body : body, unwrap, signal)) as {
                 html?: string; errors?: unknown[]; status?: number; error?: string;
                 files?: { path: string; data: string }[];
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
+            if (sh) {
+                out.errors = remapErrors((out.errors ?? []) as { sourceLine?: number }[], sh.sheet);
+                if (!unwrap) html = remapHtml(html, sh.sheet);
+                if (hasTex(html)) html = await renderTex(html);
+            }
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             html = addPreviewDark(html);
@@ -398,7 +458,7 @@ export function installWasmTransport(): WasmTransport {
             // the Word writer (calcpad-docx). Images from the library go in as data: URLs.
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
-            const request = JSON.parse(body) as Record<string, unknown>;
+            const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
             request.captureOpenXml = true;
             request.enableUi = false;
             request.includeLineAnchors = false;
@@ -424,7 +484,7 @@ export function installWasmTransport(): WasmTransport {
             // vectors and matrices and the input fields.
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
-            const request = JSON.parse(body) as Record<string, unknown>;
+            const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
             request.exportXlsx = true;
             request.enableUi = false;
             request.includeLineAnchors = false;

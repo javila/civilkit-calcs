@@ -5,6 +5,10 @@
 // and Open, which makes a new untitled copy and puts the sample's files into the library.
 
 import { replaceCStyleOperators } from './c-style';
+import { isSheetText } from './sheet';
+
+/** A sheet keeps its own operators; a Calcpad worksheet gets the C-style ones converted. */
+const opened = (t: string) => (isSheetText(t) ? t : replaceCStyleOperators(t));
 import type { FileLibrary } from './library';
 import type { TabsLike } from './web-files';
 
@@ -29,10 +33,20 @@ const base = new URL(import.meta.env.BASE_URL || './', document.baseURI).href;
 let manifest: Promise<Manifest> | null = null;
 
 export function loadManifest(): Promise<Manifest> {
-    manifest ??= fetch(`${base}samples/manifest.json`).then((r) => {
+    manifest ??= (async () => {
+        const r = await fetch(`${base}samples/manifest.json`);
         if (!r.ok) throw new Error(`samples/manifest.json: ${r.status}`);
-        return r.json() as Promise<Manifest>;
-    });
+        const m = (await r.json()) as Manifest;
+        // Sheet syntax samples (our addition): their own folder and manifest, listed first.
+        try {
+            const sr = await fetch(`${base}sheet-samples/manifest.json`);
+            if (sr.ok) {
+                const sm = (await sr.json()) as Manifest;
+                return { groups: [...sm.groups, ...m.groups], samples: [...sm.samples, ...m.samples] };
+            }
+        } catch { /* the sheet samples are optional */ }
+        return m;
+    })();
     return manifest;
 }
 
@@ -116,7 +130,7 @@ export class SamplesBrowser {
 
     /** Opens `sample` as a new untitled worksheet and puts its files into the library. */
     async openSample(sample: Sample): Promise<void> {
-        const text = replaceCStyleOperators(new TextDecoder().decode(await bytes(sample.file)).replace(/^﻿/, ''));
+        const text = opened(new TextDecoder().decode(await bytes(sample.file)).replace(/^﻿/, ''));
         for (const a of sample.assets) await this.host.library.put(a.key, await bytes(a.url));
         this.host.tabs().newUntitled(text, sample.title);
         this.host.log('info', `Opened the sample "${sample.title}" as a new worksheet${sample.assets.length ? `; its ${sample.assets.length} file(s) are in the library` : ''}.`);
@@ -232,7 +246,7 @@ export class SamplesBrowser {
         const seq = ++this.previewSeq;
         frame.srcdoc = '<p style="font:13px sans-serif;color:#666">Rendering...</p>';
         try {
-            const text = replaceCStyleOperators(new TextDecoder().decode(await bytes(s.file)).replace(/^﻿/, ''));
+            const text = opened(new TextDecoder().decode(await bytes(s.file)).replace(/^﻿/, ''));
             const extraFiles: Record<string, string> = {};
             for (const a of s.assets) {
                 if (/\.(cpd|txt|csv|xlsx|xlsm)$/i.test(a.key)) extraFiles[a.key] = toBase64(await bytes(a.url));
