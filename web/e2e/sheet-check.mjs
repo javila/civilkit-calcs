@@ -134,6 +134,16 @@ const bodies = await page.evaluate(async () => {
 });
 check(bodies.docx[0] === 200 && bodies.docx[1] === 'PK' && bodies.docx[2] > 2000, `a sheet exports to Word (${bodies.docx[2]} bytes)`);
 check(bodies.xlsx[0] === 200 && bodies.xlsx[1] === 'PK' && bodies.xlsx[2] > 2000, `a sheet exports to Excel (${bodies.xlsx[2]} bytes)`);
+// Print and the exports use the same request path: the LaTeX sample, as a print render and as Word.
+const tex = await page.evaluate(async () => {
+    const content = await (await fetch('/sheet-samples/LaTeX prose.sheet')).text();
+    const post = (ep, extra) => fetch(`/api/calcpad/${ep}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, ...extra }) });
+    const html = await (await post('convert', { forPrint: true })).text();
+    const docx = await post('docx', {});
+    return { katex: (html.match(/class="katex"/g) ?? []).length, placeholders: (html.match(/class="sheet-tex"[^>]*><\/(span|div)>/g) ?? []).length, style: html.includes('id="cprs-katex"'), docx: docx.status, bytes: (await docx.arrayBuffer()).byteLength };
+});
+check(tex.katex >= 5 && tex.placeholders === 0 && tex.style, `the print render of a LaTeX sheet has typeset formulas and the stylesheet (${tex.katex} formulas)`);
+check(tex.docx === 200 && tex.bytes > 2000, 'a LaTeX sheet exports to Word (formulas as TeX source)');
 await page.click('[data-ribbon-btn=x-convert]');
 await page.waitForTimeout(500);
 const converted = await page.evaluate(() => ({ lang: window.calcpadActiveEditor.getModel().getLanguageId(), text: window.calcpadActiveEditor.getValue() }));

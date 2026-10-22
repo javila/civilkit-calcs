@@ -581,8 +581,12 @@ const haystack = (s) => `${s.title} ${s.description} ${s.codes.join(' ')} ${s.fo
 await page.evaluate(() => (window).calcpadTabs.newUntitled(''));
 await page.locator('.cprs-samples-link').waitFor({ state: 'visible', timeout: 5000 }).then(() => check(true, 'an empty editor shows the samples link'), () => check(false, 'an empty editor shows the samples link'));
 await page.locator('.cprs-samples-link').click().catch(() => {});
+await dialog.waitFor({ timeout: 10000 }).catch(() => {});
 check(await dialog.isVisible(), 'the link opens the Samples browser');
-check(await items().count() === SAMPLES.length, `the browser lists all ${SAMPLES.length} samples (${await items().count()})`);
+// The Sheet syntax group (our addition) is listed with CalcpadCE's examples: its own manifest.
+const SHEET_SAMPLES = JSON.parse(readFileSync(join(web, 'calcpad-web', 'public', 'sheet-samples', 'manifest.json'), 'utf8')).samples.length;
+await items().first().waitFor({ timeout: 10000 }).catch(() => {});
+check(await items().count() === SAMPLES.length + SHEET_SAMPLES, `the browser lists all ${SAMPLES.length} samples and ${SHEET_SAMPLES} sheet syntax samples (${await items().count()})`);
 await page.screenshot({ path: join(out, 'browser-samples.png') });
 
 // Search, code filter and groups narrow the list, to exactly the matching samples.
@@ -902,7 +906,7 @@ const subFailed = requests.filter((r) => r.url.includes('/calcs/') && r.url.ends
 check(subFailed > 0, 'under /calcs/ the engine is fetched from /calcs/wasm/');
 
 // ---- 3. no calculation request left the page ---------------------------------------------
-const STATIC = /^\/(calcs\/)?(|index\.html|samples\/.*|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
+const STATIC = /^\/(calcs\/)?(|index\.html|samples\/.*|sheet-samples\/.*|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
 const remote = requests.filter((r) => !r.url.startsWith('data:') && !r.url.startsWith('blob:'));
 const api = remote.filter((r) => new URL(r.url).pathname.includes('/api/'));
 // Other origins: only the exact library files on the list (and the one added in the test).
