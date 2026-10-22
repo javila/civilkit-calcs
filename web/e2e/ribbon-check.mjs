@@ -6,11 +6,13 @@
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { allSnippets, PRELUDE, RIBBON } from '../calcpad-web/src/wasm/ribbon-data.ts';
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
 const here = new URL('.', import.meta.url).pathname;
 const url = arg('--url', 'http://127.0.0.1:4175/');
-const out = arg('--out', '/tmp/civilkit-calcs-shots');
+const out = arg('--out', join(tmpdir(), 'civilkit-calcs-shots'));
 mkdirSync(out, { recursive: true });
 const fails = [];
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) fails.push(what); };

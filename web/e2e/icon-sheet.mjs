@@ -1,9 +1,13 @@
 // A review sheet of every ribbon icon, big (32px) and small (16px), on the light and dark themes.
 //   PLAYWRIGHT_BROWSERS_PATH=... node e2e/icon-sheet.mjs [--url U] [--out DIR]
 import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
 const url = arg('--url', 'http://127.0.0.1:4175/');
-const out = arg('--out', '/tmp/civilkit-calcs-shots');
+const out = arg('--out', join(tmpdir(), 'civilkit-calcs-shots'));
+mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
 for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 }, colorScheme: theme });
