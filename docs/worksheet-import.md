@@ -98,10 +98,18 @@ arguments are `arity-mismatch` gaps. Caveats are notes: `log(x, b)` becomes `(ln
 | rows, cols, length | `n_rows`, `n_cols`, `len` |
 | norm2 | `norm_2` |
 
-A built-in the source has and Calcpad lacks (`stdev`, `lookup`, `erf`, `cumsum`, ...) is
-`unmapped-function`; a call to a name the sheet does not define is `undefined-function` (usually an
-add-in or an included worksheet). The list is `UNMAPPED_FUNCTIONS`. Solve-block names (`Given`,
-`Find`, ...) are `solve-block`.
+A call to a function that is not defined in the sheet is one of three codes, ranked separately:
+
+* `builtin-missing`: a built-in of the source tool that the engine lacks (`stdev`, `lookup`, `erf`,
+  `cumsum`, ...). The table is `BUILTIN_MISSING` in `src/tables.rs`; together with `FUNCTIONS` it is the
+  list of built-in names the importer knows.
+* `reference-function`: any other undefined name, in a sheet that has worksheet-reference regions, which may
+  define it.
+* `addin-function`: any other undefined name, in a sheet with no reference regions. The file has no
+  structural marker for an add-in (the files only mention add-ins in prose), so this is a heuristic:
+  not built in, not defined, nothing to define it.
+
+Solve-block names (`Given`, `Find`, ...) are `solve-block`.
 
 ### Units
 
@@ -130,6 +138,46 @@ A test checks that every Calcpad unit and function name in the tables exists in 
 
 The built-in gravitational acceleration `g` becomes `(9.80665*m/s^2)`, because Calcpad's `g` is the gram.
 
+## Pictures and fallbacks
+
+Options (`ImportOptions`, `import_xmcd_opts`): `pictures` (default on), `saved_results` (default off),
+`asset_prefix` (default `imported`), reader `limits`, `svg_limits`, `max_total_asset_bytes`.
+
+`ImportResult.assets` is a list of `Asset { path, mime, bytes }`. The Calcpad text refers to each by exactly
+its `path` in `<img src="...">`, relative to the library root with `/` separators (for example
+`imported/R1795.svg`). The caller stores each asset in the page's file library under that path: the web
+app resolves a relative `<img src>` against the library (root `/`) and inlines it, the same way the bundled
+samples show their images. Give every imported worksheet its own `asset_prefix`; the prefix is cleaned to
+letters, digits, `_ - . /` and cannot climb out of the library. Region ids are made unique within a prefix.
+The batch runner writes the assets under the output folder as `<worksheet name>/R<id>.svg|png`.
+
+* **Picture regions.** A picture region carries a metafile and/or a PNG. The metafile (base64, gzip when the item
+  says so, WMF or EMF) is converted to SVG with the `emf-core` crate and written as `R<id>.svg`; the
+  text gets `'<img style="width:Npt;max-width:100%;" src="..." alt="R<id>">`. If the conversion fails, is
+  refused by a guard, or the SVG is too large, the PNG (the picture's own `png` item, else the region's saved
+  rendering) is used instead, with note `svg-fallback`. If neither exists the region keeps its placeholder
+  (`image`). A shown picture counts as converted.
+* **Fallback pictures.** For every region that does not convert (math, embedded object, plot, component,
+  reference) and has a saved rendering (a PNG), the output shows that picture, followed on the same text line
+  by a caption: `static picture of the original, not live (R1795 ole-object)`. The grey `[import-gap` line
+  is not written for such a region; the report keeps the gap codes and adds the note `static-picture`. The
+  region still counts as needing attention (it is not live); `report.regions_showing()` counts converted plus
+  pictured regions and `KindStats.pictured` the pictured ones. With `pictures` off there are no assets and
+  every unconverted region is a placeholder line, as before.
+* **Saved results.** An evaluation stores its last calculated result in the file. A single number (with a
+  unit) is read; strings, matrices and anything else are ignored. For an unconverted math region that has
+  one, `report.pictures.saved_result_available` counts it. With `saved_results` on, and no picture shown for
+  the region, the output adds `'<i>saved result from the original, not live (R12): 571.9 International_BTU/(pound)</i>`
+  after the placeholder line. Units are written as the source spells them; they are not converted. Default off.
+
+Guards (every byte here is untrusted): base64 text over 32 MiB is refused; a gzip item may not inflate past
+16 MiB (`max_item_bytes`) and all items together are capped at 192 MiB; a metafile over 4 MiB is not converted; the
+converter runs on its own thread with a 32 MiB stack and a 10 s limit (a panic is caught, a run past the limit is
+abandoned and its thread left to finish, so a hostile file costs a stuck thread, not the caller); an SVG over
+3 MiB, or one containing script, foreign content, entity declarations or event attributes, is refused and the PNG is
+used; a worksheet may produce at most 128 MiB of assets. Tests cut a hand-made metafile short at every
+length, corrupt it at every byte and feed 300 random buffers.
+
 ## What does not convert
 
 Reported with a code, counted, and replaced by a placeholder. Codes are stable; the UI and the batch
@@ -146,9 +194,10 @@ summary key on them.
 | `string-value` | Strings; Calcpad has no string variables |
 | `bare-expression` | An expression with no definition or evaluation operator (documentation, or a solve-block constraint) |
 | `element-assignment`, `disabled-region` | `v[i] := x`; a region switched off in the source |
-| `plot`, `image`, `ole-object`, `component`, `worksheet-reference`, `other-region` | Counted only, never converted |
+| `plot`, `ole-object`, `component`, `worksheet-reference`, `other-region` | Counted only, never converted; shown as a static picture when the file has one (see Pictures) |
+| `image` | A picture region with nothing usable (no metafile, no raster picture) |
 | `unknown-element` | An element name the reader does not know (the name is the detail) |
-| `unmapped-unit`, `unmapped-function`, `undefined-variable`, `undefined-function` | See above |
+| `unmapped-unit`, `builtin-missing`, `addin-function`, `reference-function`, `undefined-variable` | See above |
 | `depends-on-gap` | Uses a name that an earlier unconverted region defines; attributed to the root cause in `ranked_gaps()` |
 | `invalid-name`, `bad-number`, `arity-mismatch`, `bad-structure`, `too-deep` | Structure the importer will not guess |
 
@@ -192,12 +241,17 @@ are skipped. It only reads the inputs. Input files are never copied into this re
 
 * 1315 content regions: 562 text (all converted), 578 math, 132 embedded objects, 28 pictures, 11 plots,
   2 components, 2 worksheet references. 48 page breaks are not counted.
-* 79 of 578 math regions convert (13.7 %); 48.7 % of all regions. Engine errors after import: 0 in all
-  31 files, because anything that would fail is a placeholder.
+* 79 of 578 math regions convert (13.7 %). Live-convertible regions overall: 669 of 1315 (50.9 %), 641
+  (48.7 %) when the 28 pictures are not counted. With pictures on, every region shows something: the 669 live
+  plus 646 static pictures of the original. Engine errors after import: 0 in all 31 files, because anything
+  that would fail is a placeholder or a picture.
+* Pictures: 13 of 13 metafiles became an SVG (1.4 MB in total), 15 pictures came from a PNG item, and 646
+  unconverted regions got their saved rendering (1.3 MB of PNG). Saved scalar results exist on 26 unconverted
+  math regions.
 * The corpus is dominated by calls into an add-in (the sheets are wrappers around a native library), so
-  the top gaps are `undefined-function` (426 regions including 83 downstream), embedded objects (132),
-  strings that feed those calls (107 including downstream), and `bare-expression` (94, documentation
-  that shows call syntax). Range variables, programs and calculus together are under 30 regions here.
+  the top gaps are `addin-function` (408 regions including 82 downstream), embedded objects (132),
+  strings that feed those calls (107 including downstream), `bare-expression` (94, documentation
+  that shows call syntax), `reference-function` (18) and, in this corpus, no `builtin-missing` at all. Range variables, programs and calculus together are under 30 regions here.
   A corpus of ordinary structural or mechanical sheets will rank differently; this one does not tell
   how common range variables are in the wild.
 
@@ -209,8 +263,13 @@ pre-scan before the parser runs) are capped; expression and region nesting is fo
 deep (deeper becomes a `too-deep` gap); an n-ary operator with more than 100 operands is a `too-deep`
 gap so that its left-leaning tree stays shallow. Tests cover malformed input, a billion-laughs DTD, an
 external entity, 200 000 nested elements, 200 nested expressions, a 5000-term sum and odd attribute values.
-The crate forbids `unsafe` and has one dependency, `roxmltree` (MIT OR Apache-2.0; it was already in the
-lockfile through the plotting stack). The importer never executes anything from the file.
+The crate forbids `unsafe`. Dependencies: `roxmltree` (MIT OR Apache-2.0), `miniz_oxide` (MIT OR Zlib OR
+Apache-2.0) and `emf-core` 0.1.1 (MIT, default features off, so no `tracing`), which brings `wmf-core` (MIT),
+`snafu` and `snafu-derive` (MIT OR Apache-2.0), `strum` and `strum_macros` (MIT), `heck` and `embedded-io`
+(MIT OR Apache-2.0), `base64` (MIT OR Apache-2.0), `codepage` (Apache-2.0 OR MIT), `encoding_rs`
+((Apache-2.0 OR MIT) AND BSD-3-Clause), `multiversion_no_op`, `scopeguard`, `simdutf8`, `unicode-segmentation`
+and `unicode-width` (all MIT or Apache-2.0 alternatives). Nothing non-permissive; `THIRD_PARTY_LICENSES.md`
+is regenerated. The importer never executes anything from the file.
 
 ## Front doors: adding the `.mcdx` container later
 

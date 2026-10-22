@@ -107,9 +107,11 @@ the browser's print dialog, so it carries the browser's own header and footer.
 `calcpad-import-xmcd` reads the `.xmcd` files of the spreadsheet-like worksheet format of a commercial
 calculation tool and writes Calcpad worksheet text for this engine, so existing sheets can be brought
 over. It evaluates nothing itself. Text, definitions, evaluations, functions, vectors and matrices,
-indexing (with the array origin shifted to Calcpad's 1), units and the common built-in functions convert.
+indexing (with the array origin shifted to Calcpad's 1), units, the common built-in functions and picture regions
+(metafile to SVG) convert.
 Range variables, programs, solve blocks, symbolic evaluation, plots, pictures and embedded objects do
-not: each becomes a visible placeholder line carrying its region id, and the report counts them by code.
+not: each becomes a static picture of the original when the file has one, else a visible placeholder line
+carrying its region id, and the report counts them by code.
 The newer `.mcdx` container is not read yet. Details, the mapping tables and how to run the batch
 runner over a folder: [docs/worksheet-import.md](docs/worksheet-import.md).
 

@@ -7,13 +7,13 @@ declared SPDX expressions of each package, not a legal review. Development-only 
 
 None.
 
-## Rust crates in the build graph (78)
+## Rust crates in the build graph (94)
 
 | Licence | Count |
 | --- | --- |
-| MIT OR Apache-2.0 | 38 |
-| MIT | 12 |
-| Apache-2.0 OR MIT | 8 |
+| MIT OR Apache-2.0 | 47 |
+| MIT | 16 |
+| Apache-2.0 OR MIT | 10 |
 | MIT/Apache-2.0 | 6 |
 | Zlib | 3 |
 | Unlicense OR MIT | 2 |
@@ -22,6 +22,7 @@ None.
 | BSD-3-Clause | 2 |
 | 0BSD OR MIT OR Apache-2.0 | 1 |
 | BSD-2-Clause | 1 |
+| (Apache-2.0 OR MIT) AND BSD-3-Clause | 1 |
 | (MIT OR Apache-2.0) AND Unicode-3.0 | 1 |
 
 | Crate | Version | Licence |
@@ -32,14 +33,19 @@ None.
 | arrayvec | 0.7.8 | MIT OR Apache-2.0 |
 | autocfg | 1.5.1 | Apache-2.0 OR MIT |
 | base64 | 0.22.1 | MIT OR Apache-2.0 |
+| base64 | 0.23.1 | MIT OR Apache-2.0 |
 | bitflags | 1.3.2 | MIT/Apache-2.0 |
 | bitflags | 2.13.2 | MIT OR Apache-2.0 |
 | bumpalo | 3.20.3 | MIT OR Apache-2.0 |
 | bytemuck | 1.25.2 | Zlib OR Apache-2.0 OR MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
+| codepage | 0.1.3 | Apache-2.0 OR MIT |
 | core_maths | 0.1.1 | MIT |
 | crc32fast | 1.5.3 | MIT OR Apache-2.0 |
 | data-url | 0.3.2 | MIT OR Apache-2.0 |
+| embedded-io | 0.7.1 | MIT OR Apache-2.0 |
+| emf-core | 0.1.1 | MIT |
+| encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | equivalent | 1.0.3 | Apache-2.0 OR MIT |
 | euclid | 0.22.14 | MIT OR Apache-2.0 |
 | fdeflate | 0.3.7 | MIT OR Apache-2.0 |
@@ -48,6 +54,7 @@ None.
 | foldhash | 0.2.0 | Zlib |
 | fontdb | 0.23.0 | MIT |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 |
+| heck | 0.5.0 | MIT OR Apache-2.0 |
 | imagesize | 0.13.0 | MIT |
 | indexmap | 2.14.2 | Apache-2.0 OR MIT |
 | itoa | 1.0.18 | MIT OR Apache-2.0 |
@@ -57,6 +64,7 @@ None.
 | memchr | 2.8.3 | Unlicense OR MIT |
 | miniz_oxide | 0.8.9 | MIT OR Zlib OR Apache-2.0 |
 | miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
+| multiversion_no_op | 1.0.0 | Apache-2.0 OR MIT |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
 | pico-args | 0.5.0 | MIT |
@@ -71,16 +79,22 @@ None.
 | roxmltree | 0.20.0 | MIT OR Apache-2.0 |
 | rustversion | 1.0.23 | MIT OR Apache-2.0 |
 | rustybuzz | 0.20.1 | MIT |
+| scopeguard | 1.2.0 | MIT OR Apache-2.0 |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 |
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 |
 | simd-adler32 | 0.3.10 | MIT |
+| simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | simplecss | 0.2.2 | Apache-2.0 OR MIT |
 | siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | slotmap | 1.1.1 | Zlib |
 | smallvec | 1.16.3 | MIT OR Apache-2.0 |
+| snafu | 0.9.2 | MIT OR Apache-2.0 |
+| snafu-derive | 0.9.2 | MIT OR Apache-2.0 |
 | strict-num | 0.1.1 | MIT |
+| strum | 0.28.0 | MIT |
+| strum_macros | 0.28.0 | MIT |
 | svgtypes | 0.15.3 | Apache-2.0 OR MIT |
 | syn | 2.0.119 | MIT OR Apache-2.0 |
 | syn | 3.0.9 | MIT OR Apache-2.0 |
@@ -94,13 +108,16 @@ None.
 | unicode-ident | 1.0.27 | (MIT OR Apache-2.0) AND Unicode-3.0 |
 | unicode-properties | 0.1.4 | MIT/Apache-2.0 |
 | unicode-script | 0.5.8 | MIT OR Apache-2.0 |
+| unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 |
 | unicode-vo | 0.1.0 | MIT/Apache-2.0 |
+| unicode-width | 0.2.2 | MIT OR Apache-2.0 |
 | usvg | 0.45.1 | Apache-2.0 OR MIT |
 | version_check | 0.9.5 | MIT/Apache-2.0 |
 | wasm-bindgen | 0.2.122 | MIT OR Apache-2.0 |
 | wasm-bindgen-macro | 0.2.122 | MIT OR Apache-2.0 |
 | wasm-bindgen-macro-support | 0.2.122 | MIT OR Apache-2.0 |
 | wasm-bindgen-shared | 0.2.122 | MIT OR Apache-2.0 |
+| wmf-core | 0.1.2 | MIT |
 | xmlwriter | 0.1.0 | MIT |
 | zlib-rs | 0.6.8 | Zlib |
 | zmij | 1.0.23 | MIT |
