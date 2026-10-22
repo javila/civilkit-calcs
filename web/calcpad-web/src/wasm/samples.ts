@@ -240,7 +240,7 @@ export class SamplesBrowser {
             const res = await fetch(`${window.location.origin}/api/calcpad/convert`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: text, extraFiles, includeLineAnchors: false }),
+                body: JSON.stringify({ content: text, extraFiles, sourceFilePath: `/${s.id}.cpd`, includeLineAnchors: false }),
             });
             const html = await res.text();
             if (seq === this.previewSeq && this.root) frame.srcdoc = staticImages(html, s);

@@ -613,6 +613,12 @@ const previewImg = await previewFrame.locator('img').first().evaluate((img) => n
 }), null, { timeout: 30000 }).catch(() => 0);
 check(previewImg > 0, `the preview renders "${withImage.title}" with its image`);
 await page.screenshot({ path: join(out, 'browser-samples-preview.png') });
+// A sample that #includes a sheet previews with no error bar (its included sheet is passed with it).
+const withInclude = SAMPLES.find((s) => s.assets.some((a) => /\.cpd$/i.test(a.key)) && !s.scripts && !s.read);
+await page.locator(`.cprs-s-item[data-sample-id="${withInclude.id}"]`).click();
+await page.waitForFunction(() => { const d = document.querySelector('.cprs-s-preview')?.srcdoc ?? ''; return d.length > 2000 && !/Rendering\.\.\./.test(d); }, null, { timeout: 120000 });
+const incPreview = await page.evaluate(() => { const d = document.querySelector('.cprs-s-preview').srcdoc; return { bar: /class="errorHeader">Found/.test(d), errs: (d.match(/<p class="err">/g) ?? []).length }; });
+check(!incPreview.bar && incPreview.errs === 0, `the preview of "${withInclude.title}" (it #includes a sheet) has no error bar and no error (${JSON.stringify(incPreview)})`);
 await page.keyboard.press('Escape');
 
 // Every sample opens from the browser as an untitled copy and renders with no errors.
@@ -640,6 +646,18 @@ for (const s of SAMPLES.filter((x) => x.upstream.includes(sampleFilter))) {
     if (tab.title !== s.title || tab.path) problems.push(`opened as ${tab.title} (${tab.path})`);
     // Its images come from the library (the transport turns them into data: URLs).
     if (s.assets.some((a) => /\.(png|jpe?g|gif|svg)$/i.test(a.key)) && got && got.libraryImages === 0) problems.push('images not shown from the library');
+    // The editor resolves the copy's #include too: no undefined-macro (CPD-3303) marker for a macro an included sheet defines.
+    if (got && s.assets.some((a) => /\.cpd$/i.test(a.key))) {
+        let last = -1, same = 0;
+        for (let i = 0; i < 50 && same < 3; i++) {
+            await page.waitForTimeout(500);
+            const c = await page.evaluate(() => window.monaco.editor.getModelMarkers({ resource: window.calcpadActiveEditor.getModel().uri }).length);
+            same = c === last ? same + 1 : 0;
+            last = c;
+        }
+        const undef = await page.evaluate(() => window.monaco.editor.getModelMarkers({ resource: window.calcpadActiveEditor.getModel().uri }).filter((k) => (typeof k.code === 'string' ? k.code : k.code?.value) === 'CPD-3303').length);
+        if (undef) problems.push(`${undef} undefined-macro marker(s): the included sheet was not resolved`);
+    }
     if (problems.length) sampleFailures.push(`${s.upstream}: ${problems.join('; ')}`);
     await page.evaluate(() => (window).calcpadTabs.close((window).calcpadTabs.activeId));
 }

@@ -388,3 +388,14 @@ it differs. Tests: `calcpad-highlighter/tests` and the unit tests in `calcpad-hi
   page's file library like the engine's `#include`. The `HtmlComment` test that renders a
   worksheet through the Calcpad.Core parsers (`SettingsDirective_AppliesFourDecimals...`) is
   `#[ignore]`d in the highlighter crate; the Core behaviour is covered by the engine tests.
+* **H11. A relative `#include` needs a source path; the browser gives one.** Upstream resolves a
+  relative include against the directory of `sourceFilePath` and, when there is none, against the
+  server's working directory (`Path.GetFullPath`). `ContentResolver` does the same here, so a sheet
+  without a path finds no included file and reports every macro and variable an include defines as
+  undefined (CPD-3303, CPD-3304 and the like). The page has no working directory, and its library keeps
+  files at `/<name>`, so the web message bridge (`buildFileContext`) sends the active sheet's library
+  path as `sourceFilePath`, and `/<title>.cpd` for an untitled sheet, which is where the engine looks
+  too. Before this the page sent none, and the three Frames samples showed 40 undefined-macro markers.
+  Checked by `web/e2e/browser-check.mjs` (the samples section) and `web/e2e/samples-sweep.mjs`, which
+  compares every bundled sample's editor diagnostics and engine errors with the command line's on the same
+  file with its includes on disk.

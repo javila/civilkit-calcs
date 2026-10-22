@@ -143,8 +143,16 @@ export class MessageBridge extends BaseMessageBridge {
         return null;
     }
 
+    /**
+     * Where the active worksheet lives, for resolving `#include`: its library path when it has one, else the library root
+     * (an untitled sheet is treated as sitting there, which is where the engine looks too). Without a path the highlighter
+     * finds no included file, and every macro and variable defined in one is reported as undefined.
+     */
     protected async buildFileContext(_content: string): Promise<{ sourceFilePath?: string }> {
-        return {};
+        const tab = (window as unknown as { calcpadTabs?: { activeTab: { title: string; filePath: string | null } | null } }).calcpadTabs?.activeTab;
+        if (!tab) return {};
+        const path = tab.filePath ?? `/${(tab.title || 'Untitled').replace(/[\\/:*?"<>|]/g, '_')}.cpd`;
+        return { sourceFilePath: path.startsWith('/') ? path : `/${path}` };
     }
 
     protected getVariablesOrigin(): string {
