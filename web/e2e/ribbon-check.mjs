@@ -105,12 +105,23 @@ await btn(page, 'tf-b').click();
 check((await text(page)) === "'<b>hello</b> world", `Text Formatting > Bold wraps the selection (${JSON.stringify(await text(page))})`);
 // exports (Document tab)
 await tab(page, 'document');
-// The Excel export is the engine's own and is changing on main; check that the button sends the request
-// (the download itself was checked against a matching engine build in round 2).
-await page.evaluate(() => { window.__sent = []; const b = window.calcpadBridge; const orig = b.handleMessage.bind(b); b.handleMessage = (m) => { window.__sent.push(m?.type); if (m?.type === 'saveXlsx' && window.__stubXlsx) return; return orig(m); }; window.__stubXlsx = true; });
+// Document > Excel really downloads a workbook: it opens in openpyxl, has the Report sheet and a chart part.
+await page.evaluate(() => window.calcpadActiveEditor.setValue("'Ribbon Excel\nL = 4\nM = L^2\n$Plot{x^2 @ x = 0 : 2}"));
+await page.waitForTimeout(1500);
+const xl = page.waitForEvent('download', { timeout: 120000 }).catch(() => null);
 await btn(page, 'd-excel').click();
-check((await page.evaluate(() => window.__sent)).includes('saveXlsx'), 'Document > Excel sends the saveXlsx request');
-await page.evaluate(() => { window.__stubXlsx = false; });
+const xd = await xl;
+check(!!xd && /\.xlsx$/i.test(xd.suggestedFilename()), `Document > Excel triggers a download (${xd?.suggestedFilename()})`);
+if (xd) {
+    const xp = `${out}/ribbon-excel.xlsx`;
+    await xd.saveAs(xp);
+    const { execFileSync } = await import('node:child_process');
+    let info;
+    try {
+        info = JSON.parse(execFileSync('python3', ['-I', '-c', 'import json,sys,zipfile,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nz=zipfile.ZipFile(sys.argv[1])\nprint(json.dumps({"sheets":wb.sheetnames,"charts":len(wb["Report"]._charts),"parts":[n for n in z.namelist() if n.startswith("xl/charts/")]}))', xp], { encoding: 'utf8' }));
+    } catch (e) { info = { error: String(e).slice(0, 200) }; }
+    check(info.sheets?.[0] === 'Report' && info.charts === 1 && info.parts?.length === 1, `the workbook opens in openpyxl with a Report sheet and a chart part (${JSON.stringify(info)})`);
+}
 let dl, d;
 dl = page.waitForEvent('download', { timeout: 20000 }).catch(() => null);
 await btn(page, 'd-word').click();
