@@ -11,7 +11,9 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const rel = (p) => join(root, p);
 const SEMVER = /^(\d{2})\.([1-9]|1[0-2])\.([1-9]\d*)$/;
-const CRATES = ['calcpad-core', 'calcpad-cli', 'calcpad-wasm', 'calcpad-docx', 'calcpad-docx-wasm', 'calcpad-highlighter', 'calcpad-highlighter-wasm'];
+// The three library crates (civilkit-calcs-engine, -highlighter, -docx) are published to crates.io on their own 0.x.y
+// semver and are not touched here; the app and its unpublished crates carry the YY.M.N version.
+const CRATES = ['calcpad-cli', 'calcpad-wasm', 'calcpad-docx-wasm', 'calcpad-highlighter-wasm'];
 const PACKAGES = ['web/package.json', 'web/calcpad-web/package.json', 'web/calcpad-frontend/package.json'];
 
 const cargoToml = readFileSync(rel('Cargo.toml'), 'utf8');

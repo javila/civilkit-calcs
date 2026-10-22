@@ -3,6 +3,7 @@ name = "calcpad-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+publish = false
 description = "Command line front end for calcpad-core, compatible with Calcpad.Cli batch conversion"
 
 [[bin]]
@@ -10,5 +11,5 @@ name = "Cli"
 path = "src/main.rs"
 
 [dependencies]
-calcpad-core = { path = "../calcpad-core" }
-calcpad-docx = { path = "../calcpad-docx", features = ["system-fonts"] }
+calcpad-core = { package = "civilkit-calcs-engine", path = "../calcpad-core" }
+calcpad-docx = { package = "civilkit-calcs-docx", path = "../calcpad-docx", features = ["system-fonts"] }

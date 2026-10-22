@@ -1,9 +1,17 @@
 [package]
-name = "calcpad-core"
-version.workspace = true
+name = "civilkit-calcs-engine"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Rust port of the CalcpadCE calculation engine (Calcpad.Core)"
+readme = "README.md"
+repository = "https://github.com/mageaustralia/civilkit-calcs"
+homepage = "https://github.com/mageaustralia/civilkit-calcs"
+keywords = ["engineering","calculation","units","worksheet","wasm"]
+categories = ["science","mathematics","wasm"]
+description = "Calculation engine of CivilKit Calcs: a Rust port of the CalcpadCE worksheet engine (units, vectors, matrices, plots, input forms, HTML reports)"
+
+[lib]
+name = "calcpad_core"
 
 [features]
 # Runs the vector, matrix and HP xunit classes that are still being ported

@@ -1,9 +1,17 @@
 [package]
-name = "calcpad-docx"
-version.workspace = true
+name = "civilkit-calcs-docx"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Word (.docx) export of CalcpadCE worksheets (port of Calcpad.OpenXml's Word path)"
+readme = "README.md"
+repository = "https://github.com/mageaustralia/civilkit-calcs"
+homepage = "https://github.com/mageaustralia/civilkit-calcs"
+keywords = ["docx","xlsx","export","report","engineering"]
+categories = ["encoding","text-processing"]
+description = "Word (.docx) and Excel (.xlsx) export of CalcpadCE worksheet reports, in Rust: Office Math equations, tables, pictures and native charts"
+
+[lib]
+name = "calcpad_docx"
 
 [features]
 default = ["svg"]
@@ -14,5 +22,5 @@ svg = ["dep:resvg"]
 system-fonts = ["svg", "resvg/system-fonts"]
 
 [dependencies]
-calcpad-core = { path = "../calcpad-core" }
+calcpad-core = { package = "civilkit-calcs-engine", path = "../calcpad-core", version = "0.1.0" }
 resvg = { version = "0.45", default-features = false, features = ["text"], optional = true }

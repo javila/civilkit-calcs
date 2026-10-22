@@ -69,51 +69,25 @@ checksum = "95832e849adfb21180ccb6826a99da14e5d266ae5c2e668e1602cf234f153797"
 name = "calcpad-cli"
 version = "26.10.1"
 dependencies = [
- "calcpad-core",
- "calcpad-docx",
-]
-
-[[package]]
-name = "calcpad-core"
-version = "26.10.1"
-dependencies = [
- "miniz_oxide 0.8.9",
- "serde_json",
-]
-
-[[package]]
-name = "calcpad-docx"
-version = "26.10.1"
-dependencies = [
- "calcpad-core",
- "resvg",
+ "civilkit-calcs-docx",
+ "civilkit-calcs-engine",
 ]
 
 [[package]]
 name = "calcpad-docx-wasm"
 version = "26.10.1"
 dependencies = [
- "calcpad-core",
- "calcpad-docx",
+ "civilkit-calcs-docx",
+ "civilkit-calcs-engine",
  "serde_json",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "calcpad-highlighter"
-version = "26.10.1"
-dependencies = [
- "calcpad-core",
- "regex",
- "serde",
- "serde_json",
 ]
 
 [[package]]
 name = "calcpad-highlighter-wasm"
 version = "26.10.1"
 dependencies = [
- "calcpad-highlighter",
+ "civilkit-calcs-highlighter",
  "wasm-bindgen",
 ]
 
@@ -121,8 +95,8 @@ dependencies = [
 name = "calcpad-wasm"
 version = "26.10.1"
 dependencies = [
- "calcpad-core",
- "calcpad-highlighter",
+ "civilkit-calcs-engine",
+ "civilkit-calcs-highlighter",
  "serde_json",
  "wasm-bindgen",
 ]
@@ -132,6 +106,32 @@ name = "cfg-if"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
+
+[[package]]
+name = "civilkit-calcs-docx"
+version = "0.1.0"
+dependencies = [
+ "civilkit-calcs-engine",
+ "resvg",
+]
+
+[[package]]
+name = "civilkit-calcs-engine"
+version = "0.1.0"
+dependencies = [
+ "miniz_oxide 0.8.9",
+ "serde_json",
+]
+
+[[package]]
+name = "civilkit-calcs-highlighter"
+version = "0.1.0"
+dependencies = [
+ "civilkit-calcs-engine",
+ "regex",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "core_maths"

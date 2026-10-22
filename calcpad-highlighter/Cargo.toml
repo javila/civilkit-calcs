@@ -1,12 +1,20 @@
 [package]
-name = "calcpad-highlighter"
-version.workspace = true
+name = "civilkit-calcs-highlighter"
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
-description = "Rust port of Calcpad.Highlighter (CalcpadCE): tokenizer, linter, content resolution and snippets"
+readme = "README.md"
+repository = "https://github.com/mageaustralia/civilkit-calcs"
+homepage = "https://github.com/mageaustralia/civilkit-calcs"
+keywords = ["calcpad","linter","tokenizer","editor","worksheet"]
+categories = ["parser-implementations","development-tools"]
+description = "Editor services for CalcpadCE worksheets, in Rust: tokenizer, linter, content resolution, prettifier and snippet library"
+
+[lib]
+name = "calcpad_highlighter"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 regex = { version = "1", default-features = false, features = ["std", "unicode-perl", "unicode-case"] }
-calcpad-core = { path = "../calcpad-core" }
+calcpad-core = { package = "civilkit-calcs-engine", path = "../calcpad-core", version = "0.1.0" }
