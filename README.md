@@ -8,8 +8,8 @@ WebAssembly, and no calculation request leaves the browser.
 
 * Live demo: https://civilkit.io/calcs/ (also at https://mageaustralia.github.io/civilkit-calcs/)
 * Source: https://github.com/mageaustralia/civilkit-calcs
-* Version: see [CHANGELOG.md](CHANGELOG.md). Releases are numbered YY.M.N (26.10.1 is the first release of
-  October 2026) and tagged `v26.10.1`.
+* Version: see [CHANGELOG.md](CHANGELOG.md). Releases are numbered YY.M.N (26.10.1 was the first release of
+  October 2026; this is 26.10.2) and tagged `v26.10.2`.
 
 Status: early. The project is not affiliated with the authors of CalcpadCE.
 

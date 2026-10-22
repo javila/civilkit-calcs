@@ -2,14 +2,14 @@
 
 All notable changes are listed here, newest first. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions are numbered YY.M.N with no zero padding (26.10.1 is the first release of October 2026; N counts the releases
-of the month and restarts at 1), which is valid semver for Cargo and npm. Tags are `v26.10.1`.
+of the month and restarts at 1), which is valid semver for Cargo and npm. Tags are `v26.10.2` and so on.
 CalcpadCE's own version is tracked separately in NOTICE.
 
 The app changes are listed under their YY.M.N version below. The three Rust library crates have their own entries
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
-## [Unreleased]
+## [26.10.2] - 2026-10-23
 
 ### Added
 - Import worksheet: File menu, a Document-tab ribbon button and drag and drop bring in a worksheet of the
@@ -18,6 +18,13 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
   new unsaved worksheet, keeps its pictures in the library under `/imported/<name>/`, and reports what converted
   live, what is shown as a static picture and what needs attention, with toggles for the pictures and for saved
   results. Prime `.mcdx` files are refused with a message.
+- While files are dragged over the page, a full-window hint says whether a drop opens a worksheet (`.cpd`) or imports
+  one (`.xmcd`).
+- Library: several files can be written with a single store write and one sync (an import brings in hundreds of
+  pictures).
+- `calcpad-import-xmcd` (not published): the converter behind Import worksheet, with a batch runner that reports
+  what converted over a folder of worksheets; mapping tables and limits are in docs/worksheet-import.md.
+- THIRD_PARTY_LICENSES.md lists the 16 additional Rust crates the importer pulls in (94 in the build graph).
 
 ## [26.10.1] - 2026-10-22
 

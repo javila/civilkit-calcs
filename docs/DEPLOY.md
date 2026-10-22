@@ -43,7 +43,7 @@ mkdir -p ../../calcpad-rs-pages-build
 cp -R calcpad-web/dist/. ../../calcpad-rs-pages-build/
 touch ../../calcpad-rs-pages-build/.nojekyll
 cd ../../calcpad-rs-pages-build
-git init -b gh-pages && git add -A && git commit -m "CivilKit Calcs 26.10.1"
+git init -b gh-pages && git add -A && git commit -m "CivilKit Calcs 26.10.2"
 git remote add origin git@github.com:mageaustralia/civilkit-calcs.git
 git push -f origin gh-pages
 ```

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["calcpad-core", "calcpad-cli", "calcpad-wasm", "calcpad-docx", "calcpad-docx-wasm", "calcpad-highlighter", "calcpad-highlighter-wasm", "calcpad-import-xmcd", "calcpad-import-xmcd-wasm"]
 
 [workspace.package]
-version = "26.10.1"
+version = "26.10.2"
 edition = "2021"
 license = "MIT"
 
