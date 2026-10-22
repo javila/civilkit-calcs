@@ -7,14 +7,15 @@
 //! ```
 //!
 //! The output directory must be outside the repository: the generated `.cpd` and `.html` files
-//! and `summary.txt` are written there. The input files are only read. Directories whose name
+//! and `summary.txt` are written there, and so are the picture files of each worksheet (under
+//! `<output dir>/<worksheet name>/R<id>.svg|png`, the paths the `.cpd` refers to). The input files are only read. Directories whose name
 //! starts with `build`, `doc` or `includes` (at the top level of the input dir) are skipped.
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
-use calcpad_import_xmcd::{import_xmcd, ImportReport};
+use calcpad_import_xmcd::{import_xmcd_opts, ImportOptions, ImportReport};
 
 fn walk(dir: &Path, top: bool, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };
@@ -99,6 +100,10 @@ fn main() -> ExitCode {
         eprintln!("usage: batch <input dir> <output dir> <Cli binary>");
         return ExitCode::from(2);
     }
+    let no_pictures = std::env::var("IMPORT_PICTURES").map(|v| v == "off").unwrap_or(false);
+    let saved_results = std::env::var("IMPORT_SAVED_RESULTS")
+        .map(|v| v == "on")
+        .unwrap_or(false);
     let (input, outdir, cli) = (
         PathBuf::from(&args[0]),
         PathBuf::from(&args[1]),
@@ -130,7 +135,20 @@ fn main() -> ExitCode {
                 continue;
             }
         };
-        let r = import_xmcd(&xml);
+        let opts = ImportOptions {
+            asset_prefix: flat.clone(),
+            pictures: !no_pictures,
+            saved_results,
+            ..ImportOptions::default()
+        };
+        let r = import_xmcd_opts(&xml, &opts);
+        for a in &r.assets {
+            let p = outdir.join(&a.path);
+            if let Some(d) = p.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = std::fs::write(&p, &a.bytes);
+        }
         let cpd = outdir.join(format!("{}.cpd", flat));
         let html = outdir.join(format!("{}.html", flat));
         let _ = std::fs::write(&cpd, &r.calcpad);
@@ -182,6 +200,7 @@ fn main() -> ExitCode {
             m.converted += v.converted;
             m.with_notes += v.with_notes;
             m.attention += v.attention;
+            m.pictured += v.pictured;
         }
         for (k, v) in &rep.math_shapes {
             let m = merged.math_shapes.entry(k.clone()).or_default();
@@ -189,12 +208,22 @@ fn main() -> ExitCode {
             m.converted += v.converted;
             m.with_notes += v.with_notes;
             m.attention += v.attention;
+            m.pictured += v.pictured;
         }
         for mut i in rep.issues.clone() {
             i.region_id = i.region_id.map(|id| format!("{}:{}", fi, id));
             merged.issues.push(i);
         }
         merged.page_breaks += rep.page_breaks;
+        let (m, p) = (&mut merged.pictures, &rep.pictures);
+        m.svg_ok += p.svg_ok;
+        m.svg_failed += p.svg_failed;
+        m.png_used += p.png_used;
+        m.fallback_shown += p.fallback_shown;
+        m.svg_bytes += p.svg_bytes;
+        m.png_bytes += p.png_bytes;
+        m.saved_result_available += p.saved_result_available;
+        m.saved_result_emitted += p.saved_result_emitted;
     }
     let pct = |a: usize, b: usize| if b == 0 { 100.0 } else { a as f64 * 100.0 / b as f64 };
     rows.push(format!(
@@ -219,10 +248,24 @@ fn main() -> ExitCode {
     s.push_str("\nRegions by kind (all files):\n");
     for (k, v) in &merged.kinds {
         s.push_str(&format!(
-            "  {:<10} total {:>5}  converted {:>5}  attention {:>5}\n",
-            k, v.total, v.converted, v.attention
+            "  {:<10} total {:>5}  converted {:>5}  attention {:>5}  (of which shown as a static picture {:>5})\n",
+            k, v.total, v.converted, v.attention, v.pictured
         ));
     }
+    let showing = merged.regions_showing();
+    s.push_str(&format!(
+        "  regions showing something (live or picture): {} of {} ({:.1} %); live-convertible: {:.1} %\n",
+        showing,
+        t_regions,
+        pct(showing, t_regions),
+        pct(t_conv, t_regions)
+    ));
+    let p = &merged.pictures;
+    s.push_str(&format!(
+        "  pictures: metafile to SVG ok {} of {} metafiles (failed {}); raster pictures used {}; static fallbacks for unconverted regions {}\n  asset bytes: svg {}, png {}; saved scalar results on unconverted math regions: {} (written: {})\n",
+        p.svg_ok, p.svg_ok + p.svg_failed, p.svg_failed, p.png_used, p.fallback_shown, p.svg_bytes, p.png_bytes,
+        p.saved_result_available, p.saved_result_emitted
+    ));
     s.push_str(&format!(
         "  page breaks (layout, not counted): {}\n",
         merged.page_breaks

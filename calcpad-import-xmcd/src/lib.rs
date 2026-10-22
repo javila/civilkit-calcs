@@ -28,6 +28,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ir;
+pub mod picture;
 pub mod report;
 pub mod tables;
 pub mod translate;
@@ -37,22 +38,99 @@ pub use report::{Code, ImportReport, Issue, KindStats, RankedGap, Severity};
 pub use translate::GAP_MARKER;
 pub use xmcd::Limits;
 
-/// The result of an import: the Calcpad text and the report.
+/// A binary file the Calcpad text refers to: put it in the page's file library at `path`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Asset {
+    /// Library path relative to the library root, with `/` separators, for example
+    /// `imported/R1795.svg`. The Calcpad text refers to it by exactly this string in
+    /// `<img src="...">`, so the file must be stored under this path.
+    pub path: String,
+    pub mime: &'static str,
+    pub bytes: Vec<u8>,
+}
+
+/// Switches and limits for an import.
+#[derive(Debug, Clone)]
+pub struct ImportOptions {
+    /// Show pictures: picture regions as images, and a static picture of the original (with a
+    /// caption) in place of every region that did not convert and has a saved picture. When off,
+    /// those regions are placeholder lines only and no assets are produced.
+    pub pictures: bool,
+    /// For a region that did not convert, has no picture shown, and has a saved scalar result, write
+    /// that result as a labelled static line. Off by default; the report counts the regions it
+    /// would cover either way (`report.pictures.saved_result_available`).
+    pub saved_results: bool,
+    /// Directory (library path) the asset paths start with. Letters, digits, `_`, `-`, `.` and `/`
+    /// only; anything else is dropped. Give each imported worksheet its own so that region ids do
+    /// not collide between worksheets.
+    pub asset_prefix: String,
+    /// Reader limits (input size, nesting, picture bytes).
+    pub limits: Limits,
+    /// Metafile conversion limits.
+    pub svg_limits: picture::SvgLimits,
+    /// Most asset bytes produced for one worksheet; past it, pictures fall back to placeholders.
+    pub max_total_asset_bytes: usize,
+}
+
+impl Default for ImportOptions {
+    fn default() -> Self {
+        ImportOptions {
+            pictures: true,
+            saved_results: false,
+            asset_prefix: "imported".to_string(),
+            limits: Limits::default(),
+            svg_limits: picture::SvgLimits::default(),
+            max_total_asset_bytes: 128 * 1024 * 1024,
+        }
+    }
+}
+
+fn clean_prefix(p: &str) -> String {
+    let segs: Vec<String> = p
+        .split('/')
+        .map(|s| {
+            s.chars()
+                .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                .collect::<String>()
+        })
+        .filter(|s| !s.is_empty() && !s.chars().all(|c| c == '.'))
+        .collect();
+    if segs.is_empty() {
+        "imported".to_string()
+    } else {
+        segs.join("/")
+    }
+}
+
+/// The result of an import: the Calcpad text, the report and the picture files.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportResult {
     pub calcpad: String,
     pub report: ImportReport,
+    /// Files to store in the library, each under its `path`. Empty when `pictures` is off.
+    pub assets: Vec<Asset>,
 }
 
-/// Imports an `.xmcd` worksheet with the default limits.
+/// Imports an `.xmcd` worksheet with the default options.
 pub fn import_xmcd(xml: &str) -> ImportResult {
-    import_xmcd_with(xml, Limits::default())
+    import_xmcd_opts(xml, &ImportOptions::default())
 }
 
-/// Imports an `.xmcd` worksheet with explicit limits.
+/// Imports an `.xmcd` worksheet with explicit reader limits and otherwise default options.
 pub fn import_xmcd_with(xml: &str, limits: Limits) -> ImportResult {
-    match xmcd::read(xml, limits) {
-        Ok(sheet) => import_sheet(sheet),
+    import_xmcd_opts(
+        xml,
+        &ImportOptions {
+            limits,
+            ..ImportOptions::default()
+        },
+    )
+}
+
+/// Imports an `.xmcd` worksheet.
+pub fn import_xmcd_opts(xml: &str, opts: &ImportOptions) -> ImportResult {
+    match xmcd::read(xml, opts.limits) {
+        Ok(sheet) => import_sheet_opts(sheet, opts),
         Err(e) => {
             let (code, detail) = match e {
                 xmcd::ReadError::TooLarge => (Code::InputTooLarge, None),
@@ -73,13 +151,25 @@ pub fn import_xmcd_with(xml: &str, limits: Limits) -> ImportResult {
             ImportResult {
                 calcpad: String::new(),
                 report,
+                assets: Vec::new(),
             }
         }
     }
 }
 
-/// Translates a sheet that a reader already produced.
+/// Translates a sheet that a reader already produced, with the default options.
 pub fn import_sheet(sheet: ir::Sheet) -> ImportResult {
-    let (calcpad, report) = translate::translate(sheet);
-    ImportResult { calcpad, report }
+    import_sheet_opts(sheet, &ImportOptions::default())
+}
+
+/// Translates a sheet that a reader already produced.
+pub fn import_sheet_opts(sheet: ir::Sheet, opts: &ImportOptions) -> ImportResult {
+    let mut opts = opts.clone();
+    opts.asset_prefix = clean_prefix(&opts.asset_prefix);
+    let (calcpad, report, assets) = translate::translate(sheet, &opts);
+    ImportResult {
+        calcpad,
+        report,
+        assets,
+    }
 }

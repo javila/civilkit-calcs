@@ -235,13 +235,10 @@ fn trig_switches_the_output_to_radians() {
 fn unmapped_and_undefined_functions_are_told_apart() {
     let res = one(&eval(&call("stdev", &[r("1"), r("2")])));
     let i = res.report.gaps().next().unwrap();
-    assert_eq!((i.code, i.detail.as_deref()), (Code::UnmappedFunction, Some("stdev")));
+    assert_eq!((i.code, i.detail.as_deref()), (Code::BuiltinMissing, Some("stdev")));
     let res = one(&eval(&call("vendor_fn", &[r("1")])));
     let i = res.report.gaps().next().unwrap();
-    assert_eq!(
-        (i.code, i.detail.as_deref()),
-        (Code::UndefinedFunction, Some("vendor_fn"))
-    );
+    assert_eq!((i.code, i.detail.as_deref()), (Code::AddinFunction, Some("vendor_fn")));
 }
 
 #[test]
@@ -783,9 +780,13 @@ fn mk(id: &str, left: f64, top: f64, baseline: Option<f64>) -> Region {
         top,
         baseline,
         line: 0,
+        width: 0.0,
+        height: 0.0,
+        rendering: None,
         kind: RegionKind::Math(MathRegion {
             stmt: Stmt::Bare(calcpad_import_xmcd::ir::Expr::Num("1".into())),
             disabled: false,
+            saved_result: None,
         }),
     }
 }
@@ -895,7 +896,7 @@ fn ranking_orders_by_blocked_regions() {
     let ranked = import_xmcd(&sheet(&regs)).report.ranked_gaps();
     assert_eq!(ranked[0].code, Code::RangeVariable);
     assert_eq!(ranked[0].blocked(), 3);
-    assert_eq!(ranked[1].code, Code::UnmappedFunction);
+    assert_eq!(ranked[1].code, Code::BuiltinMissing);
     assert_eq!(ranked[1].top_details, vec![("stdev".to_string(), 1)]);
 }
 

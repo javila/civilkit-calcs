@@ -9,8 +9,10 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ir::*;
+use crate::picture::{self, SvgError};
 use crate::report::{Code, ImportReport, Issue, KindStats, Severity};
 use crate::tables::{self, Constant, FnRule};
+use crate::{Asset, ImportOptions};
 
 /// Every placeholder line starts with this (after the leading `'` that makes it a text line).
 pub const GAP_MARKER: &str = "[import-gap";
@@ -49,7 +51,7 @@ struct Pending {
 /// where regions whose baselines are within [`ROW_TOLERANCE`] of the first region of a row share
 /// that row. The baseline (not the top edge) is used because a tall region next to a short one
 /// sits on the same line while their top edges differ.
-pub fn reading_order(regions: &mut [Region]) {
+pub fn reading_order(regions: &mut Vec<Region>) {
     let key = |r: &Region| r.baseline.unwrap_or(r.top);
     let mut idx: Vec<usize> = (0..regions.len()).collect();
     idx.sort_by(|&a, &b| {
@@ -78,10 +80,8 @@ pub fn reading_order(regions: &mut [Region]) {
         ordered.extend(row);
         i = j;
     }
-    let old: Vec<Region> = regions.to_vec();
-    for (slot, &src) in ordered.iter().enumerate() {
-        regions[slot] = old[src].clone();
-    }
+    let mut old: Vec<Option<Region>> = std::mem::take(regions).into_iter().map(Some).collect();
+    regions.extend(ordered.iter().filter_map(|&src| old[src].take()));
 }
 
 /// Calcpad identifiers: a letter, then letters, digits, `_` and primes.
@@ -192,6 +192,11 @@ struct Tr {
     lines: Vec<String>,
     report: ImportReport,
     depth: usize,
+    opts: ImportOptions,
+    assets: Vec<Asset>,
+    used_paths: HashSet<String>,
+    asset_total: usize,
+    has_references: bool,
 }
 
 const MAX_RENDER_DEPTH: usize = 300;
@@ -466,10 +471,12 @@ impl Tr {
                 return self.apply_rule(rule, &rendered);
             }
         }
-        if n.sub.is_none() && tables::is_unmapped_function(&flat) {
-            self.issue(Code::UnmappedFunction, Some(flat));
+        if n.sub.is_none() && tables::is_builtin_missing(&flat) {
+            self.issue(Code::BuiltinMissing, Some(flat));
+        } else if self.has_references {
+            self.issue(Code::ReferenceFunction, Some(flat));
         } else {
-            self.issue(Code::UndefinedFunction, Some(flat));
+            self.issue(Code::AddinFunction, Some(flat));
         }
         atom("?call?")
     }
@@ -578,6 +585,10 @@ impl Tr {
     }
 
     fn bump(map: &mut BTreeMap<String, KindStats>, key: &str, converted: bool, notes: bool) {
+        Self::bump_p(map, key, converted, notes, false)
+    }
+
+    fn bump_p(map: &mut BTreeMap<String, KindStats>, key: &str, converted: bool, notes: bool, pictured: bool) {
         let s = map.entry(key.to_string()).or_default();
         s.total += 1;
         if converted {
@@ -587,6 +598,9 @@ impl Tr {
             }
         } else {
             s.attention += 1;
+            if pictured {
+                s.pictured += 1;
+            }
         }
     }
 
@@ -612,12 +626,146 @@ impl Tr {
         self.lines.push(line);
     }
 
+    /// Registers a binary asset and returns its library path, or `None` over the size budget.
+    fn add_asset(&mut self, id: &str, ext: &str, mime: &'static str, bytes: Vec<u8>) -> Option<String> {
+        if self.asset_total.saturating_add(bytes.len()) > self.opts.max_total_asset_bytes {
+            return None;
+        }
+        let base = format!("{}/R{}", self.opts.asset_prefix, sanitize_id(id));
+        let mut path = format!("{}.{}", base, ext);
+        let mut n = 2;
+        while self.used_paths.contains(&path) {
+            path = format!("{}-{}.{}", base, n, ext);
+            n += 1;
+        }
+        self.used_paths.insert(path.clone());
+        self.asset_total += bytes.len();
+        self.assets.push(Asset {
+            path: path.clone(),
+            mime,
+            bytes,
+        });
+        Some(path)
+    }
+
+    fn img_line(path: &str, r: &Region) -> String {
+        let style = if r.width > 0.0 {
+            format!("width:{:.1}pt;max-width:100%;", r.width.min(900.0))
+        } else {
+            "max-width:100%;".to_string()
+        };
+        format!(
+            "'<img style=\"{}\" src=\"{}\" alt=\"R{}\">",
+            style,
+            path,
+            sanitize_id(&r.id)
+        )
+    }
+
+    /// Output for a region that did not convert: a static picture of the original when the option is
+    /// on and the file has one, otherwise the placeholder line (plus a labelled saved result when
+    /// that option is on). Returns true when a picture was written.
+    fn show_gap(&mut self, r: &Region, codes: &[Code], attempt: Option<&str>, saved: Option<&SavedResult>) -> bool {
+        if saved.is_some() {
+            self.report.pictures.saved_result_available += 1;
+        }
+        if self.opts.pictures {
+            if let Some(png) = &r.rendering {
+                let len = png.len();
+                if let Some(path) = self.add_asset(&r.id, "png", "image/png", png.clone()) {
+                    // One line, so the caption stays under its picture.
+                    self.lines.push(format!(
+                        "{}<br/><i>{} (R{} {})</i>",
+                        Self::img_line(&path, r),
+                        picture::PICTURE_CAPTION,
+                        sanitize_id(&r.id),
+                        codes[0].as_str()
+                    ));
+                    self.report.pictures.fallback_shown += 1;
+                    self.report.pictures.png_bytes += len;
+                    self.issue(Code::StaticPicture, None);
+                    return true;
+                }
+            }
+        }
+        self.placeholder(&r.id, codes, attempt);
+        if self.opts.saved_results {
+            if let Some(sr) = saved {
+                let unit = sr.unit.as_ref().map(|u| format!(" {}", u)).unwrap_or_default();
+                self.lines.push(format!(
+                    "'<i>saved result from the original, not live (R{}): {}{}</i>",
+                    sanitize_id(&r.id),
+                    escape_text(&sr.value),
+                    escape_text(&unit)
+                ));
+                self.report.pictures.saved_result_emitted += 1;
+            }
+        }
+        false
+    }
+
     fn simple_gap(&mut self, key: &str, r: &Region, code: Code, detail: Option<String>) {
         self.issue(code, detail);
-        let codes = [code];
-        self.placeholder(&r.id, &codes, None);
+        let pictured = self.show_gap(r, &[code], None, None);
         self.flush_issues(&r.id, r.line, None);
-        Self::bump(&mut self.report.kinds, key, false, false);
+        Self::bump_p(&mut self.report.kinds, key, false, false, pictured);
+    }
+
+    fn picture(&mut self, r: &Region, p: &Picture) {
+        if !self.opts.pictures {
+            self.simple_gap("image", r, Code::Image, None);
+            return;
+        }
+        let mut note_fallback = false;
+        if let Some(mf) = &p.metafile {
+            match picture::metafile_to_svg(mf, self.opts.svg_limits) {
+                Ok(svg) => {
+                    let len = svg.len();
+                    if let Some(path) = self.add_asset(&r.id, "svg", "image/svg+xml", svg.into_bytes()) {
+                        self.lines.push(Self::img_line(&path, r));
+                        self.report.pictures.svg_ok += 1;
+                        self.report.pictures.svg_bytes += len;
+                        Self::bump(&mut self.report.kinds, "image", true, false);
+                        return;
+                    }
+                    note_fallback = true;
+                }
+                Err(e) => {
+                    note_fallback = true;
+                    let why = match e {
+                        SvgError::InputTooLarge => "input too large",
+                        SvgError::Failed => "conversion failed",
+                        SvgError::Aborted => "conversion aborted",
+                        SvgError::OutputTooLarge => "output too large",
+                        SvgError::Unsafe => "unsafe content",
+                    };
+                    self.cur.push(Pending {
+                        code: Code::SvgFallback,
+                        detail: Some(why.to_string()),
+                        root: None,
+                    });
+                }
+            }
+            self.report.pictures.svg_failed += 1;
+        }
+        let png = p.png.clone().or_else(|| r.rendering.clone());
+        if let Some(png) = png {
+            let len = png.len();
+            if let Some(path) = self.add_asset(&r.id, "png", "image/png", png) {
+                self.lines.push(Self::img_line(&path, r));
+                self.report.pictures.png_used += 1;
+                self.report.pictures.png_bytes += len;
+                if note_fallback && self.cur.is_empty() {
+                    self.issue(Code::SvgFallback, None);
+                }
+                self.flush_issues(&r.id, r.line, None);
+                Self::bump_p(&mut self.report.kinds, "image", true, true, false);
+                return;
+            }
+        }
+        // Neither usable: the placeholder.
+        self.cur.retain(|p| p.code != Code::SvgFallback);
+        self.simple_gap("image", r, Code::Image, None);
     }
 
     fn region(&mut self, r: &Region) {
@@ -633,7 +781,7 @@ impl Tr {
             }
             RegionKind::Math(m) => self.math(r, m),
             RegionKind::Plot => self.simple_gap("plot", r, Code::Plot, None),
-            RegionKind::Image => self.simple_gap("image", r, Code::Image, None),
+            RegionKind::Picture(p) => self.picture(r, p),
             RegionKind::Ole => self.simple_gap("ole", r, Code::OleObject, None),
             RegionKind::Component => self.simple_gap("component", r, Code::Component, None),
             RegionKind::Reference => self.simple_gap("reference", r, Code::WorksheetReference, None),
@@ -765,6 +913,7 @@ impl Tr {
             .collect();
         let has_notes = self.cur.iter().any(|p| p.code.severity() == Severity::Note);
         let converted = gap_codes.is_empty();
+        let mut pictured = false;
 
         if converted {
             if let Some(v) = origin_assign {
@@ -811,11 +960,11 @@ impl Tr {
                 let _ = arity;
                 self.gap_names.insert(name, root);
             }
-            self.placeholder(&r.id, &gap_codes, attempt.as_deref());
+            pictured = self.show_gap(r, &gap_codes, attempt.as_deref(), m.saved_result.as_ref());
         }
         self.flush_issues(&r.id, r.line, None);
-        Self::bump(&mut self.report.kinds, "math", converted, has_notes);
-        Self::bump(&mut self.report.math_shapes, shape, converted, has_notes);
+        Self::bump_p(&mut self.report.kinds, "math", converted, has_notes, pictured);
+        Self::bump_p(&mut self.report.math_shapes, shape, converted, has_notes, pictured);
     }
 }
 
@@ -948,8 +1097,9 @@ fn text_line(p: &Paragraph) -> Option<String> {
 }
 
 /// Translates a sheet. See the crate documentation.
-pub fn translate(mut sheet: Sheet) -> (String, ImportReport) {
+pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
     reading_order(&mut sheet.regions);
+    let has_references = sheet.regions.iter().any(|r| matches!(r.kind, RegionKind::Reference));
     let mut tr = Tr {
         origin: sheet.origin,
         defined: HashSet::new(),
@@ -965,6 +1115,11 @@ pub fn translate(mut sheet: Sheet) -> (String, ImportReport) {
             ..Default::default()
         },
         depth: 0,
+        opts: opts.clone(),
+        assets: Vec::new(),
+        used_paths: HashSet::new(),
+        asset_total: 0,
+        has_references,
     };
     for r in &sheet.regions {
         tr.region(r);
@@ -995,5 +1150,5 @@ pub fn translate(mut sheet: Sheet) -> (String, ImportReport) {
         out.push_str(l);
         out.push('\n');
     }
-    (out, tr.report)
+    (out, tr.report, tr.assets)
 }

@@ -29,9 +29,10 @@ pub enum Code {
     OtherRegion,
     UnknownElement,
     UnmappedUnit,
-    UnmappedFunction,
+    BuiltinMissing,
     UndefinedVariable,
-    UndefinedFunction,
+    AddinFunction,
+    ReferenceFunction,
     DependsOnGap,
     InvalidName,
     BadNumber,
@@ -48,6 +49,8 @@ pub enum Code {
     AbsOfArray,
     CallAsMultiplication,
     UnitOverride,
+    StaticPicture,
+    SvgFallback,
     // ---- whole-file problems ----
     XmlError,
     NotAWorksheet,
@@ -87,9 +90,10 @@ impl Code {
         Code::OtherRegion,
         Code::UnknownElement,
         Code::UnmappedUnit,
-        Code::UnmappedFunction,
+        Code::BuiltinMissing,
         Code::UndefinedVariable,
-        Code::UndefinedFunction,
+        Code::AddinFunction,
+        Code::ReferenceFunction,
         Code::DependsOnGap,
         Code::InvalidName,
         Code::BadNumber,
@@ -105,6 +109,8 @@ impl Code {
         Code::AbsOfArray,
         Code::CallAsMultiplication,
         Code::UnitOverride,
+        Code::StaticPicture,
+        Code::SvgFallback,
         Code::XmlError,
         Code::NotAWorksheet,
         Code::InputTooLarge,
@@ -133,9 +139,10 @@ impl Code {
             OtherRegion => "other-region",
             UnknownElement => "unknown-element",
             UnmappedUnit => "unmapped-unit",
-            UnmappedFunction => "unmapped-function",
+            BuiltinMissing => "builtin-missing",
             UndefinedVariable => "undefined-variable",
-            UndefinedFunction => "undefined-function",
+            AddinFunction => "addin-function",
+            ReferenceFunction => "reference-function",
             DependsOnGap => "depends-on-gap",
             InvalidName => "invalid-name",
             BadNumber => "bad-number",
@@ -151,6 +158,8 @@ impl Code {
             AbsOfArray => "abs-of-array",
             CallAsMultiplication => "call-as-multiplication",
             UnitOverride => "unit-override",
+            StaticPicture => "static-picture",
+            SvgFallback => "svg-fallback",
             XmlError => "xml-error",
             NotAWorksheet => "not-a-worksheet",
             InputTooLarge => "input-too-large",
@@ -161,7 +170,7 @@ impl Code {
         use Code::*;
         match self {
             GlobalDefinition | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits | AbsOfArray
-            | CallAsMultiplication | UnitOverride => Severity::Note,
+            | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
             XmlError | NotAWorksheet | InputTooLarge => Severity::Fatal,
             _ => Severity::Gap,
         }
@@ -193,9 +202,10 @@ impl Code {
             OtherRegion => "region kind the importer does not know",
             UnknownElement => "element the importer does not know",
             UnmappedUnit => "unit with no Calcpad equivalent in the mapping table",
-            UnmappedFunction => "built-in function with no Calcpad equivalent in the mapping table",
+            BuiltinMissing => "built-in function of the source tool that the engine lacks (no Calcpad equivalent in the table)",
             UndefinedVariable => "name used before it is defined (or defined by an add-in or an included worksheet)",
-            UndefinedFunction => "function that is not defined in the worksheet (an add-in or included worksheet?)",
+            AddinFunction => "function that is not defined in the sheet and is not a built-in: most likely supplied by a native add-in",
+            ReferenceFunction => "function that is not defined in this sheet; the sheet references other worksheets that may define it",
             DependsOnGap => "uses a name that an earlier unconverted region defines",
             InvalidName => "name that Calcpad cannot spell",
             BadNumber => "number literal the importer cannot read",
@@ -213,6 +223,8 @@ impl Code {
                 "name applied like a function but defined as a variable: converted as multiplication"
             }
             UnitOverride => "result shown in a unit: converted to a `|unit` conversion",
+            StaticPicture => "shown as a static picture of the original (not live, not editable)",
+            SvgFallback => "metafile could not be converted to SVG (failed or too large): the raster picture is used",
             XmlError => "the input is not well-formed XML (or uses a DTD, which is refused)",
             NotAWorksheet => "the XML is not a worksheet document",
             InputTooLarge => "the input exceeds the size limit",
@@ -244,6 +256,8 @@ pub struct KindStats {
     /// Converted but with at least one note.
     pub with_notes: usize,
     pub attention: usize,
+    /// Of the regions needing attention, how many still show something: a static picture of the original.
+    pub pictured: usize,
 }
 
 /// One row of the ranked list of missing features.
@@ -275,6 +289,27 @@ pub struct ImportReport {
     pub math_shapes: BTreeMap<String, KindStats>,
     pub issues: Vec<Issue>,
     pub page_breaks: usize,
+    pub pictures: PictureStats,
+}
+
+/// What happened to pictures and picture fallbacks.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PictureStats {
+    /// Picture regions whose metafile became an SVG.
+    pub svg_ok: usize,
+    /// Picture regions with a metafile that could not be used (conversion failed or too large).
+    pub svg_failed: usize,
+    /// Picture regions shown from a raster picture.
+    pub png_used: usize,
+    /// Regions that did not convert but are shown as a static picture of the original.
+    pub fallback_shown: usize,
+    /// Total bytes of SVG and of raster assets produced.
+    pub svg_bytes: usize,
+    pub png_bytes: usize,
+    /// Unconverted math regions that carry a saved scalar result.
+    pub saved_result_available: usize,
+    /// Of those, how many were written out as a labelled static line (option on, no picture used).
+    pub saved_result_emitted: usize,
 }
 
 impl ImportReport {
@@ -288,6 +323,10 @@ impl ImportReport {
     /// How many regions need the user's attention: the "5 of 140" of the UI.
     pub fn regions_needing_attention(&self) -> usize {
         self.kinds.values().map(|k| k.attention).sum()
+    }
+    /// Regions that show something: converted ones plus static pictures of unconverted ones.
+    pub fn regions_showing(&self) -> usize {
+        self.regions_converted() + self.kinds.values().map(|k| k.pictured).sum::<usize>()
     }
     /// Share of content regions that converted, 0.0 to 1.0 (1.0 for an empty sheet).
     pub fn convertible_ratio(&self) -> f64 {

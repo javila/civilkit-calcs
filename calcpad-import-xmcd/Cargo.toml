@@ -12,7 +12,12 @@ name = "calcpad_import_xmcd"
 [dependencies]
 # MIT OR Apache-2.0. Read-only XML tree, no DTD support unless asked for (we never ask), no unsafe.
 roxmltree = "0.20"
+# MIT. Metafile (WMF/EMF) to SVG; pulls in wmf-core, snafu, strum and embedded-io (all permissive).
+# Default features off: no tracing.
+emf-core = { version = "0.1.1", default-features = false, features = ["svg"] }
+# MIT OR Zlib OR Apache-2.0, already in the lockfile. Inflates the gzip items of the file with an output cap.
+miniz_oxide = "0.8"
 
 [dev-dependencies]
 # Only to check, in a test, that every unit name in the mapping table exists in the engine.
-calcpad-core = { path = "../calcpad-core" }
+calcpad-core = { package = "civilkit-calcs-engine", path = "../calcpad-core", version = "0.1.0" }

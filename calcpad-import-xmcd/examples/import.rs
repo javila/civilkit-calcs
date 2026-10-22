@@ -19,6 +19,9 @@ fn main() -> ExitCode {
     };
     let r = calcpad_import_xmcd::import_xmcd(&xml);
     print!("{}", r.calcpad);
+    for a in &r.assets {
+        eprintln!("asset {} ({}, {} bytes)", a.path, a.mime, a.bytes.len());
+    }
     eprintln!("---- report ----");
     eprint!("{}", r.report.to_text());
     if r.report.is_fatal() {

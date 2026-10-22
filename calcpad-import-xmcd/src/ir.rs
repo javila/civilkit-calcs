@@ -16,6 +16,13 @@ pub struct Sheet {
     pub regions: Vec<Region>,
 }
 
+/// A picture region: a vector metafile (WMF or EMF bytes) and/or a PNG.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Picture {
+    pub metafile: Option<Vec<u8>>,
+    pub png: Option<Vec<u8>>,
+}
+
 /// One region of the page. Position is kept only so that the translator can order the regions.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Region {
@@ -26,6 +33,11 @@ pub struct Region {
     pub baseline: Option<f64>,
     /// 1-based line in the source file (0 when the reader has no line information).
     pub line: u32,
+    /// Size on the page in points (0 when the file gives none).
+    pub width: f64,
+    pub height: f64,
+    /// The tool's own saved picture of the region (PNG bytes), when the file carries one.
+    pub rendering: Option<Vec<u8>>,
     pub kind: RegionKind,
 }
 
@@ -34,7 +46,7 @@ pub enum RegionKind {
     Text(Vec<Paragraph>),
     Math(MathRegion),
     Plot,
-    Image,
+    Picture(Picture),
     /// An embedded object of another application (an OLE object).
     Ole,
     /// A scripted or data component (data table, spreadsheet, ...).
@@ -75,6 +87,15 @@ pub struct MathRegion {
     pub stmt: Stmt,
     /// The region is switched off in the source (it is not evaluated there either).
     pub disabled: bool,
+    /// The last calculated result the file stored for the region, when it is a single value.
+    pub saved_result: Option<SavedResult>,
+}
+
+/// A stored scalar result: the number (or string) as written, and its unit in the source's spelling.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SavedResult {
+    pub value: String,
+    pub unit: Option<String>,
 }
 
 /// What a math region does.

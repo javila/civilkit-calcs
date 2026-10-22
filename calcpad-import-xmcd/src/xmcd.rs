@@ -6,9 +6,13 @@
 //! The XML is untrusted: a DTD (and so every entity definition) is refused, the input size and the
 //! node count are capped, and every recursion below has a depth limit.
 
+use std::cell::Cell;
+use std::collections::HashMap;
+
 use roxmltree::{Document, Node, ParsingOptions};
 
 use crate::ir::*;
+use crate::picture;
 use crate::report::Code;
 
 /// Limits applied while reading. The defaults suit worksheets of a few megabytes.
@@ -22,6 +26,10 @@ pub struct Limits {
     pub max_depth: usize,
     /// Deepest XML element nesting accepted at all (checked before the parser runs).
     pub max_xml_depth: usize,
+    /// Largest decoded binary item (a picture), in bytes. Larger items are ignored.
+    pub max_item_bytes: usize,
+    /// Most decoded bytes over all items of one file; past it, items are ignored.
+    pub max_total_item_bytes: usize,
 }
 
 impl Default for Limits {
@@ -31,6 +39,8 @@ impl Default for Limits {
             max_nodes: 4_000_000,
             max_depth: 64,
             max_xml_depth: 256,
+            max_item_bytes: 16 * 1024 * 1024,
+            max_total_item_bytes: 192 * 1024 * 1024,
         }
     }
 }
@@ -159,13 +169,56 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
             break;
         }
     }
+    let mut items = HashMap::new();
+    for n in root.descendants() {
+        if is_ws(n, "item") {
+            if let Some(id) = n.attribute("item-id") {
+                items.insert(id, n);
+            }
+        }
+    }
+    let ctx = Ctx {
+        doc: &doc,
+        items,
+        lim: &limits,
+        budget: Cell::new(limits.max_total_item_bytes),
+    };
     let mut regions = Vec::new();
     if let Some(container) = root.children().find(|c| is_ws(*c, "regions")) {
         for r in container.children().filter(|c| is_ws(*c, "region")) {
-            collect_region(&doc, r, &limits, 0, &mut regions);
+            collect_region(&ctx, r, 0, &mut regions);
         }
     }
     Ok(Sheet { origin, regions })
+}
+
+struct Ctx<'a, 'i> {
+    doc: &'a Document<'i>,
+    items: HashMap<&'a str, Node<'a, 'i>>,
+    lim: &'a Limits,
+    /// Decoded bytes still allowed.
+    budget: Cell<usize>,
+}
+
+impl Ctx<'_, '_> {
+    /// The decoded bytes of binary item `id`, or `None` if it is missing, malformed or over a cap.
+    fn item(&self, id: &str) -> Option<Vec<u8>> {
+        let node = self.items.get(id)?;
+        let text = node.text()?;
+        let mut bytes = picture::base64_decode(text)?;
+        if node.attribute("content-encoding") == Some("gzip") {
+            bytes = picture::gunzip(&bytes, self.lim.max_item_bytes)?;
+        }
+        if bytes.len() > self.lim.max_item_bytes || bytes.len() > self.budget.get() {
+            return None;
+        }
+        self.budget.set(self.budget.get() - bytes.len());
+        Some(bytes)
+    }
+
+    fn item_of(&self, n: Node) -> Option<Vec<u8>> {
+        self.item(n.attribute("item-idref")?)
+    }
 }
 
 fn num_attr(n: Node, name: &str) -> Option<f64> {
@@ -174,66 +227,83 @@ fn num_attr(n: Node, name: &str) -> Option<f64> {
         .filter(|v| v.is_finite())
 }
 
-fn collect_region(doc: &Document, r: Node, lim: &Limits, depth: usize, out: &mut Vec<Region>) {
+fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
+    let lim = ctx.lim;
     let id = r.attribute("region-id").unwrap_or("?").to_string();
-    let line = doc.text_pos_at(r.range().start).row;
+    let line = ctx.doc.text_pos_at(r.range().start).row;
     let left = num_attr(r, "left").unwrap_or(0.0);
     let top = num_attr(r, "top").unwrap_or(0.0);
+    let width = num_attr(r, "width").unwrap_or(0.0).max(0.0);
+    let height = num_attr(r, "height").unwrap_or(0.0).max(0.0);
     let baseline = num_attr(r, "align-y");
     // The content element is the first child that is not a link or a cached rendering.
     let content = r
         .children()
         .find(|c| c.is_element() && ns_tail(*c) == "worksheet30" && !matches!(local(*c), "link" | "rendering"));
-    let idx = out.len();
-    let kind = match content {
-        None => RegionKind::Other("empty".into()),
-        Some(c) => match local(c) {
-            "math" => RegionKind::Math(read_math(c, lim)),
-            "text" => {
-                let mut paras = Vec::new();
-                let mut nested = Vec::new();
-                for p in c.children().filter(|x| is_ws(*x, "p")) {
-                    let mut pieces = Vec::new();
-                    walk_inline(p, &Run::default(), &mut pieces, &mut nested, depth, lim);
-                    paras.push(Paragraph {
-                        style: p.attribute("style").unwrap_or("Normal").to_string(),
-                        pieces,
-                    });
-                }
-                // Reserve the slot so that the text region precedes the regions nested in it.
-                out.push(Region {
-                    id: id.clone(),
-                    left,
-                    top,
-                    baseline,
-                    line,
-                    kind: RegionKind::Text(paras),
-                });
-                for n in nested {
-                    if depth < lim.max_depth {
-                        collect_region(doc, n, lim, depth + 1, out);
-                    }
-                }
-                return;
-            }
-            "plot" => RegionKind::Plot,
-            "picture" => RegionKind::Image,
-            "ole" => RegionKind::Ole,
-            "component" => RegionKind::Component,
-            "reference" => RegionKind::Reference,
-            "pageBreak" => RegionKind::PageBreak,
-            other => RegionKind::Other(other.to_string()),
-        },
+    let tag = content.map(local).unwrap_or("");
+    // The saved raster picture of the region, wanted for everything that is not prose or layout.
+    let rendering = if matches!(tag, "text" | "pageBreak" | "") {
+        None
+    } else {
+        r.children()
+            .find(|c| is_ws(*c, "rendering"))
+            .and_then(|c| ctx.item_of(c))
+            .filter(|b| picture::is_png(b))
     };
-    debug_assert!(idx == out.len());
-    out.push(Region {
-        id,
+    let mk = |kind: RegionKind, rendering: Option<Vec<u8>>| Region {
+        id: id.clone(),
         left,
         top,
         baseline,
         line,
+        width,
+        height,
+        rendering,
         kind,
-    });
+    };
+    let Some(c) = content else {
+        out.push(mk(RegionKind::Other("empty".into()), None));
+        return;
+    };
+    match local(c) {
+        "math" => out.push(mk(RegionKind::Math(read_math(c, lim)), rendering)),
+        "text" => {
+            let mut paras = Vec::new();
+            let mut nested = Vec::new();
+            for p in c.children().filter(|x| is_ws(*x, "p")) {
+                let mut pieces = Vec::new();
+                walk_inline(p, &Run::default(), &mut pieces, &mut nested, depth, lim);
+                paras.push(Paragraph {
+                    style: p.attribute("style").unwrap_or("Normal").to_string(),
+                    pieces,
+                });
+            }
+            // The text region precedes the regions nested in it.
+            out.push(mk(RegionKind::Text(paras), None));
+            for n in nested {
+                if depth < lim.max_depth {
+                    collect_region(ctx, n, depth + 1, out);
+                }
+            }
+        }
+        "picture" => {
+            let mut pic = Picture::default();
+            for k in c.children().filter(|k| k.is_element()) {
+                match local(k) {
+                    "metafile" if pic.metafile.is_none() => pic.metafile = ctx.item_of(k),
+                    "png" if pic.png.is_none() => pic.png = ctx.item_of(k).filter(|b| picture::is_png(b)),
+                    _ => {}
+                }
+            }
+            out.push(mk(RegionKind::Picture(pic), rendering));
+        }
+        "plot" => out.push(mk(RegionKind::Plot, rendering)),
+        "ole" => out.push(mk(RegionKind::Ole, rendering)),
+        "component" => out.push(mk(RegionKind::Component, rendering)),
+        "reference" => out.push(mk(RegionKind::Reference, rendering)),
+        "pageBreak" => out.push(mk(RegionKind::PageBreak, None)),
+        other => out.push(mk(RegionKind::Other(other.to_string()), rendering)),
+    }
 }
 
 /// Walks the children of a paragraph or a formatting element, collecting runs. Regions found
@@ -354,7 +424,74 @@ fn read_math(m: Node, lim: &Limits) -> MathRegion {
         },
         Some(n) => read_stmt(unwrap_provenance(n), lim),
     };
-    MathRegion { stmt, disabled }
+    let saved_result = m
+        .descendants()
+        .find(|n| is_ml(*n) && local(*n) == "result")
+        .and_then(read_saved_result);
+    MathRegion {
+        stmt,
+        disabled,
+        saved_result,
+    }
+}
+
+/// The stored result of an evaluation when it is a single number or string, with its unit.
+fn read_saved_result(res: Node) -> Option<SavedResult> {
+    let kid = res.children().find(|c| c.is_element())?;
+    let take_value = |n: Node| -> Option<String> {
+        let t = n.text()?.trim().to_string();
+        if t.is_empty() || t.len() > 64 {
+            return None;
+        }
+        // Numbers only; strings and anything else are not carried.
+        (local(n) == "real" && t.parse::<f64>().map(|v| v.is_finite()).unwrap_or(false)).then_some(t)
+    };
+    match local(kid) {
+        "real" => Some(SavedResult {
+            value: take_value(kid)?,
+            unit: None,
+        }),
+        "unitedValue" => {
+            let value = take_value(kid.children().find(|c| c.is_element() && local(*c) == "real")?)?;
+            let mono = kid.children().find(|c| c.is_element() && local(*c) == "unitMonomial");
+            let mut num: Vec<String> = Vec::new();
+            let mut den: Vec<String> = Vec::new();
+            if let Some(m) = mono {
+                for u in m.children().filter(|c| c.is_element() && local(*c) == "unitReference") {
+                    let name = u.attribute("unit")?;
+                    if name.len() > 40 {
+                        return None;
+                    }
+                    let pn: i32 = u.attribute("power-numerator").and_then(|v| v.parse().ok()).unwrap_or(1);
+                    let pd: i32 = u
+                        .attribute("power-denominator")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(1);
+                    if pd == 0 {
+                        return None;
+                    }
+                    let (list, p) = if pn < 0 { (&mut den, -pn) } else { (&mut num, pn) };
+                    let mut t = name.to_string();
+                    if p != 1 || pd != 1 {
+                        t = if pd == 1 {
+                            format!("{}^{}", t, p)
+                        } else {
+                            format!("{}^({}/{})", t, p, pd)
+                        };
+                    }
+                    list.push(t);
+                }
+            }
+            let unit = match (num.is_empty(), den.is_empty()) {
+                (true, true) => None,
+                (false, true) => Some(num.join("*")),
+                (true, false) => Some(format!("1/({})", den.join("*"))),
+                (false, false) => Some(format!("{}/({})", num.join("*"), den.join("*"))),
+            };
+            Some(SavedResult { value, unit })
+        }
+        _ => None,
+    }
 }
 
 fn unwrap_provenance<'a, 'i>(mut n: Node<'a, 'i>) -> Node<'a, 'i> {
