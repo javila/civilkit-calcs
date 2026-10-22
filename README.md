@@ -33,6 +33,17 @@ The upstream copyright and licence are kept in [LICENSE](LICENSE) and [NOTICE](N
 versions this work tracks are listed in NOTICE: the frontend 8.0.0-beta3-preview, the engine ported
 from commit `0cf438f`. CalcpadCE's own version is tracked there, separately from the CivilKit Calcs version.
 
+## Rust crates
+
+The Rust libraries are published on crates.io (0.1.0, early; the API may change between minor versions):
+
+* [`civilkit-calcs-engine`](https://crates.io/crates/civilkit-calcs-engine): the calculation engine.
+* [`civilkit-calcs-highlighter`](https://crates.io/crates/civilkit-calcs-highlighter): tokenizer, linter, prettifier and snippets.
+* [`civilkit-calcs-docx`](https://crates.io/crates/civilkit-calcs-docx): Word and Excel export.
+
+Their Rust crate names are unchanged (`calcpad_core`, `calcpad_highlighter`, `calcpad_docx`), so `use calcpad_core::...` works
+with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 0.x semver, separate from the app's YY.M.N version.
+
 ## What we changed
 
 * **Engine:** the Rust engine, compiled to WebAssembly, replaces the .NET engine and the server it

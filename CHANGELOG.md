@@ -30,6 +30,9 @@ worksheet language, with the engine, highlighter and Word and Excel export reimp
 ### Changed
 - The product is named CivilKit Calcs; CalcpadCE is credited in the About text, README, LICENSE and NOTICE.
 
+### Crates
+- `civilkit-calcs-engine`, `civilkit-calcs-highlighter` and `civilkit-calcs-docx` 0.1.0 are published on crates.io.
+
 ### Known limits
 - Raster (SkiaSharp) plots, `#ProjectPath`/`#LibraryPath` path roots and compiled `.cpdz` worksheets are not supported.
 - Exports are untested in Microsoft Office: Excel files were checked in openpyxl and LibreOffice, Word files in
