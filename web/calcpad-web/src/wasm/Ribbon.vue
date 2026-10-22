@@ -1,0 +1,240 @@
+<template>
+  <div class="rb" role="toolbar" ref="root">
+    <div class="rb-quick">
+      <button class="rb-file" data-ribbon-btn="file" title="File: recent worksheets, the library, samples, save and export"
+        @mousedown.prevent @click="fire(FILE, $event)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" v-html="ICONS_SMALL.menu"></svg><span>File</span>
+      </button>
+      <button v-for="b in QUICK" :key="b.id" class="rb-q" :title="b.title || b.label" :aria-label="b.label"
+        :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" v-html="ICONS_SMALL[b.icon!]"></svg>
+      </button>
+    </div>
+    <div class="rb-tabs" role="tablist">
+      <button v-for="t in RIBBON" :key="t.id" class="rb-tab" :class="{ on: t.id === active }" role="tab"
+        :aria-selected="t.id === active" :data-ribbon-tab="t.id" @click="selectTab(t.id)">{{ t.label }}</button>
+    </div>
+    <div class="rb-panel" role="tabpanel" :data-ribbon-panel="active">
+      <div v-for="g in tab.groups" :key="g.name" class="rb-group">
+        <div class="rb-cells">
+          <template v-for="(cell, ci) in cells(g)" :key="ci">
+            <button v-if="cell.big" class="rb-big" :class="{ on: isOn(cell.big) }" :title="cell.big.title || cell.big.label"
+              :data-ribbon-btn="cell.big.id" @mousedown.prevent @click="fire(cell.big, $event)">
+              <svg class="rb-ic" viewBox="0 0 32 32" width="32" height="32" v-html="ICONS_BIG[cell.big.icon!] ?? ICONS_BIG.cube"></svg>
+              <span class="rb-label">{{ cell.big.label }}<i v-if="cell.big.palette || cell.big.more" class="rb-caret"></i></span>
+            </button>
+            <div v-else class="rb-stack">
+              <button v-for="b in cell.stack" :key="b.id" class="rb-small" :class="{ on: isOn(b) }" :title="b.title || b.label"
+                :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round" v-html="ICONS_SMALL[b.icon!]"></svg>
+                <span>{{ b.label }}</span><i v-if="b.palette || b.more" class="rb-caret"></i>
+              </button>
+            </div>
+          </template>
+        </div>
+        <div class="rb-gname">{{ g.name }}</div>
+      </div>
+    </div>
+    <div v-if="pop" class="rb-pop" :class="{ wide: pop.wide }" :style="pop.style" role="dialog" :data-ribbon-popover="pop.id" @mousedown="onPopDown">
+      <input v-if="pop.filter" ref="filterEl" v-model="q" class="rb-filter" type="search" placeholder="Filter" aria-label="Filter" />
+      <div v-if="pop.loading" class="rb-pop-h">Loading...</div>
+      <template v-for="s in shown" :key="s.heading + s.items[0]?.label">
+        <div v-if="s.heading" class="rb-pop-h">{{ s.heading }}</div>
+        <div class="rb-pop-grid">
+          <button v-for="e in s.items" :key="(e.snipKey ?? '') + e.label + e.text" class="rb-glyph" :title="e.title || e.text.replace(/\n/g, ' ').trim()"
+            :data-ribbon-glyph="e.label" :data-snip-key="e.snipKey" @click="pick(e)">{{ e.label }}</button>
+        </div>
+      </template>
+      <div v-if="pop.filter && !pop.loading && !shown.length" class="rb-pop-h">No match</div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { MORE, QUICK, RIBBON } from './ribbon-data';
+import type { Entry, RibbonButton, RibbonGroup, Section } from './ribbon-data';
+import { ICONS_BIG, ICONS_SMALL } from './ribbon-icons';
+import { insertLibrarySnippet, loadSnippets, sectionsFor } from './ribbon-snippets';
+import type { Snip } from './ribbon-snippets';
+import { insertSnippet, isActive, runAction } from './ribbon-actions';
+import type { RibbonCtx } from './ribbon-actions';
+
+const props = defineProps<{ ctx: Omit<RibbonCtx, 'anchor'> }>();
+const FILE: RibbonButton = { id: 'file', label: 'File', action: 'filemenu' };
+const active = ref('math');
+const tab = computed(() => RIBBON.find(t => t.id === active.value) ?? RIBBON[0]);
+const root = ref<HTMLElement | null>(null);
+type Pop = { id: string; sections: Section[]; style: Record<string, string>; filter: boolean; wide: boolean; loading: boolean };
+const pop = ref<Pop | null>(null);
+const q = ref('');
+const filterEl = ref<HTMLInputElement | null>(null);
+const snipByKey = new Map<string, Snip>();
+const shown = computed<Section[]>(() => {
+  const p = pop.value;
+  if (!p) return [];
+  const needle = q.value.trim().toLowerCase();
+  if (!needle) return p.sections;
+  return p.sections
+    .map(s => ({ heading: s.heading, items: s.items.filter(e => (e.search ?? `${e.label} ${e.text} ${e.title ?? ''}`.toLowerCase()).includes(needle) || s.heading.toLowerCase().includes(needle)) }))
+    .filter(s => s.items.length);
+});
+let popAnchor: HTMLElement | null = null;
+
+// Toggle states (theme, result mode, panes) live outside Vue; re-read them on a slow tick and after clicks.
+const tick = ref(0);
+const timer = setInterval(() => tick.value++, 500);
+const ctxWith = (anchor: HTMLElement): RibbonCtx => ({ ...props.ctx, anchor });
+const isOn = (b: RibbonButton): boolean => (void tick.value, !!b.action && isActive(b.action, ctxWith(document.body)));
+
+type Cell = { big?: RibbonButton; stack?: RibbonButton[] };
+/** Big buttons stand alone; runs of small buttons stack three to a column. */
+function cells(g: RibbonGroup): Cell[] {
+  const out: Cell[] = [];
+  for (const b of g.buttons) {
+    if (b.size === 'small') {
+      const last = out[out.length - 1];
+      if (last?.stack && last.stack.length < 3) last.stack.push(b);
+      else out.push({ stack: [b] });
+    } else out.push({ big: b });
+  }
+  return out;
+}
+
+function closePop(refocus: boolean): void {
+  if (!pop.value) return;
+  pop.value = null;
+  popAnchor = null;
+  if (refocus) (props.ctx.editor() as any)?.focus();
+}
+function selectTab(id: string): void {
+  closePop(false);
+  active.value = id;
+}
+
+function place(anchor: HTMLElement, wide: boolean): Record<string, string> {
+  const r = anchor.getBoundingClientRect();
+  if (window.innerWidth <= 700) return {};
+  const width = wide ? 600 : 340;
+  return { left: `${Math.max(4, Math.min(r.left, window.innerWidth - width - 8))}px`, top: `${r.bottom + 2}px` };
+}
+
+function openPalette(b: RibbonButton, anchor: HTMLElement): void {
+  if (pop.value?.id === b.id) return closePop(true);
+  q.value = '';
+  popAnchor = anchor;
+  if (b.more) {
+    const spec = MORE[b.more];
+    pop.value = { id: b.id, sections: [], style: place(anchor, true), filter: !!spec.filter, wide: true, loading: true };
+    void loadSnippets().then(all => {
+      for (const s of all) snipByKey.set(`${s.category}|${s.insert}`, s);
+      if (pop.value?.id !== b.id) return;
+      pop.value = { ...pop.value, sections: sectionsFor(all, spec), loading: false };
+      if (spec.filter && window.innerWidth > 700) void nextTick(() => filterEl.value?.focus());
+    }).catch(() => {
+      if (pop.value?.id === b.id) pop.value = { ...pop.value, loading: false, sections: [{ heading: 'The snippet library could not be loaded', items: [] }] };
+    });
+    return;
+  }
+  const wide = b.palette!.reduce((n, s) => n + s.items.length, 0) > 60;
+  pop.value = { id: b.id, sections: b.palette!, style: place(anchor, wide), filter: wide, wide, loading: false };
+}
+
+function fire(b: RibbonButton, ev: MouseEvent): void {
+  const anchor = ev.currentTarget as HTMLElement;
+  if (b.palette || b.more) {
+    openPalette(b, anchor);
+  } else {
+    closePop(false);
+    if (b.text !== undefined) insertSnippet(props.ctx.editor(), b.text, !!b.line);
+    else if (b.action) runAction(b.action, ctxWith(anchor));
+  }
+  tick.value++;
+}
+
+function pick(e: Entry): void {
+  if (e.snipKey) insertLibrarySnippet(props.ctx.editor(), e.text, !!e.line, snipByKey.get(e.snipKey));
+  else insertSnippet(props.ctx.editor(), e.text, !!e.line);
+  closePop(false);
+}
+/** Keep the editor's focus, except when the click lands in the filter box. */
+function onPopDown(e: MouseEvent): void {
+  if ((e.target as HTMLElement).tagName !== 'INPUT') e.preventDefault();
+}
+
+function onDocDown(e: MouseEvent): void {
+  if (!pop.value) return;
+  const t = e.target as Node;
+  if ((root.value?.querySelector('.rb-pop') as HTMLElement | null)?.contains(t) || popAnchor?.contains(t)) return;
+  closePop(false);
+}
+function onKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && pop.value) {
+    e.stopPropagation();
+    closePop(true);
+  }
+}
+onMounted(() => {
+  document.addEventListener('mousedown', onDocDown, true);
+  document.addEventListener('keydown', onKey, true);
+});
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  document.removeEventListener('mousedown', onDocDown, true);
+  document.removeEventListener('keydown', onKey, true);
+});
+</script>
+
+<style>
+.rb{position:relative;flex:none;font-size:12px;user-select:none;
+  background:var(--vscode-sideBar-background,#f3f3f3);color:var(--vscode-foreground,#333);
+  border-bottom:1px solid var(--vscode-panel-border,#ddd)}
+.rb svg{flex:none}
+.rb{--rb-ic-main:#2f7fd1;--rb-ic-hi:#9cc9f3;--rb-ic-lo:#1b5aa6;--rb-ic-line:#164a85;--rb-ic-ink:#ffffff;--rb-ic-acc:#f0a030}
+:root[data-theme="dark"] .rb{--rb-ic-main:#4b9be6;--rb-ic-hi:#a9d4ff;--rb-ic-lo:#2468b8;--rb-ic-line:#0e2a4a;--rb-ic-ink:#ffffff;--rb-ic-acc:#ffb84d}
+.rb-ic .m{fill:var(--rb-ic-main)}.rb-ic .h{fill:var(--rb-ic-hi)}.rb-ic .l{fill:var(--rb-ic-lo)}.rb-ic .a{fill:var(--rb-ic-acc)}.rb-ic .k{fill:var(--rb-ic-ink)}
+.rb-ic .o,.rb-ic .w,.rb-ic .x{fill:none;stroke-linecap:round;stroke-linejoin:round}
+.rb-ic .o{stroke:var(--rb-ic-line);stroke-width:1.2}.rb-ic .w{stroke:var(--rb-ic-ink);stroke-width:2.2}.rb-ic .x{stroke:var(--rb-ic-ink);stroke-width:.9;opacity:.65}
+.rb-quick{display:flex;align-items:center;gap:2px;height:30px;padding:0 6px;
+  background:var(--vscode-titleBar-activeBackground,var(--vscode-sideBar-background,#f3f3f3))}
+.rb-file{display:flex;align-items:center;gap:6px;height:24px;padding:0 12px 0 8px;margin-right:6px;border:1px solid var(--vscode-focusBorder,#0060c0);
+  border-radius:12px;background:var(--vscode-button-background,#0060c0);color:var(--vscode-button-foreground,#fff);font:inherit;font-weight:600;cursor:pointer}
+.rb-file:hover{filter:brightness(1.12)}
+.rb-q{display:flex;align-items:center;justify-content:center;width:26px;height:24px;border:1px solid transparent;border-radius:3px;background:none;color:inherit;cursor:pointer}
+.rb-q:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08));border-color:var(--vscode-panel-border,#ccc)}
+.rb-tabs{display:flex;overflow-x:auto;padding:0 4px;scrollbar-width:none;border-top:1px solid var(--vscode-panel-border,#ddd)}
+.rb-tab{flex:none;height:26px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.rb-tab:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08))}
+.rb-tab.on{border-bottom-color:var(--vscode-focusBorder,#0060c0);font-weight:600}
+.rb-panel{display:flex;align-items:stretch;height:96px;padding:3px 4px 0;overflow-x:auto;overflow-y:hidden;
+  background:var(--vscode-editor-background,#fff);border-top:1px solid var(--vscode-panel-border,#ddd)}
+.rb-group{flex:none;display:flex;flex-direction:column;padding:0 6px;border-right:1px solid var(--vscode-panel-border,#ddd)}
+.rb-group:last-child{border-right:0}
+.rb-cells{flex:1;display:flex;align-items:flex-start;gap:2px;min-height:0}
+.rb-big,.rb-small{display:flex;border:1px solid transparent;border-radius:3px;background:none;color:inherit;font:inherit;cursor:pointer}
+.rb-big{flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;min-width:52px;height:68px;padding:4px 6px}
+.rb-small{align-items:center;gap:5px;height:22px;padding:0 6px;white-space:nowrap;text-align:left}
+.rb-stack{display:flex;flex-direction:column;justify-content:flex-start;gap:0;min-width:96px}
+.rb-big:hover,.rb-small:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08));border-color:var(--vscode-panel-border,#ccc)}
+.rb-big.on,.rb-small.on{background:var(--vscode-toolbar-activeBackground,rgba(0,96,192,.18));border-color:var(--vscode-focusBorder,#0060c0)}
+.rb-label{font-size:11px;line-height:1.1;white-space:nowrap}
+.rb-caret{display:inline-block;margin-left:4px;vertical-align:middle;border:4px solid transparent;border-top-color:currentColor;border-bottom:0}
+.rb-gname{flex:none;text-align:center;font-size:10px;opacity:.65;padding:2px 0;white-space:nowrap}
+.rb-pop{position:fixed;z-index:1100;width:340px;max-width:calc(100vw - 8px);max-height:70vh;overflow:auto;padding:6px 8px 8px;
+  background:var(--vscode-menu-background,#fff);color:var(--vscode-menu-foreground,#222);
+  border:1px solid var(--vscode-menu-border,#c8c8c8);box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:4px}
+.rb-pop.wide{width:600px}
+.rb-filter{position:sticky;top:0;width:100%;box-sizing:border-box;margin:0 0 4px;padding:4px 8px;font:inherit;font-size:12px;color:inherit;background:var(--vscode-input-background,#fff);border:1px solid var(--vscode-input-border,#bbb);border-radius:3px}
+.rb-pop-h{margin:6px 0 3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
+.rb-pop-grid{display:flex;flex-wrap:wrap;gap:3px}
+.rb-glyph{min-width:30px;max-width:260px;height:26px;padding:0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--vscode-panel-border,#ccc);border-radius:3px;background:none;color:inherit;
+  font:13px var(--vscode-editor-font-family,monospace);cursor:pointer}
+.rb-glyph:hover{background:var(--vscode-menu-selectionBackground,#0060c0);color:var(--vscode-menu-selectionForeground,#fff)}
+@media (max-width:700px){
+  .rb-pop,.rb-pop.wide{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:55vh;border-radius:10px 10px 0 0}
+  .rb-glyph{min-width:36px;height:34px}
+}
+</style>
