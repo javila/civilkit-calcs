@@ -16,6 +16,10 @@
 export interface Entry {
     label: string;
     text: string;
+    /** Set on library snippets (category and insert text); the hand-picked entries have none. */
+    snipKey?: string;
+    /** Lower-case text the popover filter searches. */
+    search?: string;
     title?: string;
     line?: boolean;
     test?: string;
@@ -40,7 +44,43 @@ export interface RibbonButton {
     skip?: string;
     action?: string;
     palette?: Section[];
+    /** Opens the full library list named here (a key of MORE), filled from the snippet library. */
+    more?: string;
 }
+/** A full-list popover: every library snippet of these categories (a category also matches its sub-categories). */
+export interface MoreSpec { title: string; categories: string[]; filter?: boolean }
+export const MORE: Record<string, MoreSpec> = {
+    constants: { title: 'All constants', categories: ['Constants'] },
+    operators: { title: 'All operators', categories: ['Operators'] },
+    symbols: { title: 'All symbols', categories: ['Symbols'], filter: true },
+    units: { title: 'All units', categories: ['Units'], filter: true },
+    keywords: { title: 'Program flow, loops, modules', categories: ['Program Flow Control', 'Iteration Blocks', 'Modules and Macros', 'Read Only'] },
+    numerical: { title: 'Numerical methods and blocks', categories: ['Numerical Methods'] },
+    uiInputs: { title: 'Input fields', categories: ['UI Inputs'] },
+    externalData: { title: 'Read and write files', categories: ['External Data'] },
+    breakpoints: { title: 'Breakpoints', categories: ['Breakpoints'] },
+    fnElementary: { title: 'Elementary functions', categories: ['Functions/Trigonometric', 'Functions/Inverse Trigonometric', 'Functions/Hyperbolic', 'Functions/Inverse Hyperbolic', 'Functions/Logarithmic, Exponential and Roots'] },
+    fnNumbers: { title: 'Rounding, integer and complex', categories: ['Functions/Rounding', 'Functions/Integer', 'Functions/Complex'] },
+    fnData: { title: 'Aggregate, logical and other', categories: ['Functions/Aggregate and Interpolation', 'Functions/Conditional and Logical', 'Functions/Other'] },
+    fnVector: { title: 'All vector functions', categories: ['Functions/Vector'], filter: true },
+    fnMatrix: { title: 'All matrix functions', categories: ['Functions/Matrix'], filter: true },
+    plotting: { title: 'Plot commands', categories: ['Plotting'] },
+    plotSettings: { title: 'Plot settings', categories: ['Settings/Plot'] },
+    numSettings: { title: 'Numerical settings', categories: ['Settings/Numerical Methods'] },
+    output: { title: 'Output control', categories: ['Output Control'] },
+    rounding: { title: 'Rounding', categories: ['Settings/Rounding'] },
+    angles: { title: 'Angle units', categories: ['Settings/Angle Units'] },
+    overrides: { title: 'Settings overrides', categories: ['Settings/Overrides'] },
+    formats: { title: 'Format strings', categories: ['Format Strings'] },
+    html: { title: 'HTML', categories: ['HTML'], filter: true },
+    css: { title: 'CSS', categories: ['CSS'] },
+    markdown: { title: 'Markdown', categories: ['Markdown'] },
+    svg: { title: 'SVG', categories: ['SVG'] },
+    metadata: { title: 'Metadata properties', categories: ['Metadata Properties'] },
+    // Everything, so that no snippet is out of reach even when a new category is added to the library.
+    all: { title: 'The whole library', categories: [''], filter: true },
+};
+
 export interface RibbonGroup { name: string; buttons: RibbonButton[] }
 export interface RibbonTab { id: string; label: string; groups: RibbonGroup[] }
 
@@ -51,96 +91,6 @@ export const PRELUDE_NOX = 'y = 3\nn = 3\nv = [1; 2; 3]\nw = [4; 5; 6]\nu = [1; 
 export const VERIFY_FILES: Record<string, string> = {
     'data.csv': '1,2\n3,4\n',
     'module.cpd': 'm_1 = 5\n',
-};
-
-/** Inner SVG markup for 24x24 stroke icons (currentColor). */
-export const ICONS: Record<string, string> = {
-    file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/>',
-    open: '<path d="M3 7h6l2 2h10v10H3z"/>',
-    save: '<path d="M5 3h12l2 2v16H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/>',
-    saveas: '<path d="M5 3h12l2 2v7M5 3v18h7"/><path d="M15 21l1-4 5-5 2 2-5 5z"/>',
-    samples: '<rect x="4" y="4" width="7" height="7"/><rect x="13" y="4" width="7" height="7"/><rect x="4" y="13" width="7" height="7"/><rect x="13" y="13" width="7" height="7"/>',
-    recent: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-    pdf: '<path d="M6 3h8l4 4v14H6z"/><path d="M9 15h6M9 18h4M9 12h2"/>',
-    word: '<path d="M6 3h8l4 4v14H6z"/><path d="M8.5 11l1.5 6 2-5 2 5 1.5-6"/>',
-    excel: '<path d="M6 3h8l4 4v14H6z"/><path d="M9 11l5 7M14 11l-5 7"/>',
-    export: '<path d="M12 3v12M7 8l5-5 5 5M5 14v7h14v-7"/>',
-    run: '<path d="M7 4l13 8-13 8z"/>',
-    report: '<rect x="5" y="3" width="14" height="18"/><path d="M8 8h8M8 12h8M8 16h5"/>',
-    input: '<rect x="3" y="7" width="18" height="10" rx="1"/><path d="M7 12h4"/>',
-    preview: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    source: '<path d="M8 8l-5 4 5 4M16 8l5 4-5 4M14 5l-4 14"/>',
-    undo: '<path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 010 8"/>',
-    redo: '<path d="M15 7l5 5-5 5"/><path d="M20 12H10a6 6 0 000 8"/>',
-    find: '<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6"/>',
-    heading: '<path d="M6 4v16M18 4v16M6 12h12"/>',
-    comment: '<path d="M4 5h16v11H9l-5 4z"/>',
-    text: '<path d="M5 5h14M12 5v15M9 20h6"/>',
-    mathline: '<path d="M4 8h9M4 16h9"/><path d="M16 9l4 6M20 9l-4 6"/>',
-    image: '<rect x="3" y="5" width="18" height="14"/><circle cx="9" cy="10" r="1.5"/><path d="M4 18l5-5 4 4 3-3 4 4"/>',
-    ui: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="M6 10h6M6 14h9"/>',
-    plot: '<path d="M4 4v16h16"/><path d="M7 15l4-5 3 3 5-7"/>',
-    map: '<rect x="4" y="4" width="16" height="16"/><path d="M4 10h16M4 15h16M10 4v16M15 4v16"/><path d="M4 20L20 4" opacity=".5"/>',
-    table: '<rect x="3" y="5" width="18" height="14"/><path d="M3 10h18M3 15h18M9 5v14M15 5v14"/>',
-    vector: '<path d="M8 4H5v16h3M16 4h3v16h-3"/><path d="M12 8v8"/>',
-    matrix: '<path d="M8 4H5v16h3M16 4h3v16h-3"/><path d="M10 9h1M13 9h1M10 15h1M13 15h1"/>',
-    cond: '<path d="M12 3l8 9-8 9-8-9z"/>',
-    loop: '<path d="M4 12a8 8 0 0114-5M20 12a8 8 0 01-14 5"/><path d="M18 3v4h-4M6 21v-4h4"/>',
-    program: '<path d="M9 4C6 4 7 9 5 12c2 3 1 8 4 8M15 4c3 0 2 5 4 8-2 3-1 8-4 8"/>',
-    operators: '<path d="M12 5v10M7 10h10M7 19h10"/>',
-    symbols: '<path d="M6 18c-3-4-2-10 3-10s5 6 9 6M13 6c2 4 0 12 5 12"/>',
-    constants: '<path d="M5 7h14M9 7v11M15 7c0 6 0 9 3 11"/>',
-    units: '<path d="M3 15h18v4H3z"/><path d="M6 15v-3M10 15v-2M14 15v-3M18 15v-2"/>',
-    cube: '<path d="M12 3l8 4v10l-8 4-8-4V7z"/><path d="M12 12l8-5M12 12v9M12 12L4 7"/>',
-    fx: '<path d="M10 4C7 4 8 9 8 12s-1 8-4 8M5 11h6"/><path d="M13 12l6 6M19 12l-6 6"/>',
-    sub: '<path d="M4 6l8 10M12 6L4 16"/><path d="M15 17h5v4h-5z"/>',
-    split: '<path d="M4 8h16M4 16h8"/><path d="M16 14l3 2-3 2"/>',
-    wrap: '<path d="M4 8h16v5H8"/><path d="M11 10l-3 3 3 3"/>',
-    cut: '<circle cx="7" cy="17" r="3"/><circle cx="17" cy="17" r="3"/><path d="M8 14L18 4M16 14L6 4"/>',
-    copy: '<rect x="8" y="8" width="12" height="12"/><path d="M16 8V4H4v12h4"/>',
-    paste: '<rect x="5" y="5" width="14" height="16"/><path d="M9 5V3h6v2M9 11h6M9 15h6"/>',
-    entry: '<rect x="3" y="8" width="18" height="8" rx="1"/><path d="M7 12h5"/>',
-    dropdown: '<rect x="3" y="6" width="18" height="6" rx="1"/><path d="M15 8l2 2 2-2M3 16h18M3 20h18"/>',
-    radio: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5" fill="currentColor"/>',
-    checkbox: '<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 12l3 3 5-6"/>',
-    grid: '<rect x="3" y="4" width="18" height="16"/><path d="M3 9h18M3 14h18M9 4v16M15 4v16"/>',
-    read: '<path d="M12 3v12M7 10l5 5 5-5M5 19h14"/>',
-    write: '<path d="M12 15V3M7 8l5-5 5 5M5 19h14"/>',
-    append: '<path d="M12 4v10M8 10l4 4 4-4M4 18h16M12 18v3"/>',
-    pause: '<rect x="6" y="5" width="4" height="14"/><rect x="14" y="5" width="4" height="14"/>',
-    round: '<path d="M4 17h4M10 17h2M14 17h6"/><path d="M6 12V6l-2 2M12 12c0-4 4-4 4 0s-4 4-4 0"/>',
-    angle: '<path d="M4 19h16M4 19L16 7"/><path d="M11 19a7 7 0 00-2-5"/>',
-    hide: '<path d="M3 3l18 18M2 12s4-7 10-7c2 0 3.700.6 5 1.500M22 12s-4 7-10 7c-2 0-3.700-.6-5-1.500"/>',
-    show: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    bold: '<path d="M7 4h6a4 4 0 010 8H7zM7 12h7a4 4 0 010 8H7z"/>',
-    italic: '<path d="M10 4h8M6 20h8M14 4l-4 16"/>',
-    underline: '<path d="M7 4v7a5 5 0 0010 0V4M5 21h14"/>',
-    strike: '<path d="M4 12h16M16 6c-1-2-7-3-8 1s6 4 8 7-4 5-8 3"/>',
-    list: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.500" cy="6" r="1"/><circle cx="4.500" cy="12" r="1"/><circle cx="4.500" cy="18" r="1"/>',
-    olist: '<path d="M10 6h10M10 12h10M10 18h10M4 5h2v4M4 12h3l-3 3h3M4 18h3v3H4"/>',
-    br: '<path d="M4 6h16M4 12h12a3 3 0 010 6H12"/><path d="M14 16l-2 2 2 2"/>',
-    hr: '<path d="M3 12h18M7 7h10M7 17h10" opacity=".5"/><path d="M3 12h18"/>',
-    colour: '<path d="M12 3C8 9 6 12 6 15a6 6 0 0012 0c0-3-2-6-6-12z"/>',
-    page: '<path d="M6 3h12v7H6zM6 14h12v7H6z"/><path d="M3 12h18" stroke-dasharray="2 2"/>',
-    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>',
-    moon: '<path d="M20 14A8 8 0 0110 4a8 8 0 1010 10z"/>',
-    sidebar: '<rect x="3" y="4" width="18" height="16"/><path d="M9 4v16"/>',
-    zoomin: '<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M10 7v6M7 10h6"/>',
-    zoomout: '<circle cx="10" cy="10" r="6"/><path d="M15 15l6 6M7 10h6"/>',
-    settings: '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.500 5.500l2 2M16.500 16.500l2 2M5.500 18.500l2-2M16.500 7.500l2-2"/>',
-    auto: '<path d="M7 4l10 8-10 8z"/><path d="M19 5v6M16 8h6" />',
-    help: '<circle cx="12" cy="12" r="9"/><path d="M9.500 9.500a2.500 2.500 0 115 0c0 2-2.500 2-2.500 4M12 17h.01"/>',
-    keyboard: '<rect x="2" y="6" width="20" height="12" rx="1"/><path d="M6 10h1M10 10h1M14 10h1M18 10h1M7 14h10"/>',
-    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/>',
-    link: '<path d="M10 14a4 4 0 005 0l3-3a4 4 0 00-5-5l-1 1M14 10a4 4 0 00-5 0l-3 3a4 4 0 005 5l1-1"/>',
-    fold: '<path d="M4 6h16M4 12h8M4 18h16M16 10l3 3-3 3"/>',
-    complex: '<path d="M4 20V8l8 12V8M16 20l4-12"/>',
-    plus: '<path d="M12 5v14M5 12h14"/>',
-    menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
-    func: '<path d="M14 4c-4 0-3 5-3.500 8S9 20 5 20M6 11h8"/>',
-    stat: '<path d="M4 20V10M10 20V4M16 20v-8M22 20H2"/>',
-    sigma: '<path d="M18 5H6l7 7-7 7h12"/>',
-    trig: '<path d="M2 12c3-9 5-9 8 0s5 9 8 0 3-6 4-6"/>',
 };
 
 type Item = [label: string, text: string, title?: string];
@@ -156,6 +106,7 @@ const fn = (heading: string, names: string[], o: Partial<Entry> = {}): Section =
 const big = (id: string, label: string, icon: string, title: string, b: Partial<RibbonButton>): RibbonButton => ({ id, label, icon, title, ...b });
 const small = (id: string, label: string, icon: string, title: string, b: Partial<RibbonButton>): RibbonButton => ({ id, label, icon, title, size: 'small', ...b });
 const pal = (id: string, label: string, icon: string, title: string, palette: Section[], size?: 'small'): RibbonButton => ({ id, label, icon, title, palette, size });
+const more = (id: string, label: string, icon: string, title: string, key: string): RibbonButton => ({ id, label, icon, title, more: key });
 const action = (id: string, label: string, icon: string, title: string, a = id, size?: 'small'): RibbonButton => ({ id, label, icon, title, action: a, size });
 
 const greekLower = 'αβγδεζηθικλμνξοπρστυφχψω'.split('');
@@ -190,7 +141,7 @@ export const RIBBON: RibbonTab[] = [
                     lines('Sums and calculus', [
                         ['Σ', '$Sum{k @ k = 1 : n}\n', 'Sum'], ['Π', '$Product{k @ k = 1 : n}\n', 'Product'],
                         ['∫', '$Integral{f(x) @ x = 0 : 1}\n', 'Integral'], ['Area', '$Area{f(x) @ x = 0 : 1}\n', 'Area under a curve'],
-                        ['d/dx', '$Derivative{f(x) @ x = 1}\n', 'Derivative'], ['Slope', '$Slope{f(x) @ x = 1}\n', 'Numerical slope'],
+                        ['Slope', '$Slope{f(x) @ x = 1}\n', 'Numerical slope'],
                         ['Root', '$Root{f(x) = 4 @ x = 0 : 5}\n', 'Solve f(x) = value'], ['Min', '$Inf{f(x) @ x = 0 : 5}\n', 'Minimum'], ['Max', '$Sup{f(x) @ x = 0 : 5}\n', 'Maximum'],
                     ], { nox: true }),
                 ]),
@@ -272,6 +223,14 @@ export const RIBBON: RibbonTab[] = [
                 action('c-copy', 'Copy', 'copy', 'Copy the selection', 'copy', 'small'),
                 action('c-paste', 'Paste', 'paste', 'Paste', 'paste', 'small'),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-constants', 'Constants', 'constants', 'Every constant in the library', 'constants'),
+                more('a-operators', 'Operators', 'operators', 'Every operator in the library', 'operators'),
+                more('a-symbols', 'Symbols', 'symbols', 'Greek letters with accents, bars and dots', 'symbols'),
+                more('a-units', 'Units', 'units', 'Every unit, by dimension', 'units'),
+                more('a-keywords', 'Keywords', 'program', 'Conditions, loops, modules and read-only definitions', 'keywords'),
+                more('a-numerical', 'Numerical', 'fx', 'Numerical methods and expression blocks', 'numerical'),
+            ] },
         ],
     },
     {
@@ -316,6 +275,11 @@ export const RIBBON: RibbonTab[] = [
                 action('o-toggle', 'Show results', 'preview', 'Show or hide the results pane', 'togglePreview'),
                 action('o-input', 'Input mode', 'input', 'The #UI input form', 'mode:ui'),
                 action('o-report', 'Report mode', 'report', 'The print layout', 'mode:report'),
+            ] },
+            { name: 'Full lists', buttons: [
+                more('a-ui', 'Input fields', 'entry', 'Every #UI form', 'uiInputs'),
+                more('a-ext', 'Files', 'read', 'Every read, write and append form', 'externalData'),
+                more('a-brk', 'Breakpoints', 'input', 'Pause and input form', 'breakpoints'),
             ] },
         ],
     },
@@ -379,6 +343,11 @@ export const RIBBON: RibbonTab[] = [
                 big('d-const', 'Constant', 'constants', 'Define a read-only constant', { text: '#const c_2 = 1\n', line: true }),
                 big('d-macro', 'Macro', 'program', 'Define an inline macro', { text: '#def m$ = text\n', line: true }),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-elem', 'Elementary', 'trig', 'Trigonometric, hyperbolic, logarithmic and roots', 'fnElementary'),
+                more('a-num', 'Numbers', 'round', 'Rounding, integer and complex functions', 'fnNumbers'),
+                more('a-data', 'Data and logic', 'stat', 'Aggregate, interpolation, conditional and other', 'fnData'),
+            ] },
         ],
     },
     {
@@ -428,6 +397,10 @@ export const RIBBON: RibbonTab[] = [
                 big('t-data', 'Data table', 'table', 'A table with a left-aligned first column', { text: "'<table class=\"data\"><tr><th>Item</th><th>Value</th></tr><tr><td>Load</td><td>1</td></tr></table>\n", line: true }),
                 big('t-grid', 'Data grid', 'grid', 'An editable grid in the input form', { text: '#UI G_2 = matrix(3; 3)\n', line: true }),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-vec', 'Vector functions', 'vector', 'Every vector function', 'fnVector'),
+                more('a-mat', 'Matrix functions', 'matrix', 'Every matrix function', 'fnMatrix'),
+            ] },
         ],
     },
     {
@@ -445,6 +418,10 @@ export const RIBBON: RibbonTab[] = [
             { name: 'Options', buttons: [
                 action('pl-settings', 'Plot settings', 'settings', 'Size, colours, lighting and mesh step (Settings tab)', 'settings'),
                 small('pl-image', 'Image', 'image', 'Insert an image reference', { text: '\'<img src="./image.png" alt="Image">\n', line: true }),
+            ] },
+            { name: 'Full lists', buttons: [
+                more('a-plot', 'Plot commands', 'plot', 'Every plot and map form', 'plotting'),
+                more('a-plotset', 'Plot settings', 'settings', 'Size, palette, mesh, lighting', 'plotSettings'),
             ] },
         ],
     },
@@ -481,6 +458,13 @@ export const RIBBON: RibbonTab[] = [
                 small('mf-phasor', 'Phasor', 'complex', 'Show complex numbers as A∠φ', { text: '#phasor\n', line: true }),
                 small('mf-complex', 'Algebraic', 'complex', 'Show complex numbers as a + bi', { text: '#complex\n', line: true }),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-fmt', 'Format strings', 'round', 'Number format strings', 'formats'),
+                more('a-out', 'Output control', 'show', 'Visibility, output mode, layout', 'output'),
+                more('a-round', 'Rounding', 'round', 'Rounding settings', 'rounding'),
+                more('a-angle', 'Angles', 'angle', 'Angle units', 'angles'),
+                more('a-over', 'Overrides', 'settings', 'Settings overrides', 'overrides'),
+            ] },
         ],
     },
     {
@@ -516,6 +500,12 @@ export const RIBBON: RibbonTab[] = [
                 small('tf-mdon', 'Markdown on', 'text', 'Comments use Markdown', { text: '#md on\n', line: true }),
                 small('tf-mdoff', 'Markdown off', 'text', 'Comments use HTML', { text: '#md off\n', line: true }),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-html', 'HTML', 'source', 'Every HTML snippet', 'html'),
+                more('a-css', 'CSS', 'colour', 'Style blocks', 'css'),
+                more('a-md', 'Markdown', 'text', 'Markdown forms', 'markdown'),
+                more('a-svg', 'SVG', 'image', 'SVG drawing snippets', 'svg'),
+            ] },
         ],
     },
     {
@@ -546,6 +536,9 @@ export const RIBBON: RibbonTab[] = [
                 action('k-variables', 'Variables', 'list', 'The variables of the worksheet', 'tab:variables'),
                 action('k-errors', 'Errors', 'info', 'Errors and warnings', 'tab:errors'),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-numset', 'Numerical settings', 'settings', 'Precision and tolerance', 'numSettings'),
+            ] },
         ],
     },
     {
@@ -571,6 +564,9 @@ export const RIBBON: RibbonTab[] = [
                 action('d-samples', 'Samples', 'samples', 'Browse the sample worksheets', 'samples'),
                 action('d-toc', 'Contents', 'list', 'The table of contents of the worksheet', 'tab:toc'),
             ] },
+            { name: 'Full lists', buttons: [
+                more('a-meta', 'Metadata', 'info', 'Metadata properties', 'metadata'),
+            ] },
         ],
     },
     {
@@ -594,6 +590,9 @@ export const RIBBON: RibbonTab[] = [
                 action('x-zoomin', 'Zoom in', 'zoomin', 'Larger editor text', 'zoomIn'),
                 action('x-zoomout', 'Zoom out', 'zoomout', 'Smaller editor text', 'zoomOut'),
                 action('x-sidebar', 'Sidebar', 'sidebar', 'Show or hide the sidebar (Ctrl+Shift+B)', 'sidebar'),
+            ] },
+            { name: 'Full lists', buttons: [
+                more('a-all', 'All snippets', 'list', 'The whole snippet library, searchable', 'all'),
             ] },
         ],
     },
