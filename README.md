@@ -6,7 +6,7 @@ tables), and the page calculates it, shows a formatted report, and exports it to
 printing), Word and Excel. Everything runs in the page: the calculation engine is Rust compiled to
 WebAssembly, and no calculation request leaves the browser.
 
-* Live demo: https://mageaustralia.github.io/civilkit-calcs/ (placeholder until the first deploy)
+* Live demo: https://civilkit.io/calcs/ (also at https://mageaustralia.github.io/civilkit-calcs/)
 * Source: https://github.com/mageaustralia/civilkit-calcs
 * Version: see [CHANGELOG.md](CHANGELOG.md). Releases are numbered YY.M.N (26.10.1 is the first release of
   October 2026) and tagged `v26.10.1`.
