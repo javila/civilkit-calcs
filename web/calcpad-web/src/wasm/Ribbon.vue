@@ -1,80 +1,194 @@
 <template>
-  <div class="rb" role="toolbar">
+  <div class="rb" role="toolbar" ref="root">
+    <div class="rb-quick">
+      <button class="rb-file" data-ribbon-btn="file" title="File: recent worksheets, the library, samples, save and export"
+        @mousedown.prevent @click="fire(FILE, $event)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" v-html="ICONS.menu"></svg><span>File</span>
+      </button>
+      <button v-for="b in QUICK" :key="b.id" class="rb-q" :title="b.title || b.label" :aria-label="b.label"
+        :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+          stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[b.icon!]"></svg>
+      </button>
+    </div>
     <div class="rb-tabs" role="tablist">
       <button v-for="t in RIBBON" :key="t.id" class="rb-tab" :class="{ on: t.id === active }" role="tab"
-        :aria-selected="t.id === active" :data-ribbon-tab="t.id" @click="active = t.id">{{ t.label }}</button>
+        :aria-selected="t.id === active" :data-ribbon-tab="t.id" @click="selectTab(t.id)">{{ t.label }}</button>
     </div>
     <div class="rb-panel" role="tabpanel" :data-ribbon-panel="active">
       <div v-for="g in tab.groups" :key="g.name" class="rb-group">
-        <div class="rb-btns" :class="{ compact: !g.buttons[0].icon }">
-          <button v-for="b in g.buttons" :key="b.id" class="rb-btn" :class="{ big: !!b.icon, on: isOn(b) }"
-            :title="b.title || b.label" :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
-            <svg v-if="b.icon" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor"
-              stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[b.icon]"></svg>
-            <span class="rb-label">{{ b.label }}</span>
-          </button>
+        <div class="rb-cells">
+          <template v-for="(cell, ci) in cells(g)" :key="ci">
+            <button v-if="cell.big" class="rb-big" :class="{ on: isOn(cell.big) }" :title="cell.big.title || cell.big.label"
+              :data-ribbon-btn="cell.big.id" @mousedown.prevent @click="fire(cell.big, $event)">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[cell.big.icon!]"></svg>
+              <span class="rb-label">{{ cell.big.label }}<i v-if="cell.big.palette" class="rb-caret"></i></span>
+            </button>
+            <div v-else class="rb-stack">
+              <button v-for="b in cell.stack" :key="b.id" class="rb-small" :class="{ on: isOn(b) }" :title="b.title || b.label"
+                :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round" v-html="ICONS[b.icon!]"></svg>
+                <span>{{ b.label }}</span><i v-if="b.palette" class="rb-caret"></i>
+              </button>
+            </div>
+          </template>
         </div>
         <div class="rb-gname">{{ g.name }}</div>
       </div>
+    </div>
+    <div v-if="pop" class="rb-pop" :style="pop.style" role="dialog" :data-ribbon-popover="pop.id" @mousedown.prevent>
+      <template v-for="s in pop.sections" :key="s.heading + s.items[0]?.label">
+        <div v-if="s.heading" class="rb-pop-h">{{ s.heading }}</div>
+        <div class="rb-pop-grid">
+          <button v-for="e in s.items" :key="e.label + e.text" class="rb-glyph" :title="e.title || e.text.replace(/\n/g, ' ').trim()"
+            :data-ribbon-glyph="e.label" @click="pick(e)">{{ e.label }}</button>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue';
-import { ICONS, RIBBON, insertAtCursor } from './ribbon-data';
-import type { RibbonButton, RibbonCtx } from './ribbon-data';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { ICONS, QUICK, RIBBON } from './ribbon-data';
+import type { Entry, RibbonButton, RibbonGroup, Section } from './ribbon-data';
+import { insertSnippet, isActive, runAction } from './ribbon-actions';
+import type { RibbonCtx } from './ribbon-actions';
 
 const props = defineProps<{ ctx: Omit<RibbonCtx, 'anchor'> }>();
-const active = ref('home');
+const FILE: RibbonButton = { id: 'file', label: 'File', action: 'filemenu' };
+const active = ref('math');
 const tab = computed(() => RIBBON.find(t => t.id === active.value) ?? RIBBON[0]);
-// Toggle states (theme, result mode, pane) live outside Vue; re-read them on a slow tick and after clicks.
+const root = ref<HTMLElement | null>(null);
+const pop = ref<{ id: string; sections: Section[]; style: Record<string, string> } | null>(null);
+let popAnchor: HTMLElement | null = null;
+
+// Toggle states (theme, result mode, panes) live outside Vue; re-read them on a slow tick and after clicks.
 const tick = ref(0);
 const timer = setInterval(() => tick.value++, 500);
-onBeforeUnmount(() => clearInterval(timer));
+const ctxWith = (anchor: HTMLElement): RibbonCtx => ({ ...props.ctx, anchor });
+const isOn = (b: RibbonButton): boolean => (void tick.value, !!b.action && isActive(b.action, ctxWith(document.body)));
 
-function isOn(b: RibbonButton): boolean {
-    void tick.value;
-    try {
-        return !!b.active?.({ ...props.ctx, anchor: document.body });
-    } catch {
-        return false;
-    }
+type Cell = { big?: RibbonButton; stack?: RibbonButton[] };
+/** Big buttons stand alone; runs of small buttons stack three to a column. */
+function cells(g: RibbonGroup): Cell[] {
+  const out: Cell[] = [];
+  for (const b of g.buttons) {
+    if (b.size === 'small') {
+      const last = out[out.length - 1];
+      if (last?.stack && last.stack.length < 3) last.stack.push(b);
+      else out.push({ stack: [b] });
+    } else out.push({ big: b });
+  }
+  return out;
+}
+
+function closePop(refocus: boolean): void {
+  if (!pop.value) return;
+  pop.value = null;
+  popAnchor = null;
+  if (refocus) (props.ctx.editor() as any)?.focus();
+}
+function selectTab(id: string): void {
+  closePop(false);
+  active.value = id;
+}
+
+function openPalette(b: RibbonButton, anchor: HTMLElement): void {
+  if (pop.value?.id === b.id) return closePop(true);
+  const r = anchor.getBoundingClientRect();
+  const narrow = window.innerWidth <= 700;
+  const style: Record<string, string> = narrow
+    ? {}
+    : { left: `${Math.max(4, Math.min(r.left, window.innerWidth - 360))}px`, top: `${r.bottom + 2}px` };
+  pop.value = { id: b.id, sections: b.palette!, style };
+  popAnchor = anchor;
 }
 
 function fire(b: RibbonButton, ev: MouseEvent): void {
-    const c = { ...props.ctx, anchor: ev.currentTarget as HTMLElement };
-    if (b.insertText !== undefined) insertAtCursor(c.editor(), b.insertText);
-    else b.run?.(c);
-    tick.value++;
+  const anchor = ev.currentTarget as HTMLElement;
+  if (b.palette) {
+    openPalette(b, anchor);
+  } else {
+    closePop(false);
+    if (b.text !== undefined) insertSnippet(props.ctx.editor(), b.text, !!b.line);
+    else if (b.action) runAction(b.action, ctxWith(anchor));
+  }
+  tick.value++;
 }
+
+function pick(e: Entry): void {
+  const line = !!e.line;
+  insertSnippet(props.ctx.editor(), e.text, line);
+  closePop(false);
+}
+
+function onDocDown(e: MouseEvent): void {
+  if (!pop.value) return;
+  const t = e.target as Node;
+  if ((root.value?.querySelector('.rb-pop') as HTMLElement | null)?.contains(t) || popAnchor?.contains(t)) return;
+  closePop(false);
+}
+function onKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape' && pop.value) {
+    e.stopPropagation();
+    closePop(true);
+  }
+}
+onMounted(() => {
+  document.addEventListener('mousedown', onDocDown, true);
+  document.addEventListener('keydown', onKey, true);
+});
+onBeforeUnmount(() => {
+  clearInterval(timer);
+  document.removeEventListener('mousedown', onDocDown, true);
+  document.removeEventListener('keydown', onKey, true);
+});
 </script>
 
 <style>
-.rb{flex:none;font-size:12px;user-select:none;
+.rb{position:relative;flex:none;font-size:12px;user-select:none;
   background:var(--vscode-sideBar-background,#f3f3f3);color:var(--vscode-foreground,#333);
   border-bottom:1px solid var(--vscode-panel-border,#ddd)}
-.rb-tabs{display:flex;overflow-x:auto;padding:0 4px;background:var(--vscode-titleBar-activeBackground,var(--vscode-sideBar-background,#f3f3f3));scrollbar-width:none}
-.rb-tab{flex:none;height:26px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer}
+.rb svg{flex:none}
+.rb-quick{display:flex;align-items:center;gap:2px;height:30px;padding:0 6px;
+  background:var(--vscode-titleBar-activeBackground,var(--vscode-sideBar-background,#f3f3f3))}
+.rb-file{display:flex;align-items:center;gap:6px;height:24px;padding:0 12px 0 8px;margin-right:6px;border:1px solid var(--vscode-focusBorder,#0060c0);
+  border-radius:12px;background:var(--vscode-button-background,#0060c0);color:var(--vscode-button-foreground,#fff);font:inherit;font-weight:600;cursor:pointer}
+.rb-file:hover{filter:brightness(1.12)}
+.rb-q{display:flex;align-items:center;justify-content:center;width:26px;height:24px;border:1px solid transparent;border-radius:3px;background:none;color:inherit;cursor:pointer}
+.rb-q:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08));border-color:var(--vscode-panel-border,#ccc)}
+.rb-tabs{display:flex;overflow-x:auto;padding:0 4px;scrollbar-width:none;border-top:1px solid var(--vscode-panel-border,#ddd)}
+.rb-tab{flex:none;height:26px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:none;color:inherit;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
 .rb-tab:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08))}
 .rb-tab.on{border-bottom-color:var(--vscode-focusBorder,#0060c0);font-weight:600}
-.rb-panel{display:flex;align-items:stretch;gap:0;height:84px;padding:3px 4px 0;overflow-x:auto;overflow-y:hidden;
+.rb-panel{display:flex;align-items:stretch;height:96px;padding:3px 4px 0;overflow-x:auto;overflow-y:hidden;
   background:var(--vscode-editor-background,#fff);border-top:1px solid var(--vscode-panel-border,#ddd)}
 .rb-group{flex:none;display:flex;flex-direction:column;padding:0 6px;border-right:1px solid var(--vscode-panel-border,#ddd)}
 .rb-group:last-child{border-right:0}
-.rb-btns{flex:1;display:flex;align-items:flex-start;gap:2px;min-height:0}
-.rb-btns.compact{flex-wrap:wrap;align-content:flex-start;max-width:640px;gap:2px;padding-top:2px}
-.rb-btn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border:1px solid transparent;border-radius:3px;
-  background:none;color:inherit;font:inherit;cursor:pointer;padding:2px 6px}
-.rb-btn.big{min-width:46px;height:52px}
-.rb-btn:not(.big){min-width:26px;height:24px;font-size:13px;font-family:var(--vscode-editor-font-family,monospace)}
-.rb-btn:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08));border-color:var(--vscode-panel-border,#ccc)}
-.rb-btn.on{background:var(--vscode-toolbar-activeBackground,rgba(0,96,192,.18));border-color:var(--vscode-focusBorder,#0060c0)}
-.rb-btn.big .rb-label{font-size:11px;line-height:1.1;white-space:nowrap}
-.rb-gname{flex:none;text-align:center;font-size:10px;opacity:.65;padding:1px 0 2px;white-space:nowrap}
+.rb-cells{flex:1;display:flex;align-items:flex-start;gap:2px;min-height:0}
+.rb-big,.rb-small{display:flex;border:1px solid transparent;border-radius:3px;background:none;color:inherit;font:inherit;cursor:pointer}
+.rb-big{flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;min-width:52px;height:68px;padding:4px 6px}
+.rb-small{align-items:center;gap:5px;height:22px;padding:0 6px;white-space:nowrap;text-align:left}
+.rb-stack{display:flex;flex-direction:column;justify-content:flex-start;gap:0;min-width:96px}
+.rb-big:hover,.rb-small:hover{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08));border-color:var(--vscode-panel-border,#ccc)}
+.rb-big.on,.rb-small.on{background:var(--vscode-toolbar-activeBackground,rgba(0,96,192,.18));border-color:var(--vscode-focusBorder,#0060c0)}
+.rb-label{font-size:11px;line-height:1.1;white-space:nowrap}
+.rb-caret{display:inline-block;margin-left:4px;vertical-align:middle;border:4px solid transparent;border-top-color:currentColor;border-bottom:0}
+.rb-gname{flex:none;text-align:center;font-size:10px;opacity:.65;padding:2px 0;white-space:nowrap}
+.rb-pop{position:fixed;z-index:1100;width:340px;max-width:calc(100vw - 8px);max-height:70vh;overflow:auto;padding:6px 8px 8px;
+  background:var(--vscode-menu-background,#fff);color:var(--vscode-menu-foreground,#222);
+  border:1px solid var(--vscode-menu-border,#c8c8c8);box-shadow:0 4px 16px rgba(0,0,0,.25);border-radius:4px}
+.rb-pop-h{margin:6px 0 3px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;opacity:.7}
+.rb-pop-grid{display:flex;flex-wrap:wrap;gap:3px}
+.rb-glyph{min-width:30px;height:28px;padding:0 6px;border:1px solid var(--vscode-panel-border,#ccc);border-radius:3px;background:none;color:inherit;
+  font:13px var(--vscode-editor-font-family,monospace);cursor:pointer}
+.rb-glyph:hover{background:var(--vscode-menu-selectionBackground,#0060c0);color:var(--vscode-menu-selectionForeground,#fff)}
 @media (max-width:700px){
-  .rb-panel{height:74px}
-  .rb-btn.big{min-width:52px}
-  .rb-btns.compact{flex-wrap:nowrap;max-width:none}
+  .rb-pop{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:55vh;border-radius:10px 10px 0 0}
+  .rb-glyph{min-width:36px;height:34px}
 }
 </style>

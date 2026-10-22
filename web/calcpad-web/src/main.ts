@@ -1825,7 +1825,7 @@ async function bootstrap(): Promise<void> {
     appInstance.onRunRequest = () => { void runRefresh(); };
 
     // calcpad-rs: open, save, recent files, print and the #include/#read library in the browser.
-    if (!isTauri) mountRibbon(installWebFiles((window as any).calcpadEngine, { tabs: () => (window as any).calcpadTabs, appendOutput: (l, m) => appInstance.appendOutput(l, m), bridge: activeBridge, showSidebarTab: (id: string) => sidebarInstance.switchTab?.(id) }), appInstance);
+    if (!isTauri) mountRibbon(installWebFiles((window as any).calcpadEngine, { tabs: () => (window as any).calcpadTabs, appendOutput: (l, m) => appInstance.appendOutput(l, m), bridge: activeBridge, showSidebarTab: (id: string) => sidebarInstance.switchTab?.(id) }), { app: appInstance, bridge: activeBridge, showSidebarTab: (id: string) => sidebarInstance.switchTab?.(id) });
 
     // Tauri-specific: native menu clicks + file operations
     if (isTauri && tauriBridge) {

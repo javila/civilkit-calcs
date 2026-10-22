@@ -27,8 +27,7 @@ await page.goto(url + '/');
 await page.waitForFunction(() => window.calcpadActiveEditor != null, null, { timeout: 30000 });
 
 async function openInput(title) {
-    await page.locator('[data-ribbon-tab=file]').click();
-    await page.locator('[data-ribbon-btn=recent]').click();
+    await page.locator('[data-ribbon-btn=file]').click();
     await page.locator('.cprs-menu button', { hasText: 'Samples...' }).click();
     await page.locator('.cprs-samples').waitFor({ timeout: 10000 });
     await page.locator('.cprs-s-search').fill(title);
