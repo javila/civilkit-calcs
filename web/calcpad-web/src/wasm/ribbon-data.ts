@@ -518,6 +518,9 @@ export const RIBBON: RibbonTab[] = [
                 action('d-excel', 'Excel', 'excel', 'Save the variables as an Excel workbook', 'excel'),
                 action('d-export', 'Export tab', 'export', 'HTML, PDF, Word and #write: the Export tab', 'exportTab'),
             ] },
+            { name: 'Import', buttons: [
+                action('d-import', 'Import worksheet', 'open', 'Bring in a worksheet from another calculation tool (.xmcd); it opens as a new worksheet', 'importWorksheet'),
+            ] },
             { name: 'Page', buttons: [
                 action('d-saveas', 'Save As', 'saveas', 'Save As', 'saveas'),
                 action('d-pdfsettings', 'Header and footer', 'settings', 'Page numbers, date and title for PDF export (Settings tab)', 'settings'),

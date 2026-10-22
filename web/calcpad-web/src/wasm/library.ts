@@ -113,6 +113,38 @@ export class FileLibrary {
         return changed;
     }
 
+    /**
+     * Adds or replaces many files and removes others with one write and one sync (an import brings
+     * hundreds of pictures; syncing after each would resend the whole library each time).
+     */
+    async putMany(files: { path: string; data: Uint8Array }[], removePaths: string[] = []): Promise<void> {
+        const added: LibraryFile[] = [];
+        for (const f of files) {
+            const path = libraryPath(f.path);
+            const file: LibraryFile = { path, name: path.slice(path.lastIndexOf('/') + 1), data: f.data, modified: Date.now() };
+            this.files.set(path, file);
+            added.push(file);
+        }
+        const removed = removePaths.map(libraryPath).filter(p => this.files.delete(p));
+        const db = await openDb();
+        if (db) {
+            await new Promise<void>((resolve) => {
+                try {
+                    const tx = db.transaction(STORE_LIBRARY, 'readwrite');
+                    const store = tx.objectStore(STORE_LIBRARY);
+                    for (const f of added) store.put(f);
+                    for (const p of removed) store.delete(p);
+                    tx.oncomplete = () => resolve();
+                    tx.onerror = () => resolve();
+                    tx.onabort = () => resolve();
+                } catch {
+                    resolve();
+                }
+            });
+        }
+        await this.sync();
+    }
+
     async putText(name: string, text: string): Promise<boolean> {
         return this.put(name, new TextEncoder().encode(text));
     }

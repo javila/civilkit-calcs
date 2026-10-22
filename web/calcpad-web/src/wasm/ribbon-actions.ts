@@ -89,6 +89,7 @@ export const ACTIONS: Record<string, Handler> = {
     saveas: c => void c.files.save(true),
     filemenu: c => c.files.toggleMenu(c.anchor),
     samples: c => c.files.o.openSamples?.(),
+    importWorksheet: c => void c.files.o.importer?.pick(),
     pdf: c => c.files.o.print(),
     word: c => c.files.o.exportDocx?.(),
     excel: c => c.files.o.exportXlsx?.(),

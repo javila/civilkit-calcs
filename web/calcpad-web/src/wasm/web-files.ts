@@ -44,12 +44,15 @@ export interface WebFilesOptions {
     exportXlsx?: () => void;
     /** Saves the report as a Word document. */
     exportDocx?: () => void;
+    /** Imports foreign worksheets (.xmcd); see xmcd-import.ts. */
+    importer?: { pick(): Promise<void>; importFile(file: File): Promise<void> };
 }
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
 const MAX_RECENT = 10;
 const WORKSHEET_EXT = /\.cpd$/i;
-const ACCEPT_ALL = '.cpd,.txt,.csv,.xlsx,.xlsm';
+const ACCEPT_ALL = '.cpd,.txt,.csv,.xlsx,.xlsm,.xmcd,.mcdx';
+const IMPORT_EXT = /\.(xmcd|mcdx)$/i;
 
 type Handle = FileSystemFileHandle;
 type RecentEntry = { path: string; name: string; time: number };
@@ -125,14 +128,40 @@ export class WebFiles {
             if (e.dataTransfer?.types.includes('Files')) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'copy';
+                this.showDropHint(true);
             }
         }, true);
+        document.addEventListener('dragleave', e => {
+            // Only when the pointer leaves the window (relatedTarget is null), not between elements.
+            if (!e.relatedTarget) this.showDropHint(false);
+        }, true);
         document.addEventListener('drop', e => {
+            this.showDropHint(false);
             if (!e.dataTransfer?.files.length) return;
             e.preventDefault();
             e.stopPropagation();
             void this.openFiles(Array.from(e.dataTransfer.files).map(f => ({ file: f })));
         }, true);
+    }
+
+    private dropHint: HTMLDivElement | null = null;
+
+    /** A full-window hint while files are dragged over the page. */
+    private showDropHint(on: boolean): void {
+        if (!on) {
+            this.dropHint?.remove();
+            this.dropHint = null;
+            return;
+        }
+        if (this.dropHint) return;
+        const d = document.createElement('div');
+        d.setAttribute('data-cprs-drop-hint', '');
+        d.style.cssText = 'position:fixed;inset:8px;z-index:3000;pointer-events:none;display:flex;align-items:center;justify-content:center;' +
+            'border:3px dashed var(--vscode-focusBorder,#0060c0);border-radius:10px;background:rgba(0,96,192,.10);' +
+            'font:600 18px system-ui,sans-serif;color:var(--vscode-foreground,#222)';
+        d.textContent = this.o.importer ? 'Drop to open a worksheet (.cpd) or import one (.xmcd)' : 'Drop to open a worksheet';
+        document.body.appendChild(d);
+        this.dropHint = d;
     }
 
     // ----- written files -------------------------------------------------------------------
@@ -162,7 +191,7 @@ export class WebFiles {
                     multiple: true,
                     types: [{
                         description: 'Calcpad worksheets and data',
-                        accept: { 'text/plain': ['.cpd', '.txt', '.csv'], 'application/vnd.ms-excel': ['.xlsx', '.xlsm'] },
+                        accept: { 'text/plain': ['.cpd', '.txt', '.csv'], 'application/vnd.ms-excel': ['.xlsx', '.xlsm'], 'application/xml': ['.xmcd', '.mcdx'] },
                     }],
                 });
             } catch {
@@ -183,6 +212,10 @@ export class WebFiles {
     /** Worksheets open in the editor; every file goes into the library. */
     async openFiles(items: { file: File; handle?: Handle }[]): Promise<void> {
         for (const { file, handle } of items) {
+            if (this.o.importer && IMPORT_EXT.test(file.name)) {
+                await this.o.importer.importFile(file);
+                continue;
+            }
             const data = new Uint8Array(await file.arrayBuffer());
             const path = libraryPath(file.name);
             await this.o.library.put(path, data);
@@ -370,6 +403,7 @@ body{display:flex;flex-direction:column}
         const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
         item('New', () => this.newWorksheet());
         item('Open...', () => void this.open(), `${mod}+O`);
+        if (this.o.importer) item('Import worksheet...', () => void this.o.importer!.pick());
         if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());
         item('Save', () => void this.save(), `${mod}+S`);
         item('Save As...', () => void this.save(true), `${mod}+Shift+S`);

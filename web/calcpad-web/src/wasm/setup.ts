@@ -7,6 +7,7 @@ import { type TabsLike, WebFiles } from './web-files';
 import LibrariesSettings from './LibrariesSettings.vue';
 import LibrariesInsert from './LibrariesInsert.vue';
 import { installEmptyEditorLink, SamplesBrowser } from './samples';
+import { XmcdImport } from './xmcd-import';
 
 interface Host {
     /** The active editor group's tabs (main.ts keeps them on window.calcpadTabs). */
@@ -21,8 +22,14 @@ interface Host {
 export function installWebFiles(transport: WasmTransport, host: Host): WebFiles {
     const library = new FileLibrary(transport);
     const samples = new SamplesBrowser({ library, tabs: host.tabs, log: host.appendOutput });
+    const importer = new XmcdImport({
+        library,
+        tabs: host.tabs as never,
+        log: host.appendOutput,
+    });
     const files = new WebFiles({
         library,
+        importer,
         tabs: host.tabs,
         log: host.appendOutput,
         print: () => host.bridge.handleMessage({ type: 'generatePdf', variant: 'report' }),
