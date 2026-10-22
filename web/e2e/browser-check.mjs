@@ -308,7 +308,8 @@ page.on('download', (d) => downloads.push(d));
 await drop([{ name: 'lib-check.cpd', text: 'k = 5\n' }, { name: 'data-check.csv', text: '1,2\n3,4\n' }]);
 await page.waitForFunction(() => (window).calcpadFiles.library.list().length >= 2, null, { timeout: 10000 });
 // The dropped worksheet opened in a tab of its own; the check runs in a new one.
-await page.locator('.cprs-file-btn').click();
+await page.locator('[data-ribbon-tab=file]').click();
+await page.locator('[data-ribbon-btn=recent]').click();
 await page.locator('.cprs-menu button', { hasText: /^New$/ }).click();
 await setEditor("'Library check\n#include lib-check.cpd\nk2 = k*2\n#read M from data-check.csv\nt = sum(M)\n#write M to out-check.csv");
 const libText = await frameText('Library check');
@@ -376,7 +377,8 @@ const savedText = await (async () => {
     return t;
 })();
 check(/z\s*=\s*4/.test(savedText), `the preview follows the edit (z = 4) (${JSON.stringify(savedText.slice(0, 60))})`);
-await page.locator('.cprs-file-btn').click();
+await page.locator('[data-ribbon-tab=file]').click();
+await page.locator('[data-ribbon-btn=recent]').click();
 const menuText = await page.locator('.cprs-menu').innerText();
 check(menuText.includes('opened-check.cpd') && menuText.includes('lib-check.cpd') && menuText.includes('data-check.csv'),
     'the File menu lists the recent worksheet and the library');
@@ -569,7 +571,8 @@ const dialog = page.locator('.cprs-samples');
 const items = () => page.locator('.cprs-samples .cprs-s-item');
 const shownIds = async () => (await items().evaluateAll((els) => els.map((e) => e.dataset.sampleId))).sort();
 async function openSamples() {
-    await page.locator('.cprs-file-btn').click();
+    await page.locator('[data-ribbon-tab=file]').click();
+await page.locator('[data-ribbon-btn=recent]').click();
     await page.locator('.cprs-menu button', { hasText: 'Samples...' }).click();
     await dialog.waitFor({ timeout: 10000 });
 }
@@ -682,7 +685,8 @@ check(/asvg:svgBlip/.test(documentXml), 'the picture refers to the SVG for Word 
 // ---- Excel export (calcpad-rs's own) ---------------------------------------------------------
 await page.evaluate(() => (window).calcpadActiveEditor.setValue("'<h3>Excel export check</h3>\na = 2\nL = ? {4.5}m\n#UI F = 12.5kN\nM = F*L\nv = [1; 2; 3]*1m\nK = [1; 2|3; 4]\na = a + 1\n'<table><tr><th>Bar</th><th>Area</th></tr><tr><td>1</td><td>2.5</td></tr></table>\n$Plot{x^2 @ x = 0 : 2}"));
 await page.waitForTimeout(1500);
-await page.locator('.cprs-file-btn').click();
+await page.locator('[data-ribbon-tab=file]').click();
+await page.locator('[data-ribbon-btn=recent]').click();
 const [xlsxDownload] = await Promise.all([
     page.waitForEvent('download', { timeout: 120000 }),
     page.locator('.cprs-menu button', { hasText: 'Export Excel...' }).click(),

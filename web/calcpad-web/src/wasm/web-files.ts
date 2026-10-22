@@ -2,7 +2,7 @@
 // drag and drop) is wired to Tauri's native dialogs only; this module gives the web build its
 // own, without a server:
 //
-//   File menu (menu bar, top)      New, Open, Samples, Save, Save As, Recent, Print, Export, the library
+//   File menu (ribbon, top)        New, Open, Samples, Save, Save As, Recent, Print, Export, the library
 //   Ctrl+O / Ctrl+S / Ctrl+Shift+S open and save
 //   drag and drop                   .cpd opens in the editor, any other file joins the library
 //
@@ -42,6 +42,8 @@ export interface WebFilesOptions {
     openExport?: () => void;
     /** Saves the variables as an Excel workbook (calcpad-rs's own export). */
     exportXlsx?: () => void;
+    /** Saves the report as a Word document. */
+    exportDocx?: () => void;
 }
 
 const RECENT_KEY = 'calcpad-rs-recent-files';
@@ -114,7 +116,7 @@ export class WebFiles {
     private handles = new Map<string, Handle>();
     private menu: HTMLDivElement | null = null;
 
-    constructor(private readonly o: WebFilesOptions) {}
+    constructor(readonly o: WebFilesOptions) {}
 
     install(): void {
         this.installButton();
@@ -304,13 +306,6 @@ export class WebFiles {
         style.textContent = `
 body{display:flex;flex-direction:column}
 #app{height:auto!important;flex:1;min-height:0}
-.cprs-menubar{flex:none;display:flex;align-items:center;height:28px;padding:0 4px;gap:2px;font-size:13px;
-  background:var(--vscode-titleBar-activeBackground,var(--vscode-sideBar-background,#f3f3f3));
-  color:var(--vscode-titleBar-activeForeground,var(--vscode-foreground,#333));
-  border-bottom:1px solid var(--vscode-titleBar-border,var(--vscode-panel-border,#ddd))}
-.cprs-file-btn{height:22px;border:0;padding:0 10px;border-radius:3px;background:none;color:inherit;font:inherit;cursor:pointer}
-.cprs-file-btn:hover,.cprs-file-btn.open{background:var(--vscode-toolbar-hoverBackground,rgba(0,0,0,.08))}
-.cprs-menubar .cprs-brand{margin-left:auto;padding:0 10px;opacity:.6;font-size:12px}
 .cprs-menu{position:fixed;left:4px;top:28px;z-index:1001;min-width:260px;max-height:80vh;overflow:auto;
   background:var(--vscode-menu-background,#fff);color:var(--vscode-menu-foreground,#222);
   border:1px solid var(--vscode-menu-border,#c8c8c8);box-shadow:0 4px 16px rgba(0,0,0,.2);font-size:13px;padding:4px 0}
@@ -325,40 +320,25 @@ body{display:flex;flex-direction:column}
 .cprs-menu .cprs-row button.cprs-x{width:auto;padding:5px 10px}
 .cprs-menu .cprs-empty{padding:4px 14px;opacity:.6}`;
         document.head.appendChild(style);
-        // A menu bar above the app (the app is a full-height flex column below it).
-        const bar = document.createElement('div');
-        bar.className = 'cprs-menubar';
-        bar.setAttribute('role', 'menubar');
-        const btn = document.createElement('button');
-        btn.className = 'cprs-file-btn';
-        btn.textContent = 'File';
-        btn.setAttribute('role', 'menuitem');
-        btn.title = 'New, open, samples, save, recent files, print and export';
-        btn.addEventListener('click', e => {
-            e.stopPropagation();
-            this.toggleMenu();
-        });
-        this.fileButton = btn;
-        bar.appendChild(btn);
-        document.body.insertBefore(bar, document.body.firstChild);
         document.addEventListener('mousedown', e => {
-            if (this.menu && !this.menu.contains(e.target as Node) && e.target !== btn) this.closeMenu();
+            if (this.menu && !this.menu.contains(e.target as Node) && !this.anchor?.contains(e.target as Node)) this.closeMenu();
         });
         document.addEventListener('keydown', e => {
             if (e.key === 'Escape') this.closeMenu();
         });
     }
 
-    private fileButton: HTMLButtonElement | null = null;
+    private anchor: HTMLElement | null = null;
 
     private closeMenu(): void {
         this.menu?.remove();
         this.menu = null;
-        this.fileButton?.classList.remove('open');
     }
 
-    private toggleMenu(): void {
+    /** The full file menu (recent files, the library), dropped from `anchor`. */
+    toggleMenu(anchor?: HTMLElement): void {
         if (this.menu) return this.closeMenu();
+        this.anchor = anchor ?? null;
         const menu = document.createElement('div');
         menu.className = 'cprs-menu';
         menu.setAttribute('role', 'menu');
@@ -426,7 +406,11 @@ body{display:flex;flex-direction:column}
         }
         item('Add files to the library...', () => void this.addToLibrary());
         document.body.appendChild(menu);
+        if (anchor) {
+            const r = anchor.getBoundingClientRect();
+            menu.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - menu.offsetWidth - 4))}px`;
+            menu.style.top = `${r.bottom}px`;
+        }
         this.menu = menu;
-        this.fileButton?.classList.add('open');
     }
 }

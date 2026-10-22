@@ -62,6 +62,7 @@ import './editor/workers';
 // calcpad-rs: answer the Calcpad.Server API with the in-page wasm engine.
 import { installWasmTransport } from './wasm/transport';
 import { installWebFiles, webExtensions } from './wasm/setup';
+import { mountRibbon } from './wasm/ribbon';
 
 /** Runtime check: are we running inside a Tauri webview? */
 const isTauri = typeof (window as any).__TAURI_INTERNALS__ !== 'undefined';
@@ -1824,7 +1825,7 @@ async function bootstrap(): Promise<void> {
     appInstance.onRunRequest = () => { void runRefresh(); };
 
     // calcpad-rs: open, save, recent files, print and the #include/#read library in the browser.
-    if (!isTauri) installWebFiles((window as any).calcpadEngine, { tabs: () => (window as any).calcpadTabs, appendOutput: (l, m) => appInstance.appendOutput(l, m), bridge: activeBridge, showSidebarTab: (id: string) => sidebarInstance.switchTab?.(id) });
+    if (!isTauri) mountRibbon(installWebFiles((window as any).calcpadEngine, { tabs: () => (window as any).calcpadTabs, appendOutput: (l, m) => appInstance.appendOutput(l, m), bridge: activeBridge, showSidebarTab: (id: string) => sidebarInstance.switchTab?.(id) }), appInstance);
 
     // Tauri-specific: native menu clicks + file operations
     if (isTauri && tauriBridge) {

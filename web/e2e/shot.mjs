@@ -13,6 +13,7 @@ const b = await chromium.launch(); const page = await b.newPage({ viewport: { wi
 await page.goto('http://127.0.0.1:4195/');
 await page.waitForFunction(() => window.calcpadActiveEditor != null);
 if (process.argv[4]) { await page.evaluate(t => window.calcpadActiveEditor.setValue(t), process.argv[4]); await page.waitForTimeout(3000); }
-if (process.argv[5] === 'menu') { await page.locator('.cprs-file-btn').click(); await page.waitForTimeout(300); }
+if (process.argv[5] === 'menu') { await page.locator('[data-ribbon-tab=file]').click();
+await page.locator('[data-ribbon-btn=recent]').click(); await page.waitForTimeout(300); }
 await page.screenshot({ path: process.argv[2] });
 await b.close(); srv.close();
