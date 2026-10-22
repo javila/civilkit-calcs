@@ -144,7 +144,7 @@ export const RIBBON: RibbonTab[] = [
                 insI('i-comment', 'Comment', 'comment', "'Comment\n", 'Insert a comment line'),
             ] },
             { name: 'Input and output', buttons: [
-                insI('i-ui', 'Input', 'ui', 'a = ? {10}\n', 'Insert an input field with a default value'),
+                insI('i-ui', 'Input', 'ui', '#UI a = 10\n', 'Insert an input field with a default value'),
                 insI('i-plot', 'Plot', 'plot', '$Plot{sin(x) @ x = 0 : 2*pi}\n', 'Insert a plot'),
                 insI('i-table', 'Table', 'table', "'<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n", 'Insert an HTML table'),
             ] },
