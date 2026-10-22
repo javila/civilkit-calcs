@@ -66,10 +66,9 @@ from commit `0cf438f`. CalcpadCE's own version is tracked there, separately from
   each, in [DEVIATIONS.md](DEVIATIONS.md). Not supported: raster (SkiaSharp) plots,
   `#ProjectPath`/`#LibraryPath` path roots, and compiled `.cpdz` worksheets.
 
-What has and has not been checked for the exports: the Excel workbook was checked by opening it in
-openpyxl and in LibreOffice; it has not been opened in Microsoft Excel. The Word document was
-checked in LibreOffice only; it has not been opened in Microsoft Word. Printing to PDF goes through
-the browser's print dialog and has the browser's header and footer.
+Export testing: the Excel workbook opens cleanly in openpyxl and LibreOffice, but we have not tried it in
+Microsoft Excel. The Word document has been checked in LibreOffice only, not in Microsoft Word. PDF output uses
+the browser's print dialog, so it carries the browser's own header and footer.
 
 ## Layout
 

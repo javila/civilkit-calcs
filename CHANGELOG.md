@@ -32,6 +32,6 @@ worksheet language, with the engine, highlighter and Word and Excel export reimp
 
 ### Known limits
 - Raster (SkiaSharp) plots, `#ProjectPath`/`#LibraryPath` path roots and compiled `.cpdz` worksheets are not supported.
-- The Excel export was checked with openpyxl and LibreOffice, the Word export with LibreOffice; neither was opened in
-  Microsoft Office.
+- Exports are untested in Microsoft Office: Excel files were checked in openpyxl and LibreOffice, Word files in
+  LibreOffice.
 - Deviations from CalcpadCE are listed in DEVIATIONS.md.
