@@ -1,6 +1,7 @@
 //! Binary items of a worksheet file: base64 and gzip decoding with output caps, PNG detection, and
 //! the metafile to SVG conversion, all bounded because every byte here is untrusted.
 
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -111,6 +112,69 @@ impl Default for SvgLimits {
     }
 }
 
+/// Most records a metafile may hold. A real drawing of a table or a figure has a few thousand.
+pub const MAX_METAFILE_RECORDS: usize = 200_000;
+
+fn le16(b: &[u8], at: usize) -> Option<usize> {
+    Some(usize::from(u16::from_le_bytes([*b.get(at)?, *b.get(at + 1)?])))
+}
+
+fn le32(b: &[u8], at: usize) -> Option<usize> {
+    Some(u32::from_le_bytes([*b.get(at)?, *b.get(at + 1)?, *b.get(at + 2)?, *b.get(at + 3)?]) as usize)
+}
+
+/// Walks the record chain of a WMF or EMF before it is handed to the converter, and refuses a file
+/// whose chain is malformed (a record that overruns the data or has no size) or that holds more than
+/// [`MAX_METAFILE_RECORDS`] records. This bounds the converter's work where it cannot be run on a
+/// thread with a time limit (the browser build). It reads no pixel or point data.
+pub fn precheck_metafile(b: &[u8]) -> Result<(), SvgError> {
+    let bad = SvgError::Failed;
+    // EMF: the first record is the header (type 1) and carries the signature " EMF" at byte 40.
+    if le32(b, 0) == Some(1) && b.get(40..44) == Some(b" EMF") {
+        let mut at = 0usize;
+        let mut n = 0usize;
+        while at < b.len() {
+            let size = le32(b, at + 4).ok_or(bad)?;
+            if size < 8 || size % 4 != 0 || at + size > b.len() {
+                return Err(bad);
+            }
+            n += 1;
+            if n > MAX_METAFILE_RECORDS {
+                return Err(SvgError::InputTooLarge);
+            }
+            if le32(b, at) == Some(14) {
+                return Ok(()); // end of metafile
+            }
+            at += size;
+        }
+        return Err(bad);
+    }
+    // WMF, with or without the placeable header (key 0x9AC6CDD7, 22 bytes).
+    let mut at = if le32(b, 0) == Some(0x9AC6_CDD7) { 22 } else { 0 };
+    let header_words = le16(b, at + 2).ok_or(bad)?;
+    if !matches!(le16(b, at), Some(1 | 2)) || header_words != 9 {
+        return Err(bad);
+    }
+    at += header_words * 2;
+    let mut n = 0usize;
+    while at < b.len() {
+        let words = le32(b, at).ok_or(bad)?;
+        let func = le16(b, at + 4).ok_or(bad)?;
+        if words < 3 || at + words * 2 > b.len() {
+            return Err(bad);
+        }
+        n += 1;
+        if n > MAX_METAFILE_RECORDS {
+            return Err(SvgError::InputTooLarge);
+        }
+        if func == 0 {
+            return Ok(()); // end of file record
+        }
+        at += words * 2;
+    }
+    Err(bad)
+}
+
 /// Converts a WMF or EMF metafile to SVG text.
 ///
 /// The conversion runs on its own thread with a large stack: a panic is caught, and a run that
@@ -120,6 +184,22 @@ pub fn metafile_to_svg(bytes: &[u8], lim: SvgLimits) -> Result<String, SvgError>
     if bytes.len() > lim.max_input {
         return Err(SvgError::InputTooLarge);
     }
+    precheck_metafile(bytes)?;
+    convert_guarded(bytes, lim)
+}
+
+/// The browser build has no threads and, with `panic = "abort"`, no unwinding: a trap there is
+/// contained by the worker that runs the importer (it restarts the module and retries without
+/// vector conversion). The record-count check above is what bounds the work.
+#[cfg(target_arch = "wasm32")]
+fn convert_guarded(bytes: &[u8], lim: SvgLimits) -> Result<String, SvgError> {
+    let svg = emf_core::converter::convert_to_svg(bytes).map_err(|_| SvgError::Failed)?;
+    let svg = String::from_utf8(svg).map_err(|_| SvgError::Failed)?;
+    check_svg(svg, lim)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn convert_guarded(bytes: &[u8], lim: SvgLimits) -> Result<String, SvgError> {
     let data = bytes.to_vec();
     let (tx, rx) = mpsc::channel();
     let spawned = std::thread::Builder::new().stack_size(32 * 1024 * 1024).spawn(move || {
@@ -137,6 +217,10 @@ pub fn metafile_to_svg(bytes: &[u8], lim: SvgLimits) -> Result<String, SvgError>
         Ok(r) => r?,
         Err(_) => return Err(SvgError::Aborted),
     };
+    check_svg(svg, lim)
+}
+
+fn check_svg(svg: String, lim: SvgLimits) -> Result<String, SvgError> {
     if svg.len() > lim.max_output {
         return Err(SvgError::OutputTooLarge);
     }

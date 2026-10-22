@@ -98,6 +98,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "calcpad-import-xmcd-wasm"
+version = "26.10.1"
+dependencies = [
+ "civilkit-calcs-import-xmcd",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "calcpad-wasm"
 version = "26.10.1"
 dependencies = [

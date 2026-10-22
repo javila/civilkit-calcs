@@ -570,3 +570,62 @@ fn saved_results_that_are_not_single_numbers_are_ignored() {
         assert_eq!(run(&xml).report.pictures.saved_result_available, 0, "{body}");
     }
 }
+
+// ---- the record-chain pre-check (the only bound on conversion work in the browser build) ----------------------------------------
+
+#[test]
+fn precheck_accepts_the_good_file_and_bounds_records() {
+    use calcpad_import_xmcd::picture::{precheck_metafile, MAX_METAFILE_RECORDS};
+    assert_eq!(precheck_metafile(&tiny_wmf()), Ok(()));
+
+    // Many tiny records: refused before conversion.
+    let mut v = words(&[1, 9, 0x0300, 0, 0, 0, 7, 0, 0]);
+    for _ in 0..=MAX_METAFILE_RECORDS {
+        v.extend(words(&[3, 0, 0x0102])); // SetBkMode-sized filler record
+    }
+    v.extend(words(&[3, 0, 0]));
+    assert_eq!(precheck_metafile(&v), Err(SvgError::InputTooLarge));
+
+    // A record that claims to run past the data, a zero-size record, a missing end record.
+    let mut over = words(&[1, 9, 0x0300, 0, 0, 0, 7, 0, 0]);
+    over.extend(words(&[1000, 0, 0x041B]));
+    assert_eq!(precheck_metafile(&over), Err(SvgError::Failed));
+    let mut zero = words(&[1, 9, 0x0300, 0, 0, 0, 7, 0, 0]);
+    zero.extend(words(&[0, 0, 0x041B]));
+    assert_eq!(precheck_metafile(&zero), Err(SvgError::Failed));
+    let mut noend = words(&[1, 9, 0x0300, 0, 0, 0, 7, 0, 0]);
+    noend.extend(words(&[3, 0, 0x0102]));
+    assert_eq!(precheck_metafile(&noend), Err(SvgError::Failed));
+    assert_eq!(precheck_metafile(b""), Err(SvgError::Failed));
+    assert_eq!(precheck_metafile(&[0xFF; 64]), Err(SvgError::Failed));
+}
+
+#[test]
+fn metafile_conversion_can_be_switched_off() {
+    let xml = sheet(
+        &picture_region(3, 0, r#"<metafile item-idref="1"/>"#, Some(2)),
+        &(item(1, &tiny_wmf()) + &item(2, &fake_png(4))),
+    );
+    let res = import_xmcd_opts(
+        &xml,
+        &ImportOptions {
+            convert_metafiles: false,
+            ..ImportOptions::default()
+        },
+    );
+    assert_eq!(res.assets.len(), 1);
+    assert!(res.assets[0].path.ends_with(".png"));
+}
+
+#[test]
+fn bytes_entry_refuses_zip_and_non_utf8() {
+    use calcpad_import_xmcd::import_xmcd_bytes;
+    let o = ImportOptions::default();
+    let r = import_xmcd_bytes(b"PK\x03\x04 and then a zip", &o);
+    assert!(r.report.issues.iter().any(|i| i.code == Code::UnsupportedContainer));
+    let r = import_xmcd_bytes(&[0xFF, 0xFE, 0x00, 0x01], &o);
+    assert!(r.report.issues.iter().any(|i| i.code == Code::XmlError));
+    let mut ok = b"\xEF\xBB\xBF".to_vec();
+    ok.extend(sheet("", "").as_bytes());
+    assert!(!import_xmcd_bytes(&ok, &o).report.is_fatal());
+}

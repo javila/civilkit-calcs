@@ -1,0 +1,16 @@
+[package]
+name = "calcpad-import-xmcd-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "WebAssembly binding of the foreign worksheet importer, loaded only when a worksheet is imported"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+civilkit-calcs-import-xmcd = { path = "../calcpad-import-xmcd" }
+# Must match the wasm-bindgen CLI used by tools/build_wasm.sh.
+wasm-bindgen = "=0.2.122"
+serde_json = "1"

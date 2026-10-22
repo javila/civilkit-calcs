@@ -717,7 +717,12 @@ impl Tr {
             return;
         }
         let mut note_fallback = false;
-        if let Some(mf) = &p.metafile {
+        let metafile = if self.opts.convert_metafiles {
+            p.metafile.as_ref()
+        } else {
+            None
+        };
+        if let Some(mf) = metafile {
             match picture::metafile_to_svg(mf, self.opts.svg_limits) {
                 Ok(svg) => {
                     let len = svg.len();

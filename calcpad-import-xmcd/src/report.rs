@@ -55,6 +55,7 @@ pub enum Code {
     XmlError,
     NotAWorksheet,
     InputTooLarge,
+    UnsupportedContainer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +115,7 @@ impl Code {
         Code::XmlError,
         Code::NotAWorksheet,
         Code::InputTooLarge,
+        Code::UnsupportedContainer,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -163,6 +165,7 @@ impl Code {
             XmlError => "xml-error",
             NotAWorksheet => "not-a-worksheet",
             InputTooLarge => "input-too-large",
+            UnsupportedContainer => "unsupported-container",
         }
     }
 
@@ -171,7 +174,7 @@ impl Code {
         match self {
             GlobalDefinition | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits | AbsOfArray
             | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
-            XmlError | NotAWorksheet | InputTooLarge => Severity::Fatal,
+            XmlError | NotAWorksheet | InputTooLarge | UnsupportedContainer => Severity::Fatal,
             _ => Severity::Gap,
         }
     }
@@ -228,6 +231,7 @@ impl Code {
             XmlError => "the input is not well-formed XML (or uses a DTD, which is refused)",
             NotAWorksheet => "the XML is not a worksheet document",
             InputTooLarge => "the input exceeds the size limit",
+            UnsupportedContainer => "the file is a zip container (the newer worksheet format), which is not supported yet",
         }
     }
 }

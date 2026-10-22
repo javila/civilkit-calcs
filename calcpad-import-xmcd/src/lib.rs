@@ -66,6 +66,9 @@ pub struct ImportOptions {
     pub asset_prefix: String,
     /// Reader limits (input size, nesting, picture bytes).
     pub limits: Limits,
+    /// Convert metafiles to SVG. Off, picture regions use their raster picture only (the browser
+    /// build retries with this off if the converter ever traps).
+    pub convert_metafiles: bool,
     /// Metafile conversion limits.
     pub svg_limits: picture::SvgLimits,
     /// Most asset bytes produced for one worksheet; past it, pictures fall back to placeholders.
@@ -79,6 +82,7 @@ impl Default for ImportOptions {
             saved_results: false,
             asset_prefix: "imported".to_string(),
             limits: Limits::default(),
+            convert_metafiles: true,
             svg_limits: picture::SvgLimits::default(),
             max_total_asset_bytes: 128 * 1024 * 1024,
         }
@@ -114,6 +118,40 @@ pub struct ImportResult {
 /// Imports an `.xmcd` worksheet with the default options.
 pub fn import_xmcd(xml: &str) -> ImportResult {
     import_xmcd_opts(xml, &ImportOptions::default())
+}
+
+/// Imports the raw bytes of a file: refuses a zip container (the newer format) with a fatal
+/// `unsupported-container` report, and input that is not UTF-8 with `xml-error`; a UTF-8 byte order
+/// mark is skipped.
+pub fn import_xmcd_bytes(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
+    let fatal = |code: Code, detail: Option<String>| {
+        let mut report = ImportReport::default();
+        report.issues.push(Issue {
+            code,
+            severity: code.severity(),
+            detail,
+            region_id: None,
+            line: None,
+            reason: code.reason().to_string(),
+            root: None,
+        });
+        ImportResult {
+            calcpad: String::new(),
+            report,
+            assets: Vec::new(),
+        }
+    };
+    if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
+        return fatal(Code::UnsupportedContainer, None);
+    }
+    if bytes.len() > opts.limits.max_bytes {
+        return fatal(Code::InputTooLarge, None);
+    }
+    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
+    match std::str::from_utf8(bytes) {
+        Ok(s) => import_xmcd_opts(s, opts),
+        Err(_) => fatal(Code::XmlError, Some("the input is not UTF-8 text".into())),
+    }
 }
 
 /// Imports an `.xmcd` worksheet with explicit reader limits and otherwise default options.
