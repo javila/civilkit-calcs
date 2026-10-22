@@ -93,10 +93,29 @@ the browser's print dialog, so it carries the browser's own header and footer.
   WebAssembly binding. The snippet data is `calcpad-highlighter/src/snippets/snippets.json`.
 * `calcpad-wasm`: the engine's WebAssembly binding (wasm-bindgen).
 * `calcpad-docx` and `calcpad-docx-wasm`: the Word and Excel writers and their binding.
+* `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`): a spike that translates the simple subset of
+  a foreign worksheet format (`.xmcd`) into Calcpad text, with a report of what did not convert.
+  See [Importing foreign worksheets](#importing-foreign-worksheets-spike).
 * `web/`: the web app. `web/calcpad-frontend` is the shared frontend, `web/calcpad-web` the page
   (Vue, Monaco), `web/e2e` the browser checks.
 * `tools/`: generators, the test runner, `build_wasm.sh`, `set_version.mjs`.
-* `docs/`: [DEPLOY.md](docs/DEPLOY.md) and the model-bindings specification.
+* `docs/`: [DEPLOY.md](docs/DEPLOY.md), the model-bindings specification and
+  [the foreign worksheet importer](docs/worksheet-import.md).
+
+## Importing foreign worksheets (spike)
+
+`calcpad-import-xmcd` reads the `.xmcd` files of the spreadsheet-like worksheet format of a commercial
+calculation tool and writes Calcpad worksheet text for this engine, so existing sheets can be brought
+over. It evaluates nothing itself. Text, definitions, evaluations, functions, vectors and matrices,
+indexing (with the array origin shifted to Calcpad's 1), units and the common built-in functions convert.
+Range variables, programs, solve blocks, symbolic evaluation, plots, pictures and embedded objects do
+not: each becomes a visible placeholder line carrying its region id, and the report counts them by code.
+The newer `.mcdx` container is not read yet. Details, the mapping tables and how to run the batch
+runner over a folder: [docs/worksheet-import.md](docs/worksheet-import.md).
+
+```text
+cargo run -p civilkit-calcs-import-xmcd --example import -- sheet.xmcd
+```
 
 ## Build and run
 

@@ -1,0 +1,18 @@
+[package]
+name = "civilkit-calcs-import-xmcd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "Spike: translates the simple subset of a foreign XML worksheet format (.xmcd) into Calcpad worksheet text, with a report of what did not convert"
+
+[lib]
+name = "calcpad_import_xmcd"
+
+[dependencies]
+# MIT OR Apache-2.0. Read-only XML tree, no DTD support unless asked for (we never ask), no unsafe.
+roxmltree = "0.20"
+
+[dev-dependencies]
+# Only to check, in a test, that every unit name in the mapping table exists in the engine.
+calcpad-core = { path = "../calcpad-core" }
