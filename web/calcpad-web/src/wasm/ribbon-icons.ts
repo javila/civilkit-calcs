@@ -66,6 +66,7 @@ export const ICONS_BIG: Record<string, string> = {
     read: '<path class="m" d="M5 20h22v6a2 2 0 01-2 2H7a2 2 0 01-2-2z"/><path class="h" d="M12 4h8v9h5l-9 9-9-9h5z"/><path class="o" d="M12 4h8v9h5l-9 9-9-9h5zM5 20v6a2 2 0 002 2h18a2 2 0 002-2v-6"/>',
     write: '<path class="m" d="M5 20h22v6a2 2 0 01-2 2H7a2 2 0 01-2-2z"/><path class="h" d="M12 22h8v-9h5L16 4l-9 9h5z"/><path class="o" d="M12 22h8v-9h5L16 4l-9 9h5zM5 20v6a2 2 0 002 2h18a2 2 0 002-2v-6"/>',
     preview: tile('<path class="k" d="M6 15s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z" opacity=".9"/><circle class="a" cx="16" cy="15" r="3"/>'),
+    pause: tile('<rect class="k" x="9" y="8" width="5" height="14" rx="1"/><rect class="k" x="18" y="8" width="5" height="14" rx="1"/>'),
     input: '<rect class="h" x="3" y="9" width="26" height="14" rx="3"/><rect class="o" x="3" y="9" width="26" height="14" rx="3"/>' + a('M8 12h2v8H8z') + w('M14 16h10'),
     report: page('<rect class="m" x="10" y="12" width="13" height="3"/>', '<path class="o" d="M10 19h13M10 23h9"/>'),
     show: tile('<path class="k" d="M6 15s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6z"/><circle class="m" cx="16" cy="15" r="3"/>'),

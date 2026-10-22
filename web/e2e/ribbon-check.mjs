@@ -50,6 +50,34 @@ for (const t of RIBBON) {
     check(n > 0 && await page.locator(`[data-ribbon-panel=${t.id}]`).isVisible(), `tab ${t.label} shows ${n} buttons`);
 }
 check(RIBBON.length === 10, 'the ribbon has ten tabs');
+
+// ---- no duplicate buttons -----------------------------------------------------------------
+{
+    // Same label twice on one tab is a duplicate. (Allow-list: none today; add "tab:Label" here with the reason.)
+    const ALLOW = new Set([]);
+    const dup = [];
+    const quick = new Set();
+    for (const t of RIBBON) {
+        const seen = new Set();
+        for (const g of t.groups) for (const b of g.buttons) {
+            const k = `${t.id}:${b.label}`;
+            if (seen.has(b.label) && !ALLOW.has(k)) dup.push(k);
+            seen.add(b.label);
+        }
+    }
+    check(dup.length === 0, `no two buttons on a tab share a label (${dup.join(', ') || 'none'})`);
+    // One popover per library list: no two buttons of the whole ribbon open the same list.
+    const lists = new Map();
+    for (const t of RIBBON) for (const g of t.groups) for (const b of g.buttons) if (b.more && b.more !== 'all') lists.set(b.more, [...(lists.get(b.more) ?? []), `${t.id}:${b.label}`]);
+    const twice = [...lists].filter(([, v]) => v.length > 1).map(([k, v]) => `${k} -> ${v.join(' & ')}`);
+    check(twice.length === 0, `each library list is opened by one button (${twice.join('; ') || 'none'})`);
+    // And no two lists share a library category.
+    const { MORE } = await import('../calcpad-web/src/wasm/ribbon-data.ts');
+    const cats = new Map();
+    for (const [k, v] of Object.entries(MORE)) if (k !== 'all') for (const c of v.categories) cats.set(c, [...(cats.get(c) ?? []), k]);
+    const shared = [...cats].filter(([, v]) => v.length > 1).map(([c, v]) => `${c} in ${v.join(' & ')}`);
+    check(shared.length === 0, `no library category is in two lists (${shared.join('; ') || 'none'})`);
+}
 {
     const have = await page.evaluate(() => Object.keys(window.calcpadRibbonIcons.big));
     const need = new Set();
@@ -69,8 +97,11 @@ await page.evaluate(() => window.calcpadActiveEditor.setValue('r = '));
 await page.evaluate(() => { const e = window.calcpadActiveEditor; e.setPosition({ lineNumber: 1, column: 5 }); e.focus(); });
 await btn(page, 'p-constants').click();
 check(await popVisible(page), 'Constants popover opens');
-check(await page.locator('.rb-pop-h', { hasText: 'Math' }).count() > 0 && await page.locator('.rb-pop-h', { hasText: 'Physics' }).count() > 0, 'the popover has Math and Physics headings');
-await page.locator('[data-ribbon-glyph="π"]').click();
+{
+    const heads = await page.locator('.rb-pop-h').allInnerTexts();
+    check(/^common/i.test(heads[0] ?? '') && heads.some(h => /physics/i.test(h)) && heads.some(h => /^constants$/i.test(h)), `the Constants popover opens with Common, then the library list (${heads.slice(0, 4).join(' | ')})`);
+}
+await page.locator('[data-ribbon-glyph="π"]').first().click();
 check((await text(page)).includes('r = π'), 'Constants > pi inserts at the cursor');
 check(!(await popVisible(page)) && await editorFocused(page), 'the popover closes after a pick and the editor has focus');
 await btn(page, 'p-constants').click();
@@ -96,7 +127,7 @@ check((await text(page)).includes('#UI L = 10m'), 'Input/Output > Entry inserts 
 await tab(page, 'functions');
 await page.evaluate(() => { window.calcpadActiveEditor.setValue('r = '); window.calcpadActiveEditor.setPosition({ lineNumber: 1, column: 5 }); });
 await btn(page, 'fn-trig').click();
-await page.locator('[data-ribbon-glyph="sin"]').click();
+await page.locator('[data-ribbon-glyph="sin"]').first().click();
 check((await text(page)).includes('r = sin(x)'), 'Functions > Trigonometric > sin inserts sin(x)');
 // text formatting wraps the selection
 await tab(page, 'textfmt');
@@ -180,21 +211,31 @@ check(errors.length === 0, `no page errors (${errors.slice(0, 2).join(' | ')})`)
     // Library inserts honour the first marker: the parameter is selected.
     await page.evaluate(() => { window.calcpadActiveEditor.setValue('r = '); window.calcpadActiveEditor.setPosition({ lineNumber: 1, column: 5 }); window.calcpadActiveEditor.focus(); });
     await tab(page, 'functions');
-    await btn(page, 'a-elem').click();
+    await btn(page, 'fn-trig').click();
     await page.waitForSelector('.rb-pop [data-snip-key]');
     await clickKey(page, 'Functions/Trigonometric|sin(§)');
     const got = await page.evaluate(() => { const e = window.calcpadActiveEditor; return { t: e.getValue(), sel: e.getModel().getValueInRange(e.getSelection()) }; });
     check(got.t === 'r = sin(x)' && got.sel === 'x', `a library function inserts with its parameter selected (${JSON.stringify(got)})`);
+    // Programming: Common first, then the library under the four headings asked for.
+    await tab(page, 'math');
+    await btn(page, 'p-programming').click();
+    await page.waitForSelector('.rb-pop [data-snip-key]');
+    {
+        const heads = (await page.locator('.rb-pop-h').allInnerTexts()).map(h => h.toLowerCase());
+        const idx = ['conditions', 'loops', 'macros and modules', 'other keywords'].map(h => heads.lastIndexOf(h));
+        check(heads[0].startsWith('common') && idx.every(i => i > 0) && idx.every((v, i) => !i || v > idx[i - 1]), `Programming opens with Common, then Conditions, Loops, Macros and modules, Other keywords (${heads.join(' | ')})`);
+    }
+    await page.keyboard.press('Escape');
     // A line snippet from the keyword list goes on its own line.
     await page.evaluate(() => { window.calcpadActiveEditor.setValue('a = 1'); window.calcpadActiveEditor.setPosition({ lineNumber: 1, column: 6 }); });
     await tab(page, 'math');
-    await btn(page, 'a-keywords').click();
+    await btn(page, 'p-programming').click();
     await page.waitForSelector('.rb-pop [data-snip-key]');
     await clickKey(page, 'Iteration Blocks|#for i = 1 : n\n\texpression\n#loop');
     const kt = await text(page);
     check(/^a = 1\n#for i = 1 : n\n\s+expression\n#loop/.test(kt), `a keyword block goes on its own line (${JSON.stringify(kt)})`);
     // The filter box narrows a long list.
-    await btn(page, 'a-units').click();
+    await btn(page, 'p-units').click();
     await page.waitForSelector('.rb-pop [data-snip-key]');
     const before = await page.locator('.rb-pop .rb-glyph').count();
     await page.locator('.rb-filter').fill('kilonewton');
@@ -227,34 +268,42 @@ await page.evaluate(async () => {
 });
 await tab(page, 'math');
 const done1 = await calculated(page);
-await btn(page, 'a-constants').click();
+await btn(page, 'p-programming').click();
 await page.waitForSelector('.rb-pop [data-snip-key]');
 await calculated(page);
-await page.screenshot({ path: `${out}/math-constants-light-v3.png` });
+await page.screenshot({ path: `${out}/math-programming-light-v4.png` });
 await page.keyboard.press('Escape');
 console.log('results calculated before the light shot:', done1);
 await tab(page, 'resources');
 await btn(page, 'x-dark').click();
 await tab(page, 'math');
-await btn(page, 'a-units').click();
+await btn(page, 'p-constants').click();
 await page.waitForSelector('.rb-pop [data-snip-key]');
-console.log('results calculated before the units shot:', await calculated(page));
-await page.screenshot({ path: `${out}/math-units-dark-v3.png` });
+console.log('results calculated before the dark shot:', await calculated(page));
+await page.screenshot({ path: `${out}/math-constants-dark-v4.png` });
 await page.keyboard.press('Escape');
 await tab(page, 'functions');
-await btn(page, 'a-elem').click();
-await page.waitForSelector('.rb-pop [data-snip-key]');
-const done2 = await calculated(page);
-await page.screenshot({ path: `${out}/functions-dark-v3.png` });
-await page.keyboard.press('Escape');
-console.log('results calculated before the dark shot:', done2);
+await calculated(page);
+await page.screenshot({ path: `${out}/functions-dark-v4.png` });
 await tab(page, 'resources');
 await btn(page, 'x-light').click();
 await tab(page, 'matrices');
-await btn(page, 'a-mat').click();
-await page.waitForSelector('.rb-pop [data-snip-key]');
-await page.screenshot({ path: `${out}/matrices-tables-light-v3.png` });
-await page.keyboard.press('Escape');
+await calculated(page);
+await page.screenshot({ path: `${out}/matrices-tables-light-v4.png` });
+// A contact sheet: the ribbon of every tab, one under the other.
+{
+    const shots = [];
+    for (const t of RIBBON) {
+        await tab(page, t.id);
+        await page.waitForTimeout(150);
+        shots.push({ id: t.label, png: (await page.screenshot({ clip: { x: 0, y: 0, width: 1400, height: 155 } })).toString('base64') });
+    }
+    const sheet = await page.context().newPage();
+    await sheet.setViewportSize({ width: 1420, height: 155 * shots.length + 30 * shots.length + 20 });
+    await sheet.setContent(`<body style="margin:10px;font:13px sans-serif;background:#888">${shots.map(s => `<div style="margin-bottom:6px;color:#fff">${s.id}</div><img style="display:block;margin-bottom:12px" src="data:image/png;base64,${s.png}">`).join('')}</body>`);
+    await sheet.screenshot({ path: `${out}/all-tabs-v4.png`, fullPage: true });
+    await sheet.close();
+}
 
 // ---- phone ---------------------------------------------------------------------------------
 ({ page, errors } = await open(390, 780, 'light'));
@@ -263,11 +312,11 @@ await page.evaluate(() => { const e = window.calcpadActiveEditor; e.setPosition(
 await tab(page, 'math');
 let sw = await page.evaluate(() => ({ panel: document.querySelector('.rb-panel').scrollWidth, client: document.querySelector('.rb-panel').clientWidth, doc: document.documentElement.scrollWidth }));
 check(sw.panel > sw.client && sw.doc <= 392, `phone: the panel scrolls, the page does not (${JSON.stringify(sw)})`);
-await btn(page, 'a-units').click();
+await btn(page, 'p-units').click();
 await page.waitForSelector('.rb-pop [data-snip-key]');
 const box = await page.locator('.rb-pop').boundingBox();
 check(!!box && box.width >= 388 && Math.abs(box.y + box.height - 780) < 3, `phone: the popover is a bottom sheet (${JSON.stringify(box)})`);
-await page.screenshot({ path: `${out}/phone-long-popover-v3.png` });
+await page.screenshot({ path: `${out}/phone-long-popover-v4.png` });
 await clickKey(page, 'Units/Metric/Length|km');
 check((await text(page)).includes('km'), 'phone: a library unit inserts');
 sw = await page.evaluate(() => document.documentElement.scrollWidth);

@@ -51,6 +51,7 @@ export function snipEntry(s: Snip): Entry {
 }
 
 function heading(cat: string, spec: MoreSpec): string {
+    if (spec.headings?.[cat]) return spec.headings[cat];
     const prefix = spec.categories.find(c => cat === c || cat.startsWith(`${c}/`));
     let rest = prefix && cat !== prefix ? cat.slice(prefix.length + 1) : cat;
     if (prefix && cat === prefix) rest = cat.slice(cat.lastIndexOf('/') + 1);

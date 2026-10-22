@@ -122,25 +122,31 @@ function place(anchor: HTMLElement, wide: boolean): Record<string, string> {
   return { left: `${Math.max(4, Math.min(r.left, window.innerWidth - width - 8))}px`, top: `${r.bottom + 2}px` };
 }
 
+/** The hand-picked sections of a palette, headed "Common" so the library list below them reads as the rest. */
+function commonSections(b: RibbonButton): Section[] {
+  return (b.palette ?? []).map(s => ({ heading: s.heading ? `Common: ${s.heading}` : 'Common', items: s.items }));
+}
+
 function openPalette(b: RibbonButton, anchor: HTMLElement): void {
   if (pop.value?.id === b.id) return closePop(true);
   q.value = '';
   popAnchor = anchor;
+  const common = b.more ? commonSections(b) : (b.palette ?? []);
   if (b.more) {
     const spec = MORE[b.more];
-    pop.value = { id: b.id, sections: [], style: place(anchor, true), filter: !!spec.filter, wide: true, loading: true };
+    pop.value = { id: b.id, sections: common, style: place(anchor, true), filter: !!spec.filter, wide: true, loading: true };
     void loadSnippets().then(all => {
       for (const s of all) snipByKey.set(`${s.category}|${s.insert}`, s);
       if (pop.value?.id !== b.id) return;
-      pop.value = { ...pop.value, sections: sectionsFor(all, spec), loading: false };
+      pop.value = { ...pop.value, sections: [...common, ...sectionsFor(all, spec)], loading: false };
       if (spec.filter && window.innerWidth > 700) void nextTick(() => filterEl.value?.focus());
     }).catch(() => {
-      if (pop.value?.id === b.id) pop.value = { ...pop.value, loading: false, sections: [{ heading: 'The snippet library could not be loaded', items: [] }] };
+      if (pop.value?.id === b.id) pop.value = { ...pop.value, loading: false, sections: [...common, { heading: 'The snippet library could not be loaded', items: [] }] };
     });
     return;
   }
-  const wide = b.palette!.reduce((n, s) => n + s.items.length, 0) > 60;
-  pop.value = { id: b.id, sections: b.palette!, style: place(anchor, wide), filter: wide, wide, loading: false };
+  const wide = common.reduce((n, s) => n + s.items.length, 0) > 60;
+  pop.value = { id: b.id, sections: common, style: place(anchor, wide), filter: wide, wide, loading: false };
 }
 
 function fire(b: RibbonButton, ev: MouseEvent): void {
