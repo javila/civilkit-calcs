@@ -575,6 +575,9 @@ async function bootstrap(): Promise<void> {
         return uiDocKeyFor(activeGroup);
     }
 
+    // The once-per-tab question before a worksheet's Python runs is scoped to the tab being shown.
+    if (!isTauri) (window as any).calcpadEngine.pythonScope = () => docKeyFor(activeGroup);
+
     function refreshUiDirtyIndicator(): void {
         appInstance.setUiOverridesDirty(uiOverridesDirty.has(activeUiDocKey()));
     }

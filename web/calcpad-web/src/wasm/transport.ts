@@ -23,6 +23,9 @@ import { applyScriptPolicy } from './script-policy';
 import { compileSheet, isSheetRequest, remapErrors, remapHtml, sheetLine, withSheetCss } from './sheet';
 import type { SheetCompiled } from './sheet';
 import { hasTex, renderTex } from './sheet-tex';
+import { findPythonBlocks, hasPythonBlock, pythonErrors, remapErrors as remapPythonErrors, remapPage, substitute, type BlockResult, type EngineError } from './python-blocks';
+import { PythonRunner } from './python-runner';
+import { mayRunPython } from './python-consent';
 
 const API_PREFIX = '/api/calcpad/';
 /** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
@@ -344,6 +347,8 @@ export interface WasmTransport {
     onFilesWritten: ((files: EngineFile[]) => void) | null;
     /** A library file by its path ("/Images/a.png"), for the images a worksheet shows. */
     resolveFile: ((path: string) => Uint8Array | undefined) | null;
+    /** The open tab a render belongs to, for the once-per-tab Python question. */
+    pythonScope: () => string;
 }
 
 const IMAGE_TYPES: Record<string, string> = {
@@ -391,6 +396,29 @@ export function installWasmTransport(): WasmTransport {
         },
         onFilesWritten: null,
         resolveFile: null,
+        pythonScope: () => 'default',
+    };
+    const python = new PythonRunner(base);
+    (window as unknown as { calcpadPython: PythonRunner }).calcpadPython = python;
+
+    /**
+     * `#python` blocks run here, before the engine: each is replaced by its results (docs/python-blocks.md). Returns null for
+     * a worksheet without any, which then never touches the Python runtime.
+     */
+    const preparePython = async (request: Record<string, unknown>) => {
+        const content = request.content;
+        if (typeof content !== 'string' || !hasPythonBlock(content)) return null;
+        const blocks = findPythonBlocks(content);
+        const signature = blocks.map(b => b.code).join('\0');
+        let results: BlockResult[];
+        if (await mayRunPython(transport.pythonScope(), signature)) results = await python.run(blocks);
+        else {
+            results = blocks.map(() => ({ parts: [], exports: [], truncated: false,
+                error: { type: '', message: 'Python was not run: this worksheet asks to run Python and the question was answered Not now. Edit the Python or reopen the tab to be asked again.', line: null } }));
+        }
+        const sub = substitute(content, blocks, results);
+        request.content = sub.content;
+        return { map: sub.map, errors: pythonErrors(blocks, results) };
     };
 
     const handle = async (url: URL, method: string, body: string | null, signal?: AbortSignal | null): Promise<Response> => {
@@ -428,12 +456,21 @@ export function installWasmTransport(): WasmTransport {
             await head;
             const unwrap = url.searchParams.get('unwrap') === 'true';
             const sh = await sheetBody(body);
-            const out = JSON.parse(await engine.convert(sh ? sh.body : body, unwrap, signal)) as {
+            let engineBody = sh ? sh.body : body;
+            const req0 = JSON.parse(engineBody) as Record<string, unknown>;
+            const py = await preparePython(req0);
+            if (py) engineBody = JSON.stringify(req0);
+            const out = JSON.parse(await engine.convert(engineBody, unwrap, signal)) as {
                 html?: string; errors?: unknown[]; status?: number; error?: string;
                 files?: { path: string; data: string }[];
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
+            if (py) {
+                // Engine lines to the lines of the text the engine was given before Python (the compiled sheet, or the worksheet).
+                html = remapPage(html, py.map);
+                out.errors = [...remapPythonErrors((out.errors ?? []) as EngineError[], py.map), ...py.errors];
+            }
             if (sh) {
                 out.errors = remapErrors((out.errors ?? []) as { sourceLine?: number }[], sh.sheet);
                 if (!unwrap) html = withSheetCss(remapHtml(html, sh.sheet));
@@ -461,6 +498,7 @@ export function installWasmTransport(): WasmTransport {
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
             const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
+            await preparePython(request);
             request.captureOpenXml = true;
             request.enableUi = false;
             request.includeLineAnchors = false;
@@ -487,6 +525,7 @@ export function installWasmTransport(): WasmTransport {
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
             const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
+            await preparePython(request);
             request.exportXlsx = true;
             request.enableUi = false;
             request.includeLineAnchors = false;

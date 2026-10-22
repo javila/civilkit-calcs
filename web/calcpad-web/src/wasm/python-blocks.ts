@@ -1,0 +1,176 @@
+// The text side of `#python` blocks (docs/python-blocks.md): finding the blocks in a worksheet, turning what a
+// block produced into Calcpad lines, and mapping the source line numbers of the engine's answer back to the
+// worksheet the user wrote. No I/O here; python-runner.ts runs the code and transport.ts drives it.
+//
+// The grammar is kept in step with calcpad-highlighter/src/python_blocks.rs (the editor side):
+//   #python                a line holding only this (any case, surrounding blanks allowed) opens a block
+//   #end python            a line holding only this closes it; no nesting; a block left open runs to the end
+
+export interface PyBlock {
+    /** 0-based line of `#python`. */
+    start: number;
+    /** 0-based line of `#end python`, or -1 when the block is left open. */
+    end: number;
+    /** The block's code lines, joined with \n. */
+    code: string;
+    /** 0-based line of the first code line. */
+    first: number;
+}
+
+const OPEN = /^\s*#python\s*$/i;
+const CLOSE = /^\s*#end\s+python\s*$/i;
+
+/** Cheap test for the lazy load: does the text hold a `#python` line at all? */
+export function hasPythonBlock(text: string): boolean {
+    return /^[ \t]*#python[ \t]*\r?$/im.test(text);
+}
+
+export function findPythonBlocks(text: string): PyBlock[] {
+    const lines = text.split('\n');
+    const blocks: PyBlock[] = [];
+    for (let i = 0; i < lines.length; i++) {
+        if (!OPEN.test(lines[i])) continue;
+        let end = -1;
+        for (let j = i + 1; j < lines.length; j++) if (CLOSE.test(lines[j])) { end = j; break; }
+        const stop = end < 0 ? lines.length : end;
+        blocks.push({ start: i, end, code: lines.slice(i + 1, stop).join('\n').replace(/\r/g, ''), first: i + 1 });
+        i = stop;
+    }
+    return blocks;
+}
+
+export type ExportValue = number | number[] | number[][];
+
+export interface BlockError {
+    type: string;
+    message: string;
+    /** 0-based worksheet line the error points at, when the traceback names a line of the block. */
+    line: number | null;
+}
+
+export interface BlockResult {
+    /** print() text and figures, in the order the script made them. */
+    parts: ({ text: string } | { svg: string })[];
+    exports: { name: string; value: ExportValue }[];
+    error: BlockError | null;
+    /** The output or the figure count hit its cap. */
+    truncated: boolean;
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/** A Calcpad number: JS exponent notation becomes `m*10^e`, which the engine reads. */
+export function formatNumber(n: number): string {
+    const s = String(n);
+    const m = /^(-?[\d.]+)e([+-]?\d+)$/i.exec(s);
+    return m ? `${m[1]}*10^${Number(m[2])}` : s;
+}
+
+/** True for a name Calcpad accepts as a variable: letters (any script), digits and underscores, not starting with a digit or `_`. */
+export function validName(name: string): boolean {
+    return /^[\p{L}][\p{L}\p{N}_]*$/u.test(name);
+}
+
+/** `name = value`, `name = [a; b; c]` (vector), `name = [a; b| c; d]` (matrix). */
+export function definitionLine(name: string, value: ExportValue): string {
+    if (typeof value === 'number') return `${name} = ${formatNumber(value)}`;
+    if (Array.isArray(value[0])) return `${name} = [${(value as number[][]).map((r) => r.map(formatNumber).join('; ')).join('| ')}]`;
+    return `${name} = [${(value as number[]).map(formatNumber).join('; ')}]`;
+}
+
+const PRE_STYLE = 'font-family:monospace;white-space:pre-wrap;margin:4pt 0;padding:4pt 8pt;border-left:3pt solid #8a8a8a;background:rgba(128,128,128,.12)';
+
+/**
+ * The lines that stand in for a block in the text the engine reads: one text line holding the output (print text in a
+ * `<pre>`, figures as inline SVG, an error), then one definition line per exported name. The text line uses `'`, so it
+ * holds no single quote and no line break.
+ */
+export function replacementLines(res: BlockResult, blockLine: number): string[] {
+    const html: string[] = [];
+    for (const p of res.parts) {
+        if ('text' in p) {
+            if (p.text.length) html.push(`<pre class="cprs-py-out" style="${PRE_STYLE}">${escapeHtml(p.text).replace(/\n/g, '&#10;')}</pre>`);
+        } else html.push(`<div class="cprs-py-fig" style="margin:4pt 0">${p.svg}</div>`);
+    }
+    if (res.truncated) html.push('<p><i>Python output was cut at its size limit.</i></p>');
+    const lines: string[] = [];
+    if (res.error) {
+        const where = res.error.line != null ? ` on line ${res.error.line + 1}` : ` in the block at line ${blockLine + 1}`;
+        html.push(`<p><span class="err">Python error${escapeHtml(where)}: ${escapeHtml(res.error.type ? `${res.error.type}: ` : '')}${escapeHtml(res.error.message)}</span></p>`);
+    }
+    if (html.length) lines.push(`'${html.join('')}`);
+    if (!res.error) for (const e of res.exports) lines.push(definitionLine(e.name, e.value));
+    return lines;
+}
+
+export interface Substitution {
+    /** The worksheet with each block replaced by its results. */
+    content: string;
+    /** For each line of `content` (0-based), the 0-based worksheet line it stands for. */
+    map: number[];
+}
+
+export function substitute(content: string, blocks: PyBlock[], results: BlockResult[]): Substitution {
+    const lines = content.split('\n');
+    const out: string[] = [];
+    const map: number[] = [];
+    let at = 0;
+    blocks.forEach((b, k) => {
+        for (; at < b.start; at++) { out.push(lines[at]); map.push(at); }
+        for (const l of replacementLines(results[k], b.start)) { out.push(l); map.push(b.start); }
+        at = (b.end < 0 ? lines.length : b.end + 1);
+    });
+    for (; at < lines.length; at++) { out.push(lines[at]); map.push(at); }
+    return { content: out.join('\n'), map };
+}
+
+/**
+ * The engine numbers lines of the text it was given; the editor needs the worksheet's own. Rewrites the line numbers of
+ * the page (`data-source-line`, `data-ui-line`, `data-line`, error links) and of the error list. A line number the map
+ * does not know (past the end, from an included file) is left as it is.
+ */
+export function remapPage(html: string, map: number[]): string {
+    const m = (s: string) => { const i = Number(s) - 1; return i >= 0 && i < map.length ? String(map[i] + 1) : s; };
+    return html
+        .replace(/(data-source-line="|data-ui-line=")(\d+)(")/g, (_a, p, n, q) => p + m(n) + q)
+        .replace(/(<a\b[^>]*?\bdata-text=")(\d+)("[^>]*>)(\d+)(<\/a>)/g, (_a, p, n, q, v, e) => p + m(n) + q + m(v) + e)
+        .replace(/(<a\b[^>]*?\bhref="#line-)(\d+)("[^>]*?\bdata-text=")(\d+)("[^>]*>)(\d+)(<\/a>)/g, (_a, p, n, q, d, r, v, e) => p + m(n) + q + m(d) + r + m(v) + e)
+        .replace(/(\bdata-line=")(\d+)("[^>]*>)(\d+)(<\/span>)/g, (_a, p, n, q, v, e) => p + m(n) + q + m(v) + e);
+}
+
+export interface EngineError { message?: string; sourceLine?: number; outputLine?: number; source?: string; [k: string]: unknown }
+
+export function remapErrors(errors: EngineError[], map: number[]): EngineError[] {
+    return errors.map((e) => {
+        const i = (e.sourceLine ?? 0) - 1;
+        return i >= 0 && i < map.length ? { ...e, sourceLine: map[i] + 1 } : e;
+    });
+}
+
+/** The entries a block's error adds to the engine's error list (lines are 1-based there). */
+export function pythonErrors(blocks: PyBlock[], results: BlockResult[]): EngineError[] {
+    const out: EngineError[] = [];
+    results.forEach((r, k) => {
+        if (!r.error) return;
+        out.push({
+            message: `Python ${r.error.type ? `${r.error.type}: ` : ''}${r.error.message}`,
+            sourceLine: (r.error.line ?? blocks[k].start) + 1,
+            outputLine: 0,
+            source: 'Python',
+        });
+    });
+    return out;
+}
+
+/** A MicroPython traceback read for the worksheet: the exception, and the innermost frame that is the block's own code. */
+export function readTraceback(text: string): { type: string; message: string; line: number | null } {
+    const lines = String(text ?? '').replace(/\s+$/, '').split(/\r?\n/);
+    const last = lines[lines.length - 1] ?? '';
+    const m = /^(\w+(?:\.\w+)*): ?(.*)$/.exec(last);
+    let line: number | null = null;
+    for (const l of lines) {
+        const f = /^\s*File "<python>", line (\d+)/.exec(l);
+        if (f) line = Number(f[1]) - 1;
+    }
+    return { type: m ? m[1] : '', message: m ? m[2] : last, line };
+}

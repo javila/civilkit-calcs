@@ -25,6 +25,8 @@ export interface Sample {
     ui: boolean;
     scripts: boolean;
     read: boolean;
+    /** The worksheet has `#python` blocks: its preview shows the source and does not run them. */
+    python?: boolean;
     assets: SampleAsset[];
 }
 interface Manifest { groups: string[]; samples: Sample[] }
@@ -201,7 +203,7 @@ export class SamplesBrowser {
                 d.textContent = s.description;
                 const tags = document.createElement('div');
                 tags.className = 'cprs-s-tags';
-                for (const tag of [...s.codes.filter((c) => /-|^[A-Z]+ \d+$/.test(c) && !/^EN \d{4}$/.test(c)), ...(s.ui ? ['input form'] : []), ...(s.scripts ? ['scripts'] : []), ...(s.read ? ['#read'] : [])]) {
+                for (const tag of [...s.codes.filter((c) => /-|^[A-Z]+ \d+$/.test(c) && !/^EN \d{4}$/.test(c)), ...(s.ui ? ['input form'] : []), ...(s.scripts ? ['scripts'] : []), ...(s.read ? ['#read'] : []), ...(s.python ? ['python'] : [])]) {
                     const span = document.createElement('span');
                     span.textContent = tag;
                     tags.appendChild(span);
@@ -247,6 +249,13 @@ export class SamplesBrowser {
         frame.srcdoc = '<p style="font:13px sans-serif;color:#666">Rendering...</p>';
         try {
             const text = opened(new TextDecoder().decode(await bytes(s.file)).replace(/^﻿/, ''));
+            if (s.python) {
+                // Browsing must not run code: show the source; opening the sample asks before it runs.
+                const esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+                if (seq === this.previewSeq && this.root) frame.srcdoc = '<p style="font:13px sans-serif;color:#555">This worksheet runs Python when it is opened and calculated. Its source:</p>'
+                    + `<pre style="font:12px/1.4 monospace;white-space:pre-wrap">${esc}</pre>`;
+                return;
+            }
             const extraFiles: Record<string, string> = {};
             for (const a of s.assets) {
                 if (/\.(cpd|txt|csv|xlsx|xlsm)$/i.test(a.key)) extraFiles[a.key] = toBase64(await bytes(a.url));
