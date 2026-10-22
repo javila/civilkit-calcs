@@ -1,10 +1,7 @@
 use super::*;
 use serde_json::Value;
 
-const SAMPLES: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../web/calcpad-web/public/sheet-samples/"
-);
+const SAMPLES: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../web/calcpad-web/public/sheet-samples/");
 
 fn sample(name: &str) -> String {
     std::fs::read_to_string(format!("{SAMPLES}{name}.sheet")).unwrap()

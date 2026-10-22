@@ -308,6 +308,8 @@ function sheetLint(out: string, sheet: SheetCompiled, source: string): string {
     const seen = new Set<string>();
     const mapped: LintDiag[] = [];
     for (const d of diags) {
+        // Every quantity of a sheet is shown in the report, so "never used" says nothing here.
+        if (/^Unused variable/.test(d.message)) continue;
         const line = (sheet.map[d.line] ?? d.line);
         const len = (lines[line] ?? '').replace(/\r$/, '').length;
         const m = { ...d, line, column: 0, endColumn: Math.max(1, len) };

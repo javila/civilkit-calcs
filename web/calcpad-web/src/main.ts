@@ -47,6 +47,7 @@ import { attachQuickTyper } from './editor/quick-type';
 import { attachOperatorReplacer } from './editor/operator-replacer';
 import { attachAutoIndenter } from './editor/auto-indent';
 import { registerFormattingCommands, getParseMode } from './editor/formatting-commands';
+import { sheetInsert } from './wasm/sheet-insert';
 import { registerFormatDocumentProvider } from './editor/format-document';
 import { setActiveDocumentKeyResolver, getActiveDocumentKey, type EditorBridge } from './editor/bridge';
 import { EditorGroup } from './editor/editor-group';
@@ -1308,9 +1309,13 @@ async function bootstrap(): Promise<void> {
         if (selection) {
             // Markup snippets are written for Calcpad mode; an #html/#markdown block takes
             // the same content without the #val wrapper or the ' quotes.
-            const insert = getParseMode(editor, activeBridge) === 'cpd'
-                ? text
-                : stripCpdSnippetWrapper(text);
+            // In a sheet the sidebar's snippets insert their sheet forms (wasm/sheet-insert.ts).
+            const sheet = editor.getModel()?.getLanguageId() === 'calcpad-sheet';
+            const insert = sheet
+                ? sheetInsert(text, text.endsWith('\n')).text
+                : getParseMode(editor, activeBridge) === 'cpd'
+                    ? text
+                    : stripCpdSnippetWrapper(text);
             editor.executeEdits('calcpad-insert', [{
                 range: selection,
                 text: insert,

@@ -77,6 +77,14 @@ fn tokenize(s: &str) -> Result<Vec<(Tok, bool)>, String> {
                 }
             }
             tok = Tok::Num(cs[st..i].iter().collect());
+        } else if c == '°' {
+            // A degree sign, alone or leading a unit name (°C, °F).
+            let st = i;
+            i += 1;
+            while i < cs.len() && names::is_name_char(cs[i]) {
+                i += 1;
+            }
+            tok = Tok::Ident(cs[st..i].iter().collect());
         } else if names::is_name_start(c) || c == '_' {
             let st = i;
             while i < cs.len() && names::is_name_char(cs[i]) {
@@ -121,7 +129,7 @@ fn tokenize(s: &str) -> Result<Vec<(Tok, bool)>, String> {
                     ';' => Tok::Semi,
                     '.' => Tok::Dot,
                     '+' | '-' | '*' | '/' | '^' | '%' | '<' | '>' | '!' | '=' | '≤' | '≥' | '≠' | '≡' | '∧' | '∨'
-                    | '×' | '·' | '÷' | '−' => Tok::Op(c.to_string()),
+                    | '×' | '·' | '÷' | '−' | '⦼' | '\\' | '∠' | '⊕' => Tok::Op(c.to_string()),
                     _ => return Err(format!("unexpected character '{c}'")),
                 },
             };

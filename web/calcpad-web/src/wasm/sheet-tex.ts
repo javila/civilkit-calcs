@@ -91,7 +91,7 @@ export async function renderTex(html: string): Promise<string> {
         } catch { /* the font falls back to a system one */ }
     }
     const style = `<style id="cprs-katex">${faces}${css}`
-        + '.sheet-tex[data-display="1"]{margin:.6em 0;text-align:center}.dark-theme .katex{color:#d4d4d4}</style>';
+        + '.sheet-tex[data-display="1"]{margin:.6em 0;text-align:center}.dark-theme .katex{color:#d4d4d4}.sheet-note .katex{color:inherit}</style>';
     const i = out.toLowerCase().lastIndexOf('</head>');
     return i < 0 ? style + out : out.slice(0, i) + style + out.slice(i);
 }

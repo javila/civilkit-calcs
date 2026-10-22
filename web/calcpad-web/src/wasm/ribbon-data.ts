@@ -28,6 +28,8 @@ export interface Entry {
     /** Verify with complex numbers switched on (the real-number default rejects them). */
     cx?: boolean;
     skip?: string;
+    /** What the entry inserts in a sheet (sheet-insert.ts); without it the Calcpad text is converted or passed through. */
+    sheet?: string;
 }
 export interface Section { heading: string; items: Entry[] }
 export interface RibbonButton {
@@ -42,6 +44,8 @@ export interface RibbonButton {
     nox?: boolean;
     raw?: boolean;
     skip?: string;
+    /** What the button inserts in a sheet (sheet-insert.ts). */
+    sheet?: string;
     action?: string;
     palette?: Section[];
     /** Opens the full library list named here (a key of MORE), filled from the snippet library. */
@@ -110,10 +114,10 @@ export const VERIFY_FILES: Record<string, string> = {
     'module.cpd': 'm_1 = 5\n',
 };
 
-type Item = [label: string, text: string, title?: string];
+type Item = [label: string, text: string, title?: string, sheet?: string];
 const sec = (heading: string, items: Item[], o: Partial<Entry> = {}): Section => ({
     heading,
-    items: items.map(([label, text, title]) => ({ label, text, title, ...o })),
+    items: items.map(([label, text, title, sheet]) => ({ label, text, title, ...(sheet !== undefined ? { sheet } : {}), ...o })),
 });
 /** Inline glyphs, tested as `r = <template>` with `{}` for the glyph. */
 const op = (heading: string, items: Item[], test = 'r = x {} y'): Section => sec(heading, items, { test });
@@ -149,14 +153,14 @@ const PAL_SYMBOLS: Section[] = [
                 ];
 const PAL_PROGRAMMING: Section[] = [
                     lines('Conditions', [
-                        ['#if', '#if x > 0\n    \n#end if\n', 'If'],
-                        ['#if / #else', '#if x > 0\n    \n#else\n    \n#end if\n', 'If and else'],
-                        ['#else if', '#if x > 5\n    \n#else if x > 0\n    \n#else\n    \n#end if\n', 'If, else if and else'],
+                        ['#if', '#if x > 0\n    \n#end if\n', 'If', 'if x > 0:\n    a: 1\n'],
+                        ['#if / #else', '#if x > 0\n    \n#else\n    \n#end if\n', 'If and else', 'if x > 0:\n    a: 1\nelse:\n    a: 2\n'],
+                        ['#else if', '#if x > 5\n    \n#else if x > 0\n    \n#else\n    \n#end if\n', 'If, else if and else', 'if x > 5:\n    a: 1\nelse if x > 0:\n    a: 2\nelse:\n    a: 3\n'],
                     ]),
                     lines('Loops', [
-                        ['#for', '#for k = 1 : 5\n    \n#loop\n', 'Counting loop'],
-                        ['#while', '#while x < 5\n    x = x + 1\n#loop\n', 'Loop while a condition holds'],
-                        ['#repeat', '#repeat 3\n    \n#loop\n', 'Repeat a number of times'],
+                        ['#for', '#for k = 1 : 5\n    \n#loop\n', 'Counting loop', 'for k in 1..5:\n    a: k\n'],
+                        ['#while', '#while x < 5\n    x = x + 1\n#loop\n', 'Loop while a condition holds', 'while x < 5:\n    x: x + 1\n'],
+                        ['#repeat', '#repeat 3\n    \n#loop\n', 'Repeat a number of times', 'repeat 3:\n    a: 1\n'],
                         ['#break', '#break\n', 'Leave the loop', ], ['#continue', '#continue\n', 'Next iteration'],
                     ], { test: '#repeat 3\n    #if x > 1\n        {}\n    #end if\n#loop' }),
                     lines('Macros and definitions', [
@@ -318,11 +322,11 @@ export const RIBBON: RibbonTab[] = [
         id: 'math', label: 'Math', groups: [
             { name: 'Regions', buttons: [
                 big('r-math', 'Math line', 'mathline', 'Insert a line of math', { text: 'a = 1\n', line: true }),
-                big('r-text', 'Text', 'comment', 'Insert a comment line (text in single quotes)', { text: "'Text\n", line: true }),
-                big('r-heading', 'Heading', 'heading', 'Insert a heading line (text in double quotes)', { text: '"Heading\n', line: true }),
-                big('r-image', 'Image', 'image', 'Insert an image reference', { text: '\'<img src="./image.png" alt="Image">\n', line: true }),
-                big('r-plot', 'Plot', 'plot', 'Insert a function plot', { text: '$Plot{sin(x) @ x = 0 : 2*π}\n', line: true, nox: true }),
-                big('r-table', 'Table', 'table', 'Insert an HTML table', { text: "'<table class=\"bordered\"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n", line: true }),
+                big('r-text', 'Text', 'comment', 'Insert a comment line (text in single quotes)', { text: "'Text\n", line: true, sheet: 'Text\n' }),
+                big('r-heading', 'Heading', 'heading', 'Insert a heading line (text in double quotes)', { text: '"Heading\n', line: true, sheet: '## Heading\n' }),
+                big('r-image', 'Image', 'image', 'Insert an image reference', { text: '\'<img src="./image.png" alt="Image">\n', line: true, sheet: '![Image](./image.png)\n' }),
+                big('r-plot', 'Plot', 'plot', 'Insert a function plot', { text: '$Plot{sin(x) @ x = 0 : 2*π}\n', line: true, nox: true, sheet: 'plot sin(x) for x in 0..2*π\n' }),
+                big('r-table', 'Table', 'table', 'Insert an HTML table', { text: "'<table class=\"bordered\"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n", line: true, sheet: '| A | B |\n|---|---|\n| 1 | 2 |\n' }),
             ] },
             { name: 'Palettes', buttons: [
                 both('p-operators', 'Operators', 'operators', 'Operators', PAL_OPERATORS, 'operators'),
@@ -406,7 +410,7 @@ export const RIBBON: RibbonTab[] = [
                 big('m-transp', 'Transpose', 'matrix', 'Transpose', { text: 'transp(A)', test: 'r = {}' }),
             ] },
             { name: 'Tables', buttons: [
-                big('t-table', 'Table', 'table', 'An HTML table', { text: "'<table class=\"bordered\"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n", line: true }),
+                big('t-table', 'Table', 'table', 'An HTML table', { text: "'<table class=\"bordered\"><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>\n", line: true, sheet: '| A | B |\n|---|---|\n| 1 | 2 |\n' }),
                 big('t-data', 'Data table', 'table', 'A table with a left-aligned first column', { text: "'<table class=\"data\"><tr><th>Item</th><th>Value</th></tr><tr><td>Load</td><td>1</td></tr></table>\n", line: true }),
                 big('t-grid', 'Data grid', 'grid', 'An editable grid in the input form', { text: '#UI G_2 = matrix(3; 3)\n', line: true }),
             ] },
@@ -425,7 +429,7 @@ export const RIBBON: RibbonTab[] = [
             ] },
             { name: 'Options', buttons: [
                 more('a-plotset', 'Plot settings', 'settings', 'Size, palette, mesh and lighting lines', 'plotSettings'),
-                small('pl-image', 'Image', 'image', 'Insert an image reference', { text: '\'<img src="./image.png" alt="Image">\n', line: true }),
+                small('pl-image', 'Image', 'image', 'Insert an image reference', { text: '\'<img src="./image.png" alt="Image">\n', line: true, sheet: '![Image](./image.png)\n' }),
             ] },
         ],
     },
@@ -569,13 +573,13 @@ export const RIBBON: RibbonTab[] = [
 
 
 /** Every insertable snippet, flattened, for the verifier. */
-export interface Snippet { id: string; text: string; line: boolean; test?: string; nox?: boolean; raw?: boolean; cx?: boolean; skip?: string }
+export interface Snippet { id: string; text: string; line: boolean; test?: string; nox?: boolean; raw?: boolean; cx?: boolean; skip?: string; sheet?: string }
 export function allSnippets(): Snippet[] {
     const out: Snippet[] = [];
     for (const tab of RIBBON) for (const g of tab.groups) for (const b of g.buttons) {
-        if (b.text !== undefined) out.push({ id: `${tab.id}/${b.id}`, text: b.text, line: !!b.line, test: b.test, nox: b.nox, raw: b.raw, skip: b.skip });
+        if (b.text !== undefined) out.push({ id: `${tab.id}/${b.id}`, text: b.text, line: !!b.line, test: b.test, nox: b.nox, raw: b.raw, skip: b.skip, sheet: b.sheet });
         for (const s of b.palette ?? []) for (const e of s.items) {
-            out.push({ id: `${tab.id}/${b.id}/${e.label}`, text: e.text, line: !!e.line, test: e.test, nox: e.nox, raw: e.raw, cx: e.cx, skip: e.skip });
+            out.push({ id: `${tab.id}/${b.id}/${e.label}`, text: e.text, line: !!e.line, test: e.test, nox: e.nox, raw: e.raw, cx: e.cx, skip: e.skip, sheet: e.sheet });
         }
     }
     return out;

@@ -128,7 +128,7 @@ struct Comp<'a> {
     seq: usize,
 }
 
-const NOTE_STYLE: &str = "color:#6b7280;font-style:italic";
+const NOTE_STYLE: &str = "color:#6b7280;font-style:italic;margin-left:.6em";
 
 /// Leading whitespace: (width with a tab as 4, mixed tabs and spaces, byte length).
 fn leading(line: &str) -> (usize, bool, usize) {

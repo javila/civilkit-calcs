@@ -40,7 +40,7 @@ const monarch: monaco.languages.IMonarchLanguage = {
             [/\$[^\s$][^$]*\$/, 'string.math'],
             [/^\s*(if|else if|else|while|repeat|for|plot)\b/, 'keyword'],
             [/\b(in)\b/, 'keyword'],
-            [new RegExp(`^\\s*(${ID}(?:\\([^)]*\\))?)(\\s*)(:|=(?!=))`), ['variable.name', '', 'delimiter']],
+            [new RegExp(`^(\\s*)(${ID}(?:\\([^)]*\\))?)(\\s*)(:|=(?!=))`), ['', 'variable.name', '', 'delimiter']],
             [/\|\s.*$/, 'comment'],
             [/->/, 'operator'],
             [/\*\*[^*]+\*\*/, 'strong'],

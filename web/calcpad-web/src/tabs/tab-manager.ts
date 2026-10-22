@@ -453,6 +453,7 @@ export class TabManager {
             model,
             viewState: null,
             contentSub: model.onDidChangeContent(() => {
+                syncModelLanguage(model);
                 this.recomputeDirty(id);
                 for (const l of this.contentListeners) l(id);
             }),

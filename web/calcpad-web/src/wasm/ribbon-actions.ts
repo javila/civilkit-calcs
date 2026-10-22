@@ -4,6 +4,10 @@
 import type { WebFiles } from './web-files';
 import { getResolvedAppTheme } from '../editor/app-theme';
 import { convertToCalcpad, newSheet, showCompiled } from './sheet-ui';
+import { sheetInsert } from './sheet-insert';
+
+/** The editor's file is a sheet (its Monaco language, which follows the marker line). */
+export const isSheetEditor = (editor: any): boolean => editor?.getModel?.()?.getLanguageId?.() === 'calcpad-sheet';
 
 export interface RibbonCtx {
     files: WebFiles;
@@ -162,9 +166,15 @@ export function isActive(id: string, c: RibbonCtx): boolean {
  * Inserts text at the editor cursor. A `line` snippet goes on its own line (after the current one when
  * that has content); `{sel}` in the text stands for the selection, or the word "text" when nothing is selected.
  */
-export function insertSnippet(editor: any, text: string, line: boolean): boolean {
+export function insertSnippet(editor: any, text: string, line: boolean, sheet?: string): boolean {
     const model = editor?.getModel();
     if (!model) return false;
+    // In a sheet each button inserts its sheet form (sheet-insert.ts).
+    if (isSheetEditor(editor)) {
+        const i = sheetInsert(text, line, sheet);
+        text = i.text;
+        line = i.line;
+    }
     const sel = editor.getSelection();
     const selected = model.getValueInRange(sel);
     const body = text.replace(/\{sel\}/g, selected || 'text');

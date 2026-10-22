@@ -78,6 +78,14 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
   not yet. The generic specification is in [docs/model-bindings.md](docs/model-bindings.md).
 * **Worksheet scripts:** scripts in worksheets run only from a library list, under a
   Content Security Policy, with the print frame sandboxed (DEVIATIONS.md, D3).
+* **Sheet syntax (our addition, not part of CalcpadCE):** a Markdown-like way to write a
+  worksheet: prose, `name: expression -> unit | note` lines, LaTeX, indented `for`/`while`/`if`
+  blocks, plots, and `>>` lines that pass raw Calcpad through. It compiles to the Calcpad
+  worksheet language and runs on the same engine (it is a front end, not a second engine), so
+  units, vectors, plots and the Word and Excel exports all work. The compiler is the crate
+  `calcpad-sheet` in its own 38 KB gzipped wasm (`calcpad-sheet-wasm`); the preview renders LaTeX
+  with the bundled KaTeX, loaded only when a sheet has a formula. Errors and lint markers are
+  mapped back to sheet lines. See [docs/sheet-syntax.md](docs/sheet-syntax.md).
 * **Known deviations** from CalcpadCE's behaviour are listed one by one, with the test that pins
   each, in [DEVIATIONS.md](DEVIATIONS.md). Not supported: raster (SkiaSharp) plots,
   `#ProjectPath`/`#LibraryPath` path roots, and compiled `.cpdz` worksheets.
@@ -101,6 +109,7 @@ the browser's print dialog, so it carries the browser's own header and footer.
 * `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`): a spike that translates the simple subset of
   a foreign worksheet format (`.xmcd`) into Calcpad text, with a report of what did not convert.
   See [Importing foreign worksheets](#importing-foreign-worksheets-spike).
+* `calcpad-sheet` and `calcpad-sheet-wasm`: the sheet syntax compiler and its binding.
 * `web/`: the web app. `web/calcpad-frontend` is the shared frontend, `web/calcpad-web` the page
   (Vue, Monaco), `web/e2e` the browser checks.
 * `tools/`: generators, the test runner, `build_wasm.sh`, `set_version.mjs`.

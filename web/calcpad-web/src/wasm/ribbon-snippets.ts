@@ -4,6 +4,8 @@
 import { buildInsertSnippet, replaceParameterPlaceholders } from 'calcpad-frontend';
 import type { InsertItem } from 'calcpad-frontend';
 import type { Entry, MoreSpec, Section } from './ribbon-data';
+import { isSheetEditor } from './ribbon-actions';
+import { sheetInsert } from './sheet-insert';
 
 export interface Snip {
     insert: string;
@@ -78,6 +80,11 @@ export function sectionsFor(all: Snip[], spec: MoreSpec): Section[] {
 export function insertLibrarySnippet(editor: any, text: string, line: boolean, snip?: Snip): boolean {
     const model = editor?.getModel();
     if (!model) return false;
+    if (isSheetEditor(editor)) {
+        const i = sheetInsert(text, line);
+        text = i.text;
+        line = i.line;
+    }
     const sel = editor.getSelection();
     if (line) {
         const ln = sel.endLineNumber;

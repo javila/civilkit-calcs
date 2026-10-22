@@ -286,6 +286,20 @@ The Preview ignores entered values by design, so it shows the defaults unless Se
 through it on the I-section, catalogue (IPE 200 R in the Report), Excel catalogue, Wind Load,
 seismic detailing, radio and checkbox cases.
 
+## D11. Sheet syntax (addition)
+
+A second way to write a worksheet, `<!--sheet-->` on the first line or a `.sheet` file: Markdown
+prose, `name: expression -> unit | note` quantity lines, LaTeX, indented blocks, plots, and
+`>>` pass-through lines. It is not part of CalcpadCE. It is a front end: `calcpad-sheet`
+compiles it to a Calcpad worksheet (with a map from output lines to sheet lines) and the one
+engine runs that, so nothing in the engine, the CLI or the stub comparison changes, and a
+worksheet that is not a sheet is untouched. The compile happens in the page's request adapter
+(`transport.ts`) for Preview, Report, Print, Word, Excel and the linter; the answers' line
+numbers are mapped back. LaTeX is rendered by KaTeX in the page (bundled, MIT), not by the
+engine. Grammar and limits: [docs/sheet-syntax.md](docs/sheet-syntax.md). Tests: the crate's unit
+tests (`cargo test -p civilkit-calcs-sheet`, which render every sample through the engine and
+check hand-computed values), `web/e2e/sheet-check.mjs` and `web/e2e/verify-ribbon-sheet.mjs`.
+
 ## Not deviations (scope and known differences)
 
 These are not deliberate behaviour changes, but they can make output differ:

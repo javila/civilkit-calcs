@@ -20,13 +20,13 @@
       <div v-for="g in tab.groups" :key="g.name" class="rb-group">
         <div class="rb-cells">
           <template v-for="(cell, ci) in cells(g)" :key="ci">
-            <button v-if="cell.big" class="rb-big" :class="{ on: isOn(cell.big) }" :title="cell.big.title || cell.big.label"
+            <button v-if="cell.big" class="rb-big" :class="{ on: isOn(cell.big), 'rb-raw': isRaw(cell.big) }" :title="(cell.big.title || cell.big.label) + (isRaw(cell.big) ? RAW_NOTE : '')"
               :data-ribbon-btn="cell.big.id" @mousedown.prevent @click="fire(cell.big, $event)">
               <svg class="rb-ic" viewBox="0 0 32 32" width="32" height="32" v-html="ICONS_BIG[cell.big.icon!] ?? ICONS_BIG.cube"></svg>
               <span class="rb-label">{{ cell.big.label }}<i v-if="cell.big.palette || cell.big.more" class="rb-caret"></i></span>
             </button>
             <div v-else class="rb-stack">
-              <button v-for="b in cell.stack" :key="b.id" class="rb-small" :class="{ on: isOn(b) }" :title="b.title || b.label"
+              <button v-for="b in cell.stack" :key="b.id" class="rb-small" :class="{ on: isOn(b), 'rb-raw': isRaw(b) }" :title="(b.title || b.label) + (isRaw(b) ? RAW_NOTE : '')"
                 :data-ribbon-btn="b.id" @mousedown.prevent @click="fire(b, $event)">
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"
                   stroke-linecap="round" stroke-linejoin="round" v-html="ICONS_SMALL[b.icon!]"></svg>
@@ -44,7 +44,7 @@
       <template v-for="s in shown" :key="s.heading + s.items[0]?.label">
         <div v-if="s.heading" class="rb-pop-h">{{ s.heading }}</div>
         <div class="rb-pop-grid">
-          <button v-for="e in s.items" :key="(e.snipKey ?? '') + e.label + e.text" class="rb-glyph" :title="e.title || e.text.replace(/\n/g, ' ').trim()"
+          <button v-for="e in s.items" :key="(e.snipKey ?? '') + e.label + e.text" class="rb-glyph" :class="{ 'rb-raw': isRaw(e) }" :title="(e.title || e.text.replace(/\n/g, ' ').trim()) + (isRaw(e) ? RAW_NOTE : '')"
             :data-ribbon-glyph="e.label" :data-snip-key="e.snipKey" @click="pick(e)">{{ e.label }}</button>
         </div>
       </template>
@@ -60,7 +60,8 @@ import type { Entry, RibbonButton, RibbonGroup, Section } from './ribbon-data';
 import { ICONS_BIG, ICONS_SMALL } from './ribbon-icons';
 import { insertLibrarySnippet, loadSnippets, sectionsFor } from './ribbon-snippets';
 import type { Snip } from './ribbon-snippets';
-import { insertSnippet, isActive, runAction } from './ribbon-actions';
+import { insertSnippet, isActive, isSheetEditor, runAction } from './ribbon-actions';
+import { sheetInsert } from './sheet-insert';
 import type { RibbonCtx } from './ribbon-actions';
 
 const props = defineProps<{ ctx: Omit<RibbonCtx, 'anchor'> }>();
@@ -88,6 +89,11 @@ let popAnchor: HTMLElement | null = null;
 const tick = ref(0);
 const timer = setInterval(() => tick.value++, 500);
 const ctxWith = (anchor: HTMLElement): RibbonCtx => ({ ...props.ctx, anchor });
+/** The active file is a sheet: the buttons insert their sheet forms. Re-read on the slow tick and after clicks, so it follows tab switches. */
+const sheetMode = computed(() => (void tick.value, isSheetEditor(props.ctx.editor())));
+/** In a sheet, a text button with no sheet form inserts raw Calcpad (a `>>` line). */
+const isRaw = (b: { text?: string; line?: boolean; sheet?: string }): boolean => sheetMode.value && b.text !== undefined && sheetInsert(b.text, !!b.line, b.sheet).raw;
+const RAW_NOTE = ' (inserts raw Calcpad with >> in a sheet)';
 const isOn = (b: RibbonButton): boolean => (void tick.value, !!b.action && isActive(b.action, ctxWith(document.body)));
 
 type Cell = { big?: RibbonButton; stack?: RibbonButton[] };
@@ -155,7 +161,7 @@ function fire(b: RibbonButton, ev: MouseEvent): void {
     openPalette(b, anchor);
   } else {
     closePop(false);
-    if (b.text !== undefined) insertSnippet(props.ctx.editor(), b.text, !!b.line);
+    if (b.text !== undefined) insertSnippet(props.ctx.editor(), b.text, !!b.line, b.sheet);
     else if (b.action) runAction(b.action, ctxWith(anchor));
   }
   tick.value++;
@@ -163,7 +169,7 @@ function fire(b: RibbonButton, ev: MouseEvent): void {
 
 function pick(e: Entry): void {
   if (e.snipKey) insertLibrarySnippet(props.ctx.editor(), e.text, !!e.line, snipByKey.get(e.snipKey));
-  else insertSnippet(props.ctx.editor(), e.text, !!e.line);
+  else insertSnippet(props.ctx.editor(), e.text, !!e.line, e.sheet);
   closePop(false);
 }
 /** Keep the editor's focus, except when the click lands in the filter box. */
@@ -238,6 +244,8 @@ onBeforeUnmount(() => {
 .rb-pop-grid{display:flex;flex-wrap:wrap;gap:3px}
 .rb-glyph{min-width:30px;max-width:260px;height:26px;padding:0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--vscode-panel-border,#ccc);border-radius:3px;background:none;color:inherit;
   font:13px var(--vscode-editor-font-family,monospace);cursor:pointer}
+.rb-raw{position:relative}
+.rb-raw::after{content:'>>';position:absolute;right:1px;top:0;font:700 8px/1 var(--vscode-editor-font-family,monospace);color:var(--vscode-descriptionForeground,#888);pointer-events:none}
 .rb-glyph:hover{background:var(--vscode-menu-selectionBackground,#0060c0);color:var(--vscode-menu-selectionForeground,#fff)}
 @media (max-width:700px){
   .rb-pop,.rb-pop.wide{left:0;right:0;bottom:0;top:auto;width:auto;max-width:none;max-height:55vh;border-radius:10px 10px 0 0}
