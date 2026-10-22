@@ -18,7 +18,11 @@ export interface RibbonCtx {
     anchor: HTMLElement;
 }
 
-const DOCS_URL = 'https://github.com/imartincei/CalcpadCE';
+const UPSTREAM_URL = 'https://github.com/imartincei/CalcpadCE';
+const PROJECT_URL = 'https://github.com/mageaustralia/civilkit-calcs';
+const DOCS_URL = UPSTREAM_URL;
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '';
+const UPSTREAM_VERSION = import.meta.env.VITE_UPSTREAM_VERSION ?? '';
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
 
 const edit = (c: RibbonCtx, cmd: string) => {
@@ -32,10 +36,50 @@ const zoom = (c: RibbonCtx, delta: number) => {
     const cur = e.getOption((window as any).monaco.editor.EditorOption.fontSize) as number;
     e.updateOptions({ fontSize: Math.max(8, Math.min(40, cur + delta)) });
 };
-const say = (c: RibbonCtx, lines: string[]) => {
-    for (const l of lines) c.app.appendOutput?.('info', l);
-    c.app.showOutput?.();
-};
+/** A small modal dialog: a title, paragraphs (a string with a URL becomes a link) and a Close button. Esc and a click outside close it. */
+function dialog(title: string, paragraphs: string[]): void {
+    document.getElementById('cprs-dialog')?.remove();
+    const back = document.createElement('div');
+    back.id = 'cprs-dialog';
+    back.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35)';
+    const box = document.createElement('div');
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', title);
+    box.style.cssText = 'max-width:min(520px,92vw);max-height:80vh;overflow:auto;padding:18px 22px;border-radius:6px;font:13px/1.5 system-ui,sans-serif;' +
+        'background:var(--vscode-editor-background,#fff);color:var(--vscode-foreground,#222);border:1px solid var(--vscode-panel-border,#ccc);box-shadow:0 8px 28px rgba(0,0,0,.35)';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    h.style.cssText = 'margin:0 0 10px;font-size:16px';
+    box.append(h);
+    for (const p of paragraphs) {
+        const el = document.createElement('p');
+        el.style.margin = '6px 0';
+        const m = /^(.*?)(https?:\/\/\S+)$/.exec(p);
+        if (m) {
+            el.append(m[1]);
+            const a = document.createElement('a');
+            a.href = m[2];
+            a.textContent = m[2];
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.style.color = 'var(--vscode-textLink-foreground,#0060c0)';
+            el.append(a);
+        } else el.textContent = p;
+        box.append(el);
+    }
+    const close = document.createElement('button');
+    close.textContent = 'Close';
+    close.style.cssText = 'margin-top:12px;padding:4px 14px;font:inherit;cursor:pointer';
+    const done = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); done(); } };
+    close.onclick = done;
+    back.onmousedown = (e) => { if (e.target === back) done(); };
+    document.addEventListener('keydown', onKey, true);
+    box.append(close);
+    back.append(box);
+    document.body.append(back);
+    close.focus();
+}
 
 type Handler = (c: RibbonCtx, arg: string) => void;
 export const ACTIONS: Record<string, Handler> = {
@@ -72,17 +116,18 @@ export const ACTIONS: Record<string, Handler> = {
     zoomOut: c => zoom(c, -1),
     autocalc: c => c.bridge?.setExtraSetting('autoRun', c.bridge.getExtraSetting('autoRun') === 'false' ? 'true' : 'false'),
     docs: () => void window.open(DOCS_URL, '_blank', 'noopener'),
-    shortcuts: c => say(c, [
-        'Keyboard shortcuts',
+    shortcuts: () => dialog('Keyboard shortcuts', [
         `${mod}+O open, ${mod}+S save, ${mod}+Shift+S save as, ${mod}+N new`,
         `F5 or ${mod}+Alt+X calculate`,
         `${mod}+Shift+B show or hide the sidebar`,
         `${mod}+F find, ${mod}+Z undo, ${mod}+Shift+Z redo`,
         'Alt+Z wrap long lines',
     ]),
-    about: c => say(c, [
-        `CalcpadCE web editor ${import.meta.env.VITE_APP_VERSION ?? ''}`.trim(),
-        'The calcpad-rs engine runs in your browser. MIT licence.',
+    about: () => dialog(`CivilKit Calcs ${APP_VERSION}`, [
+        `Built on CalcpadCE ${UPSTREAM_VERSION} (MIT), by Nedelcho Ganchovski (Proektsoft) and contributors. The engine is reimplemented in Rust and runs in your browser.`,
+        `CalcpadCE: ${UPSTREAM_URL}`,
+        `This project: ${PROJECT_URL}`,
+        'MIT licence. Not affiliated with the CalcpadCE authors.',
     ]),
 };
 

@@ -556,6 +556,7 @@
     </span>
     <span class="status-output" @click="openBottomTab('output')">Output</span>
     <span class="spacer"></span>
+    <span class="status-version" data-testid="status-version" :title="`CivilKit Calcs ${appVersion}, built on CalcpadCE ${upstreamVersion}`">CivilKit Calcs {{ appVersion }}<span class="status-upstream">, built on CalcpadCE {{ upstreamVersion }}</span></span>
     <span v-if="serverStatus !== 'connected'" class="status-server" :class="serverStatus" :title="serverStatusTitle">
       ● {{ serverStatusLabel }}
     </span>
@@ -563,6 +564,8 @@
 </template>
 
 <script setup lang="ts">
+const appVersion = import.meta.env.VITE_APP_VERSION as string
+const upstreamVersion = import.meta.env.VITE_UPSTREAM_VERSION as string
 import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
 import {
   extractBodyHtml,

@@ -268,7 +268,7 @@ export abstract class BaseMessageBridge {
                 this.handleGetInsertData();
                 break;
             case 'showAlert':
-                void this.showAlert(message.title ?? 'CalcpadCE', message.message ?? '', message.kind ?? 'info');
+                void this.showAlert(message.title ?? 'CivilKit Calcs', message.message ?? '', message.kind ?? 'info');
                 break;
             case 'getSettings':
                 this.handleGetSettings();

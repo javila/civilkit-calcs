@@ -47,7 +47,8 @@ const check = (ok, what) => {
 };
 
 // ---- serve web/calcpad-web/dist as static files, at / and under /calcs/ -------------------
-const dist = join(web, 'calcpad-web', 'dist');
+// --dist DIR checks another build (for example one made with CALCS_BASE=/calcs/, whose files live in DIR).
+const dist = resolve(arg('--dist', join(web, 'calcpad-web', 'dist')));
 const TYPES = {
     '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
     '.wasm': 'application/wasm', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
@@ -81,7 +82,7 @@ async function waitForServer() {
     throw new Error(`server did not start:\n${serverLog}`);
 }
 const served = await waitForServer();
-const local = readFileSync(join(web, 'calcpad-web', 'dist', 'wasm', 'calcpad_wasm_bg.wasm'));
+const local = readFileSync(join(dist, 'wasm', 'calcpad_wasm_bg.wasm'));
 check(Buffer.compare(Buffer.from(served), local) === 0, `server on :${port} serves this tree's dist/wasm`);
 
 // ---- browser --------------------------------------------------------------------------------

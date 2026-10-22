@@ -5,6 +5,7 @@
 // --lint also loads every line snippet into the editor and fails on any linter error marker.
 import { chromium } from 'playwright';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { allSnippets, PRELUDE, RIBBON } from '../calcpad-web/src/wasm/ribbon-data.ts';
 const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? process.argv[i + 1] : d; };
 const here = new URL('.', import.meta.url).pathname;
@@ -177,8 +178,32 @@ await btn(page, 'x-light').click();
 await page.waitForTimeout(300);
 check(await page.evaluate(() => document.documentElement.dataset.theme) === 'light', 'Resources > Light sets the light theme');
 await btn(page, 'x-keys').click();
-await btn(page, 'x-about').click();
+check(/shortcuts/i.test(await page.locator('[role=dialog]').innerText()), 'Resources > Shortcuts opens the shortcut list');
+await page.keyboard.press('Escape');
 check(errors.length === 0, `no page errors (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- the version: one source of truth, shown in the page and reported by the engine ---------
+{
+    let agree = '';
+    try { agree = execFileSync('node', [`${here}../../tools/set_version.mjs`, '--check']).toString().trim(); } catch (e) { agree = `FAILED: ${e.stderr?.toString() ?? e.message}`; }
+    check(/^all manifests agree: \d{2}\.\d+\.\d+$/.test(agree), `every manifest carries the same version (${agree.split('\n')[0]})`);
+    const want = /: (\S+)$/.exec(agree)?.[1];
+    const meta = await page.evaluate(() => document.querySelector('meta[name=version]')?.content);
+    check(meta === want, `the page's <meta name="version"> is ${want} (${meta})`);
+    const bar = await page.evaluate(() => document.querySelector('[data-testid=status-version]')?.textContent ?? '');
+    check(bar.includes(`CivilKit Calcs ${want}`) && /built on CalcpadCE \S+/.test(bar), `the status bar shows the version and the upstream (${bar})`);
+    const engine = await page.evaluate(async () => { const m = await import(new URL('wasm/calcpad_wasm.js', location.href).href); await m.default({ module_or_path: new URL('wasm/calcpad_wasm_bg.wasm', location.href).href }); return m.version(); });
+    check(engine === want, `the engine wasm's version() is ${want} (${engine})`);
+    check((await page.title()).includes('CivilKit Calcs'), `the window title names CivilKit Calcs (${await page.title()})`);
+    await tab(page, 'resources');
+    await btn(page, 'x-about').click();
+    await page.waitForSelector('[role=dialog]');
+    const aboutText = await page.evaluate(() => document.querySelector('[role=dialog]').innerText + ' ' + [...document.querySelectorAll('[role=dialog] a')].map(a => a.href).join(' '));
+    check(/CivilKit Calcs \d+\.\d+\.\d+/.test(aboutText) && /Built on CalcpadCE/.test(aboutText) && aboutText.includes('github.com/imartincei/CalcpadCE') && aboutText.includes('github.com/mageaustralia/civilkit-calcs'), 'Resources > About credits CalcpadCE and links both repositories');
+    await page.screenshot({ path: `${out}/about-credits-v4.png` });
+    await page.keyboard.press('Escape');
+    check(!(await page.locator('[role=dialog]').count()), 'Escape closes the About dialog');
+}
 
 // ---- coverage: every library snippet is reachable from a ribbon popover ----------------------
 {

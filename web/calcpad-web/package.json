@@ -1,8 +1,9 @@
 {
   "name": "calcpad-web",
+  "version": "26.10.1",
   "private": true,
-  "description": "CalcpadCE web editor - Monaco + Vue sidebar powered by calcpad-frontend",
-  "author": "CalcpadCE Contributors",
+  "description": "CivilKit Calcs web app - Monaco + Vue sidebar powered by calcpad-frontend",
+  "author": "CivilKit Calcs contributors, CalcpadCE Contributors",
   "license": "MIT",
   "type": "module",
   "scripts": {

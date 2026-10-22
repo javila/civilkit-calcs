@@ -3,7 +3,7 @@ name = "calcpad-wasm"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "WebAssembly bindings of calcpad-core for the CalcpadCE web editor"
+description = "WebAssembly bindings of calcpad-core for the CivilKit Calcs web app"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

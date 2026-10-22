@@ -279,7 +279,7 @@ class HighlighterWorker {
 }
 
 function notAvailable(what: string, reason: string): Response {
-    return new Response(`${what} is not available in the browser build of CalcpadCE (calcpad-rs): ${reason}.`, {
+    return new Response(`${what} is not available in the browser build of CivilKit Calcs: ${reason}.`, {
         status: 501,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' },
     });

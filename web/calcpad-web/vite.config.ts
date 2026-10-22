@@ -1,4 +1,4 @@
-import { resolveVersion } from '../version.mjs';
+import { resolveVersion, UPSTREAM_VERSION } from '../version.mjs';
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import path from 'path';
@@ -9,10 +9,16 @@ import path from 'path';
 // running Calcpad.Server.
 export default defineConfig(() => ({
     // calcpad-rs: relative asset URLs, so the static build runs from any folder of any host.
-    base: './',
-    plugins: [vue()],
+    // CALCS_BASE=/calcs/ gives absolute URLs under that path; the default is relative, so the build runs from any folder.
+    base: process.env.CALCS_BASE || './',
+    plugins: [
+        vue(),
+        // The version in the page head: <meta name="version">.
+        { name: 'app-version-meta', transformIndexHtml: (html: string) => html.replace('__APP_VERSION__', resolveVersion()) },
+    ],
     define: {
-    'import.meta.env.VITE_APP_VERSION': JSON.stringify(resolveVersion()),
+        'import.meta.env.VITE_APP_VERSION': JSON.stringify(resolveVersion()),
+        'import.meta.env.VITE_UPSTREAM_VERSION': JSON.stringify(UPSTREAM_VERSION),
         'import.meta.env.VITE_PLATFORM': JSON.stringify('web'),
     },
     resolve: {

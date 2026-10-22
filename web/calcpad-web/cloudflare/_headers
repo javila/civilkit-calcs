@@ -1,0 +1,10 @@
+# Cloudflare Pages headers for the build under /calcs/ (see docs/DEPLOY.md).
+/calcs/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/calcs/wasm/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=86400
+/calcs/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+/calcs/report-fonts/*
+  Cache-Control: public, max-age=31536000, immutable

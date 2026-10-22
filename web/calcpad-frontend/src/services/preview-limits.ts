@@ -88,7 +88,7 @@ export function previewLimitNoticeHtml(o: PreviewLimitNotice): string {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>CalcpadCE Preview</title>
+    <title>CivilKit Calcs Preview</title>
     <style>
         body { color: ${c.fg}; background: ${c.bg}; margin: 0; padding: 40px 24px;
                font: 14px/1.5 var(--vscode-font-family, system-ui, sans-serif); }

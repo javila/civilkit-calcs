@@ -541,7 +541,7 @@ export const RIBBON: RibbonTab[] = [
                 action('x-settings', 'Settings', 'settings', 'Settings', 'settings'),
             ] },
             { name: 'Help', buttons: [
-                action('x-docs', 'Documentation', 'help', 'Open the CalcpadCE documentation', 'docs'),
+                action('x-docs', 'Documentation', 'help', 'Open the CalcpadCE documentation (the worksheet language)', 'docs'),
                 action('x-keys', 'Shortcuts', 'keyboard', 'List the keyboard shortcuts in the output panel', 'shortcuts'),
                 action('x-about', 'About', 'info', 'About this editor', 'about'),
             ] },

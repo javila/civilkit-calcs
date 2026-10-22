@@ -92,7 +92,7 @@ function getEmptyPreviewHtml(theme: 'light' | 'dark'): string {
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>CalcpadCE Preview</title>
+    <title>CivilKit Calcs Preview</title>
     <style>
         body { color: ${c.fg}; background: ${c.bg}; padding: 20px; font-family: var(--vscode-font-family, system-ui, sans-serif); }
         h3 { text-align: center; }
@@ -107,7 +107,7 @@ function getEmptyPreviewHtml(theme: 'light' | 'dark'): string {
 </head>
 <body>
     <h3>Empty Document</h3>
-    <p>Start typing CalcpadCE code to see the preview.</p>
+    <p>Start typing a worksheet to see the preview.</p>
     <h4>Formatting Hotkeys</h4>
     <table>
         <tr><th>Bold</th><td>Ctrl+B</td></tr>
@@ -123,7 +123,8 @@ function getEmptyPreviewHtml(theme: 'light' | 'dark'): string {
         <tr><th>Toggle Comment</th><td>Ctrl+Q</td></tr>
     </table>
     <h4>Resources</h4>
-    <p><a href="https://github.com/imartincei/CalcpadCE">CalcpadCE on GitHub</a></p>
+    <p><a href="https://github.com/mageaustralia/civilkit-calcs">CivilKit Calcs on GitHub</a></p>
+    <p><a href="https://github.com/imartincei/CalcpadCE">CalcpadCE (upstream) on GitHub</a></p>
     <p><a href="https://calcpad-ce.org/">calcpad-ce.org</a></p>
     <p><a href="https://imartincei.github.io/CalcpadCE/">CalcpadCE Documentation</a></p>
 </body>
@@ -131,7 +132,7 @@ function getEmptyPreviewHtml(theme: 'light' | 'dark'): string {
 }
 
 function getSampleContent(): string {
-    return `'CalcpadCE Web Editor
+    return `'CivilKit Calcs
 'Enter your calculations below
 
 a = 3
@@ -846,8 +847,8 @@ async function bootstrap(): Promise<void> {
         // the taskbar; the main window, and the single-window case, stay unmarked.
         const suffix = isPrimaryWindow ? '' : ` (${windowLabel.slice('main-'.length)})`;
         const title = active?.title
-            ? `${active.title} - CalcpadCE ${appVersion}${suffix}`
-            : `CalcpadCE ${appVersion}${suffix}`;
+            ? `${active.title} - CivilKit Calcs ${appVersion}${suffix}`
+            : `CivilKit Calcs ${appVersion}${suffix}`;
         document.title = title;
         setNativeTitle?.(title);
     }
@@ -1514,7 +1515,7 @@ async function bootstrap(): Promise<void> {
         return /^\/[A-Za-z]:/.test(path) ? path.slice(1) : path;
     }
 
-    appInstance.appendOutput('info', `CalcpadCE Web started - server: ${serverUrl}`);
+    appInstance.appendOutput('info', `CivilKit Calcs ${appVersion} started - server: ${serverUrl}`);
 
     // Flush any server-manager log lines buffered before the Output panel mounted,
     // then redirect future ones straight into the panel.
@@ -2919,6 +2920,6 @@ bootstrap().catch((err) => {
         'font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace',
         'white-space:pre-wrap', 'overflow:auto', 'z-index:2147483647',
     ].join(';'));
-    panel.textContent = `CalcpadCE failed to start.\n\n${detail}`;
+    panel.textContent = `CivilKit Calcs failed to start.\n\n${detail}`;
     document.body.appendChild(panel);
 });

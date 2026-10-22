@@ -627,7 +627,7 @@
       <component :is="section" v-for="(section, i) in extensions.settingsSections ?? []" :key="'ext-' + i" />
 
       <div v-if="appVersion" class="about-footer">
-        <span class="app-version">CalcpadCE v{{ appVersion }}</span>
+        <span class="app-version">CivilKit Calcs v{{ appVersion }}</span>
       </div>
     </div>
   </div>

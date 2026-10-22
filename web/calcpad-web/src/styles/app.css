@@ -1105,3 +1105,6 @@ select option {
     font-size: var(--calcpad-font-size-sm);
     opacity: 0.8;
 }
+
+.status-version { margin: 0 10px; font-size: 11px; opacity: .9; white-space: nowrap; }
+@media (max-width: 700px) { .status-upstream { display: none; } }

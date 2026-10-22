@@ -1,7 +1,8 @@
 {
   "name": "calcpad-rs-web",
+  "version": "26.10.1",
   "private": true,
-  "description": "The CalcpadCE web editor (Calcpad.Web/frontend, MIT) running on the calcpad-rs WebAssembly engine",
+  "description": "CivilKit Calcs: the CalcpadCE web frontend (MIT) running on a Rust WebAssembly engine",
   "license": "MIT",
   "workspaces": [
     "calcpad-frontend",

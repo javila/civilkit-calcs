@@ -10,6 +10,6 @@ const SERVER_ONLY: Record<string, string> = {
 export function serverOnlyMessage(type: unknown): string | null {
     const what = typeof type === 'string' ? SERVER_ONLY[type] : undefined;
     if (!what) return null;
-    return `${what} is not available in the browser build of CalcpadCE (calcpad-rs): it needs Calcpad.Server. `
+    return `${what} is not available in the browser build of CivilKit Calcs: it needs Calcpad.Server. `
         + 'Save PDF prints the report from the browser, and Save HTML saves the page.';
 }
