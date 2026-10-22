@@ -133,6 +133,13 @@ node e2e/verify-ribbon-snippets.mjs --cli ../target/release/Cli
 node ../tools/set_version.mjs --check
 ```
 
+## Checked at 26.10.1
+
+`cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` are clean; `cargo test` ran 5234 tests with
+none failing (3 ignored); `web/e2e/browser-check.mjs` passed all 122 checks against the build served at `/` and against
+the `CALCS_BASE=/calcs/` build; `web/e2e/ribbon-check.mjs` and `web/e2e/verify-ribbon-snippets.mjs` pass (every library
+snippet except two that need a data list was run through the engine without an error).
+
 ## Contributing
 
 Issues and pull requests are welcome. Keep changes to the engine behind a test; where behaviour
