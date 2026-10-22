@@ -5,6 +5,10 @@ Versions are numbered YY.M.N with no zero padding (26.10.1 is the first release 
 of the month and restarts at 1), which is valid semver for Cargo and npm. Tags are `v26.10.1`.
 CalcpadCE's own version is tracked separately in NOTICE.
 
+The app changes are listed under their YY.M.N version below. The three Rust library crates have their own entries
+under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
+(for example `civilkit-calcs-engine-v0.1.0`).
+
 ## [26.10.1] - 2026-10-22
 
 First public release, named CivilKit Calcs. It is a derivative of CalcpadCE (MIT): its web frontend and
@@ -30,11 +34,20 @@ worksheet language, with the engine, highlighter and Word and Excel export reimp
 ### Changed
 - The product is named CivilKit Calcs; CalcpadCE is credited in the About text, README, LICENSE and NOTICE.
 
-### Crates
-- `civilkit-calcs-engine`, `civilkit-calcs-highlighter` and `civilkit-calcs-docx` 0.1.0 are published on crates.io.
-
 ### Known limits
 - Raster (SkiaSharp) plots, `#ProjectPath`/`#LibraryPath` path roots and compiled `.cpdz` worksheets are not supported.
 - Exports are untested in Microsoft Office: Excel files were checked in openpyxl and LibreOffice, Word files in
   LibreOffice.
 - Deviations from CalcpadCE are listed in DEVIATIONS.md.
+
+## Crates
+
+Published on crates.io. The API follows the needs of the web app and may change between 0.x minor versions.
+
+### civilkit-calcs-engine 0.1.0, civilkit-calcs-highlighter 0.1.0, civilkit-calcs-docx 0.1.0 - 2026-10-22
+
+First release of the three libraries, from the same commit as the 26.10.1 release.
+- `civilkit-calcs-engine`: the calculation engine (a Rust port of the CalcpadCE worksheet engine).
+- `civilkit-calcs-highlighter`: tokenizer, linter, content resolution, prettifier and snippet library. Depends on the engine.
+- `civilkit-calcs-docx`: Word and Excel export. Depends on the engine.
+- The Rust crate names are unchanged (`calcpad_core`, `calcpad_highlighter`, `calcpad_docx`).
