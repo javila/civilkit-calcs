@@ -9,6 +9,16 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
+## [Unreleased]
+
+### Added
+- Import worksheet: File menu, a Document-tab ribbon button and drag and drop bring in a worksheet of the
+  spreadsheet-like format of another calculation tool (`.xmcd`). It is read and converted in the page by a third
+  WebAssembly module (loaded on first use, 1.1 MB, 0.46 MB gzipped; the engine module is unchanged), opens as a
+  new unsaved worksheet, keeps its pictures in the library under `/imported/<name>/`, and reports what converted
+  live, what is shown as a static picture and what needs attention, with toggles for the pictures and for saved
+  results. Prime `.mcdx` files are refused with a message.
+
 ## [26.10.1] - 2026-10-22
 
 First public release, named CivilKit Calcs. It is a derivative of CalcpadCE (MIT): its web frontend and

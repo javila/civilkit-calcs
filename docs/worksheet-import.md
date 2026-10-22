@@ -9,6 +9,41 @@ that was in the source.
 It is a spike. It answers two questions: how much of real files converts, and which missing features
 come first. It is not wired into the web app.
 
+## In the app
+
+`File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd`
+file, or dropping a `.xmcd` file anywhere on the page (a dashed hint shows while a file is dragged over it).
+
+1. The file is read in the page and converted by the importer module (`calcpad_import_xmcd_wasm`, in its own web
+   worker, loaded on first use; the engine module is not involved). **Nothing is uploaded**: the file never leaves
+   the browser.
+2. The picture files go into the library under `/imported/<file name>/` (letters, digits, `_`, `-`; importing the
+   same file name again replaces that folder).
+3. The converted worksheet opens as a new unsaved tab named `<file name>.cpd`.
+4. A dialog says how many regions converted live, how many are shown as static pictures and how many need
+   attention, and lists the top reasons in plain words ("calls to a function from an add-in we cannot run",
+   "embedded objects", ...). Two toggles re-run the import in the same tab: **Pictures of unconverted regions**
+   (default on) and **Show saved results as static values** (default off).
+
+Errors are messages, never crashes: a file that is not `.xmcd` ("... is not a worksheet this importer reads"),
+malformed XML or a DTD ("not well-formed XML"), text that is not UTF-8, and a `.mcdx` zip ("Prime (.mcdx) files are
+not supported yet.").
+
+**Pictures and Save.** The `.cpd` text refers to pictures by library path (`<img src="imported/<name>/R12.svg">`).
+The report, the preview and the HTML, Word and Excel exports resolve those paths against the library and inline
+the pictures (a test checks the rendered page and the Word package). Save writes the `.cpd` and keeps the pictures in
+the library, which is stored in the browser: the pictures stay available as long as the library does. A `.cpd`
+opened later from disk shows its pictures only while the library still holds them (it does not embed them);
+exporting to HTML or Word first gives a self-contained file.
+
+**Limits.** The module is built for the browser, which has no threads and no unwinding. Metafile conversion is bound
+by a record-chain check (a file with more than 200 000 records, or a record chain that does not add up, is refused
+and the raster picture used) plus the size caps below. If the module traps anyway, the page starts a fresh worker and
+retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
+256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
+
+Size of the module: 1,131,136 bytes raw, 464,060 bytes gzipped (`tools/build_wasm.sh import`).
+
 ## Use
 
 ```text

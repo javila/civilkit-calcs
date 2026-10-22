@@ -62,6 +62,11 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
 * **`#UI` input forms:** entries, drop-downs, radio buttons, checkboxes and data grids. A chosen
   select, radio or checkbox is carried into the report, PDF and Word output.
 * **Dark theme:** the preview keeps form controls, drawings and plots readable.
+* **Import worksheet:** `File > Import worksheet...`, the Document tab's Import button, or dropping a `.xmcd` file on
+  the page converts a worksheet of the spreadsheet-like format of another calculation tool into a new unsaved
+  worksheet, locally in the page (its own WebAssembly module, loaded on first use). Text, definitions,
+  evaluations, functions, matrices, units and pictures convert; what does not is shown as a static picture of the
+  original when the file has one, and counted in a summary. See [docs/worksheet-import.md](docs/worksheet-import.md).
 * **Samples browser:** 101 worksheets, all copied from CalcpadCE's examples (structural and maths),
   with groups, search and a preview. We rewrote their deprecated `? {default}` input fields as
   `#UI` declarations, and kept a conversion only where the engine renders it like the original.
@@ -161,6 +166,7 @@ cd web && npx playwright install chromium
 node e2e/browser-check.mjs        # worksheets through the UI, input forms, files, exports, scripts, printing
 node e2e/ribbon-check.mjs --url http://127.0.0.1:4173/ --lint
 node e2e/verify-ribbon-snippets.mjs --cli ../target/release/Cli
+node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, pictures, toggles, error paths, drop, save, exports
 node ../tools/set_version.mjs --check
 ```
 
