@@ -124,7 +124,7 @@ What works in the browser:
 * The bundled samples declare their inputs with `#UI` instead of upstream's deprecated `name = ? {default}` fields, rewritten by `tools/gen_samples.mjs` and checked against the original's rendering (DEVIATIONS.md, D8); the editor offers the same rewrite as a quick fix ("Convert to #UI") on the linter's warning.
 * File > Export Excel saves the worksheet as a workbook: a Report sheet that mirrors the page
   (headings and text, each equation as a row of name, expression, expression with the values,
-  value and unit, tables as cell ranges, plots and drawings as pictures), then all variables
+  value and unit, tables as cell ranges, each `$Plot` as a native editable chart with its data on a "Plot data" sheet, other drawings as pictures), then all variables
   with values and units, a sheet per vector or matrix, and the inputs (calcpad-rs's own,
   DEVIATIONS.md, D7; built by calcpad-docx-wasm, also `Cli input.cpd output.xlsx`).
 * Save Word writes the .docx in the page: the engine renders the equations as Office Math and

@@ -264,3 +264,14 @@ definitions, symbol, prettify, snippets and code-view responses, the UTF-16 colu
 answer and that the highlighter wasm loads from `/wasm/`. Sizes (no wasm-opt available):
 engine 1,413,340 bytes (511,533 gzipped), highlighter 1,068,661 bytes (351,454 gzipped), both
 in one module 2,156,350 bytes (774,769 gzipped), so they are two modules.
+
+## Excel export: native charts for $Plot (calcpad-rs's own, DEVIATIONS.md D7)
+
+`plotter::capture` records each `$Plot` the chart plotter calculates (curves, colours, axis
+limits, units); `ExpressionParser::captured_plots` collects them in page order with
+`capture_values`. calcpad-docx writes an XY scatter chart per plot (`xlsx_chart.rs`, schema-order
+XML, data on a "Plot data" sheet) in place of the picture; `$Map` and other drawings stay
+pictures. `tools/xlsx_check.py` checks all 101 samples: 407 charts for 407 plot drawings, chart
+XML child order, ranges and cached values against the data sheet, and LibreOffice prints
+every workbook that holds a chart. Not tested in Excel itself. Sizes: engine 1,871,455 bytes
+(651,073 gzipped), docx 1,735,197 bytes (687,035 gzipped).

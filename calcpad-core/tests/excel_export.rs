@@ -103,3 +103,47 @@ fn the_sheets_survive_json_and_name_the_variable_of_a_vector_sheet() {
     let back = variables_export::sheets_from_json(&variables_export::sheets_to_json(&sheets));
     assert_eq!(back, sheets);
 }
+
+fn plots(text: &str) -> Vec<calcpad_core::plotter::capture::CapturedChart> {
+    let mut p = ExpressionParser::new();
+    p.capture_values = true;
+    p.plot_settings.vector_graphics = true;
+    p.parse(text, true);
+    p.captured_plots.clone()
+}
+
+#[test]
+fn a_plot_records_its_curves_axes_and_colours() {
+    let c = plots("$Plot{x^2 & 2*x @ x = 0 : 2}");
+    assert_eq!(c.len(), 1);
+    let c = &c[0];
+    assert_eq!(c.x_name, "x");
+    assert_eq!(c.series.len(), 2);
+    assert_eq!(c.series[0].name, "x^2");
+    assert_eq!(c.series[1].name, "2*x");
+    assert_eq!(c.series[0].color, "FF6347");
+    assert_eq!(c.series[1].color, "9ACD32");
+    // The adaptive plot starts from 32 points and adds more where the curve bends; it ends at (2, 4).
+    assert!(c.series[0].points.len() >= 32);
+    let last = *c.series[0].points.last().unwrap();
+    assert!((last.0 - 2.0).abs() < 1e-12 && (last.1 - 4.0).abs() < 1e-12);
+    // The limits the SVG used.
+    // (the step is added 512 times, so the limits carry a little noise)
+    assert!(
+        c.bounds.0 <= 0.0 && (c.bounds.2 - 2.0).abs() < 1e-9 && (c.bounds.3 - 4.0).abs() < 1e-9,
+        "{:?}",
+        c.bounds
+    );
+}
+
+#[test]
+fn a_parametric_plot_and_units_are_kept_and_a_map_is_not_a_chart() {
+    let c = plots("$Plot{3*cos(t)*1m | 3*sin(t)*1m @ t = 0 : 6.28}");
+    assert_eq!(c[0].series[0].name, "3*cos(t)*1m | 3*sin(t)*1m");
+    assert_eq!(c[0].x_unit, "m");
+    assert_eq!(c[0].y_unit, "m");
+    assert_eq!(plots("$Map{x*y @ x = 0 : 1 & y = 0 : 1}").len(), 0);
+    // The data survives the JSON hop to the browser's Excel module.
+    let json = calcpad_core::plotter::capture::charts_to_json(&c);
+    assert_eq!(calcpad_core::plotter::capture::charts_from_json(&json), c);
+}

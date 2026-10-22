@@ -5,7 +5,8 @@
 //! * an equation is a row: name, expression, expression with the values put in, value, unit;
 //! * a table of plain text is a cell range; a table that lays out other content is read
 //!   cell by cell, in order;
-//! * plots and drawings (inline SVG, images) are pictures at their place in the text, SVG
+//! * a `$Plot` is a native chart at its place in the text, its data on the "Plot data" sheet;
+//!   other drawings (inline SVG, images, `$Map`) are pictures at their place in the text, SVG
 //!   rendered to PNG at twice its size with the same code as the Word export;
 //! * a vector or matrix value links to the sheet that holds it.
 //!
@@ -14,6 +15,7 @@
 use std::collections::HashMap;
 
 use calcpad_core::openxml::variables_export::Sheet as DataSheet;
+use calcpad_core::plotter::capture::CapturedChart;
 
 use crate::html::{self, Element, Node};
 use crate::image::{anchor_plot_text, bitmap_size, check_type, extension_of, rasterize_svg, svg_size, ImageResolver};
@@ -384,6 +386,12 @@ struct Builder<'a> {
     inferred: Inferred,
     sheet_of: HashMap<String, String>,
     resolver: Option<&'a ImageResolver<'a>>,
+    /// The data of the `$Plot`s, in page order; each plot SVG takes the next one as a chart.
+    plots: &'a [CapturedChart],
+    next_plot: usize,
+    /// The chart data: two columns per curve.
+    plot_data: Sheet,
+    plot_cols: u32,
     s_text: usize,
     s_name: usize,
     s_expr: usize,
@@ -393,7 +401,12 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(sheet_of: HashMap<String, String>, resolver: Option<&'a ImageResolver<'a>>) -> Builder<'a> {
+    fn new(
+        sheet_of: HashMap<String, String>,
+        resolver: Option<&'a ImageResolver<'a>>,
+        plots: &'a [CapturedChart],
+        data_sheet: &str,
+    ) -> Builder<'a> {
         let mut wb = Workbook::new();
         let s_text = wb.style(Style {
             wrap: true,
@@ -448,6 +461,10 @@ impl<'a> Builder<'a> {
             inferred: Inferred { units: HashMap::new() },
             sheet_of,
             resolver,
+            plots,
+            next_plot: 0,
+            plot_data: Sheet::new(data_sheet),
+            plot_cols: 0,
             s_text,
             s_name,
             s_expr,
@@ -795,7 +812,11 @@ impl<'a> Builder<'a> {
             }
             "hr" => {}
             "table" => self.table(e),
-            "svg" => self.picture(&e.outer_html(), e),
+            "svg" => {
+                if !self.chart(e) {
+                    self.picture(&e.outer_html(), e)
+                }
+            }
             "img" => {
                 if let Some(src) = e.attr("src") {
                     let src = html::decode(src);
@@ -912,6 +933,95 @@ impl<'a> Builder<'a> {
             }
         }
         self.row = first + rows.len() as u32 + 1;
+    }
+
+    /// A `$Plot` drawing as a native chart, when the engine captured its data. A `$Map`
+    /// colour map, or a drawing that is not a plot, stays a picture.
+    fn chart(&mut self, e: &Element) -> bool {
+        let is_plot = e
+            .attr("class")
+            .is_some_and(|c| c.split_whitespace().any(|w| w == "plot"))
+            && e.attr("data-plot") == Some("svg");
+        if !is_plot || self.next_plot >= self.plots.len() {
+            return false;
+        }
+        let plot = &self.plots[self.next_plot];
+        if plot.series.is_empty() || plot.series.iter().any(|s| s.points.is_empty()) {
+            return false;
+        }
+        self.next_plot += 1;
+        let k = self.next_plot;
+        let (sw, sh) = svg_size(&e.outer_html()).unwrap_or((500.0, 350.0));
+        let (mut w, mut h) = (sw, sh);
+        if w > MAX_PICTURE_WIDTH {
+            h = h * MAX_PICTURE_WIDTH / w;
+            w = MAX_PICTURE_WIDTH;
+        }
+        let (w, h) = (w.round().max(200.0) as u32, h.round().max(150.0) as u32);
+        let head = self.wb.style(Style {
+            bold: true,
+            fill: "D9E1F2",
+            border: true,
+            ..Default::default()
+        });
+        let quoted = format!("'{}'", self.plot_data.name.replace('\'', "''"));
+        let with_unit = |name: &str, unit: &str| {
+            if unit.is_empty() {
+                name.to_string()
+            } else {
+                format!("{} [{}]", name, unit)
+            }
+        };
+        let x_title = with_unit(&plot.x_name, &plot.x_unit);
+        let mut series = Vec::new();
+        for s in &plot.series {
+            let (cx, cy) = (self.plot_cols + 1, self.plot_cols + 2);
+            self.plot_cols += 2;
+            self.plot_data.set(1, cx, Value::Text(format!("Plot {}", k)), head);
+            self.plot_data.set(1, cy, Value::Text(s.name.clone()), head);
+            let x_head = if s.name.contains('|') {
+                "x".to_string()
+            } else {
+                x_title.clone()
+            };
+            self.plot_data.set(2, cx, Value::Text(x_head), head);
+            self.plot_data
+                .set(2, cy, Value::Text(with_unit(&s.name, &plot.y_unit)), head);
+            for (i, p) in s.points.iter().enumerate() {
+                self.plot_data.set(i as u32 + 3, cx, Value::Number(p.0), 0);
+                self.plot_data.set(i as u32 + 3, cy, Value::Number(p.1), 0);
+            }
+            let last = s.points.len() as u32 + 2;
+            let (xc, yc) = (xlsx::col_name(cx), xlsx::col_name(cy));
+            series.push(crate::xlsx_chart::ChartSeries {
+                name: s.name.clone(),
+                color: s.color.clone(),
+                x_ref: format!("{}!${}$3:${}${}", quoted, xc, xc, last),
+                y_ref: format!("{}!${}$3:${}${}", quoted, yc, yc, last),
+                xs: s.points.iter().map(|p| p.0).collect(),
+                ys: s.points.iter().map(|p| p.1).collect(),
+                dot: s.dot,
+            });
+        }
+        let y_title = if plot.series.len() == 1 {
+            with_unit(&plot.series[0].name, &plot.y_unit)
+        } else {
+            plot.y_unit.clone()
+        };
+        self.report.charts.push(crate::xlsx_chart::Chart {
+            col: 0,
+            row: self.row - 1,
+            width: w,
+            height: h,
+            name: format!("Plot {}", k),
+            x_title,
+            y_title,
+            series,
+            bounds: plot.bounds,
+        });
+        self.row += (h as f64 / 20.0).ceil() as u32 + 1;
+        self.after_eq = None;
+        true
     }
 
     fn picture(&mut self, src: &str, e: &Element) {
@@ -1131,14 +1241,23 @@ fn parse_cell_number(t: &str) -> Option<f64> {
 
 /// The workbook: the report sheet, then `sheets` (the variables, the vectors and matrices, the
 /// inputs).
-pub fn html_to_xlsx(html: &str, sheets: &[DataSheet], resolver: Option<&ImageResolver>) -> Result<Vec<u8>, String> {
+pub fn html_to_xlsx(
+    html: &str,
+    sheets: &[DataSheet],
+    plots: &[CapturedChart],
+    resolver: Option<&ImageResolver>,
+) -> Result<Vec<u8>, String> {
     let doc = html::parse(html);
     let body = doc.find("body").unwrap_or(&doc);
     let sheet_of: HashMap<String, String> = sheets
         .iter()
         .filter_map(|s| s.variable.clone().map(|v| (v, s.name.clone())))
         .collect();
-    let mut b = Builder::new(sheet_of, resolver);
+    let mut data_sheet = "Plot data".to_string();
+    while sheets.iter().any(|s| s.name == data_sheet) || data_sheet == "Report" {
+        data_sheet.push('_');
+    }
+    let mut b = Builder::new(sheet_of, resolver, plots, &data_sheet);
     b.header();
     b.children(body);
     b.flush();
@@ -1150,6 +1269,7 @@ pub fn html_to_xlsx(html: &str, sheets: &[DataSheet], resolver: Option<&ImageRes
         .collect();
     let mut wb = std::mem::take(&mut b.wb);
     let report = std::mem::take(&mut b.report);
+    let mut plot_data = std::mem::replace(&mut b.plot_data, Sheet::new(""));
     wb.sheets.push(report);
     // The variables take the units the text gave them, and say so.
     let mut notes: HashMap<String, String> = HashMap::new();
@@ -1169,5 +1289,20 @@ pub fn html_to_xlsx(html: &str, sheets: &[DataSheet], resolver: Option<&ImageRes
         let sh = rows_to_sheet(&mut wb, &s.name, &s.rows, note);
         wb.sheets.push(sh);
     }
+    if plot_data.cells.is_empty() {
+        return Ok(wb.finish());
+    }
+    plot_data.widths = vec![(
+        1,
+        plot_data
+            .cells
+            .values()
+            .flat_map(|r| r.keys())
+            .max()
+            .copied()
+            .unwrap_or(2),
+        18.0,
+    )];
+    wb.sheets.push(plot_data);
     Ok(wb.finish())
 }

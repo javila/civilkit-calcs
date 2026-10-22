@@ -693,11 +693,11 @@ await xlsxDownload.saveAs(xlsxPath);
 let sheets = null;
 try {
     sheets = JSON.parse(execFileSync('python3', ['-c',
-        'import json,sys,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nd={ws.title:[[c.value for c in r] for r in ws.iter_rows()] for ws in wb}\nd["_images"]=len(wb["Report"]._images)\nd["_links"]=sum(1 for r in wb["Report"].iter_rows() for c in r if c.hyperlink)\nprint(json.dumps(d))',
+        'import json,sys,openpyxl\nwb=openpyxl.load_workbook(sys.argv[1])\nd={ws.title:[[c.value for c in r] for r in ws.iter_rows()] for ws in wb}\nd["_images"]=len(wb["Report"]._images)\nd["_charts"]=len(wb["Report"]._charts)\nd["_chartpts"]=len(wb["Report"]._charts[0].series[0].xVal.numRef.numCache.pt) if wb["Report"]._charts else 0\nd["_links"]=sum(1 for r in wb["Report"].iter_rows() for c in r if c.hyperlink)\nprint(json.dumps(d))',
         xlsxPath], { encoding: 'utf8' }));
 } catch (e) { sheets = { error: String(e).slice(0, 200) }; }
 const sheetNames = Object.keys(sheets ?? {}).filter((k) => !k.startsWith('_'));
-check(JSON.stringify(sheetNames) === JSON.stringify(['Report', 'Variables', 'v', 'K', 'Inputs']), `File > Export Excel saves a workbook with a Report sheet, Variables, a sheet per vector and matrix, and Inputs (${JSON.stringify(sheetNames)})`);
+check(JSON.stringify(sheetNames) === JSON.stringify(['Report', 'Variables', 'v', 'K', 'Inputs', 'Plot data']), `File > Export Excel saves a workbook with a Report sheet, Variables, a sheet per vector and matrix, and Inputs (${JSON.stringify(sheetNames)})`);
 {
     const report = sheets?.Report ?? [];
     const rowOf = (name) => report.find((r) => r[1] === name);
@@ -708,7 +708,8 @@ check(JSON.stringify(sheetNames) === JSON.stringify(['Report', 'Variables', 'v',
     check(m && /12\.5/.test(m[3] ?? ''), `... and the expression with the values put in (${JSON.stringify(m?.[3])})`);
     const bar = report.findIndex((r) => r[0] === 'Bar' && r[1] === 'Area');
     check(bar > 0 && report[bar + 1]?.[0] === 1 && report[bar + 1]?.[1] === 2.5, 'an HTML table is a cell range with its numbers as numbers');
-    check(sheets?._images >= 1, `the plot is a picture in the Report sheet (${sheets?._images})`);
+    check(sheets?._charts === 1 && sheets?._chartpts >= 30 && sheets?._images === 0, `the plot is a native chart with its data, not a picture, in the Report sheet (${sheets?._charts} chart, ${sheets?._chartpts} points, ${sheets?._images} pictures)`);
+    check(sheets?.['Plot data']?.[1]?.[0] === 'x' && sheets['Plot data'].length >= 32, 'the chart data is on the Plot data sheet');
     const v = rowOf('v');
     check(v && /see sheet "v"/.test(v[4] ?? '') && sheets?._links >= 2, `a vector or matrix value links to its sheet (${JSON.stringify(v?.[4])}, ${sheets?._links} links)`);
 }

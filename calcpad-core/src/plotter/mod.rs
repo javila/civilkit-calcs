@@ -6,6 +6,7 @@
 //! `PlotSettings.ImagePath` is set; neither can be reproduced here, and both are reported
 //! as out of scope. The colour map of `$Map` is computed pixel by pixel and embedded as a
 //! PNG, which is ported (see `png.rs`).
+pub mod capture;
 pub mod chart_plotter;
 pub mod map_plotter;
 pub mod png;

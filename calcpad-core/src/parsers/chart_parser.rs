@@ -63,7 +63,17 @@ pub fn parse(parser: &MathParser, settings: &PlotSettings, script: &str, calcula
             right *= factor;
         }
         let mut plotter = ChartPlotter::new(parser, settings);
-        plotter.plot(&fx, &fy, &parameters[0].variable, left, right, &left_units)
+        plotter.names = charts
+            .iter()
+            .map(|c| crate::extension_methods::trim(c).to_string())
+            .collect();
+        let svg = plotter.plot(&fx, &fy, &parameters[0].variable, left, right, &left_units)?;
+        // The data of the plot, for the Excel export (ExpressionParser::capture_values).
+        *parser.last_captured_chart.borrow_mut() = plotter.captured.take().map(|mut c| {
+            c.x_name = input[1].clone();
+            c
+        });
+        Ok(svg)
     } else {
         get_html_text(parser, &mut input)
     }

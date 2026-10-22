@@ -1,6 +1,7 @@
 //! Port of Plotter/ChartPlotter.cs ($Plot).
 use std::rc::Rc;
 
+use super::capture::{CapturedChart, CapturedSeries, SERIES_COLORS};
 use super::svg_drawing::SvgDrawing;
 use super::svg_point::SvgPoint;
 use super::{clamp, Node, PlotBox, Plotter};
@@ -61,6 +62,10 @@ pub struct ChartPlotter<'a> {
     var: Option<VarRef>,
     x_units: OptUnit,
     y_units: OptUnit,
+    /// The expression of each curve as written, for the data of the Excel export.
+    pub names: Vec<String>,
+    /// The plot's data, set by `plot` (the Excel export).
+    pub captured: Option<CapturedChart>,
 }
 
 /// `Vector(Node p1, Node p2)`: the unit direction from p1 to p2.
@@ -102,6 +107,8 @@ impl<'a> ChartPlotter<'a> {
             var: None,
             x_units: None,
             y_units: None,
+            names: Vec::new(),
+            captured: None,
         }
     }
 
@@ -188,7 +195,39 @@ impl<'a> ChartPlotter<'a> {
         for c in charts.iter_mut() {
             c.get_chart_svg_points(x0, y0, xs, ys);
         }
-        self.draw_svg(&charts, x0, y0, xs, ys, &limits)
+        let svg = self.draw_svg(&charts, x0, y0, xs, ys, &limits)?;
+        self.captured = Some(self.capture(&charts, &limits, var));
+        Ok(svg)
+    }
+
+    /// The curves as drawn: in the colour order of `draw_svg` (an empty curve takes none).
+    fn capture(&self, charts: &[Chart], limits: &PlotBox, var: &VarRef) -> CapturedChart {
+        let _ = var;
+        let mut series = Vec::new();
+        let mut pen_no = 1usize;
+        for (i, c) in charts.iter().enumerate() {
+            if c.point_count() == 0 {
+                continue;
+            }
+            series.push(CapturedSeries {
+                name: self.names.get(i).cloned().unwrap_or_default(),
+                color: SERIES_COLORS[pen_no - 1].to_string(),
+                points: c.points.iter().map(|p| (p.x, p.y)).collect(),
+                dot: c.bounds.width() == 0.0 && c.bounds.height() == 0.0,
+                fill: c.fill,
+            });
+            pen_no += 1;
+            if pen_no > 10 {
+                pen_no = 1;
+            }
+        }
+        CapturedChart {
+            x_name: String::new(),
+            x_unit: self.x_units.as_ref().map(|u| u.text()).unwrap_or_default(),
+            y_unit: self.y_units.as_ref().map(|u| u.text()).unwrap_or_default(),
+            series,
+            bounds: (limits.left, limits.bottom, limits.right, limits.top),
+        }
     }
 
     fn calculate(&mut self, fx: &PlotFunc, fy: &PlotFunc, start: f64, end: f64, u: &OptUnit) -> CResult<Vec<Node>> {

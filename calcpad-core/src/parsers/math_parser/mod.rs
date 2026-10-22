@@ -94,6 +94,8 @@ pub struct MathParser {
     pub(crate) solver_eps: Cell<f64>,
     /// Records the first out of scope feature encountered (vectors, matrices, ...).
     pub out_of_scope: RefCell<Option<String>>,
+    /// The data of the last `$Plot` drawn, taken by `ExpressionParser` for the Excel export.
+    pub last_captured_chart: RefCell<Option<crate::plotter::capture::CapturedChart>>,
     // Output state (MathParser.Output fields)
     pub(crate) output_assignment_position: Cell<usize>,
     pub(crate) output_has_variables: Cell<bool>,
@@ -146,6 +148,7 @@ impl MathParser {
             is_const: Cell::new(false),
             solver_eps: Cell::new(1e-14),
             out_of_scope: RefCell::new(None),
+            last_captured_chart: RefCell::new(None),
             output_assignment_position: Cell::new(0),
             output_has_variables: Cell::new(false),
             output_format_equations: format_equations,

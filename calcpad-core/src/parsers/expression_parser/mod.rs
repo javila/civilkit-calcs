@@ -314,6 +314,8 @@ pub struct ExpressionParser {
     pub capture_values: bool,
     /// The variables in the order they were first assigned, each with its last value.
     pub captured_values: Vec<CapturedValue>,
+    /// The data of each `$Plot` drawn, in the order they appear in the page (with `capture_values`).
+    pub captured_plots: Vec<crate::plotter::capture::CapturedChart>,
     /// The first out of scope feature hit while parsing, if any.
     pub out_of_scope: Option<String>,
     error_count: i32,
@@ -384,6 +386,7 @@ impl ExpressionParser {
             open_xml_expressions: Vec::new(),
             capture_values: false,
             captured_values: Vec::new(),
+            captured_plots: Vec::new(),
             out_of_scope: None,
             error_count: 0,
             is_val: 0,
@@ -752,8 +755,16 @@ impl ExpressionParser {
                 } else {
                     crate::parsers::map_parser::parse(parser, &mut self.plot_settings, s, calculate)
                 };
+                let chart = if is_chart && self.capture_values {
+                    parser.last_captured_chart.borrow_mut().take()
+                } else {
+                    None
+                };
                 match result {
                     Ok(s1) => {
+                        if let Some(c) = chart {
+                            self.captured_plots.push(c);
+                        }
                         let id = self.html_id();
                         self.sb.push_str(&insert_attribute(&s1, &id));
                         self.p().is_plotting.set(false);
@@ -953,6 +964,7 @@ impl ExpressionParser {
             self.ui.ui_declaration_index.clear();
             self.open_xml_expressions.clear();
             self.captured_values.clear();
+            self.captured_plots.clear();
         } else {
             if self.line_cache.len() < line_count {
                 self.line_cache.resize(line_count, LineInfo::empty());

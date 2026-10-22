@@ -173,11 +173,29 @@ which the page loads on demand like the Word export.
   the value (a number cell, `m·10ⁿ` read as a number) and its unit; a vector or matrix value
   links to its sheet. A table that holds only text is a cell range (header cells bold, borders,
   numbers as numbers, colspan/rowspan merged); a table that lays out other content (headings,
-  pictures, equations) is read cell by cell, in order. Plots and inline SVG drawings are
-  pictures, rendered to PNG at twice their size by the code of the Word export, and images
+  pictures, equations) is read cell by cell, in order. A `$Plot` is a native, editable Excel
+  chart (see below); other inline SVG drawings, `$Map` colour maps and anything else the engine
+  gave no data for are pictures, rendered to PNG at twice their size by the code of the Word
+  export, and images
   (including those from the page's file library) too, each at its place in the text with the rows
   it needs left free. A select shows the chosen option; hidden elements are skipped. Printing is
   landscape, fitted to the width.
+* **Charts:** the plotter records what it calculated for each `$Plot` (`plotter::capture`:
+  the points of every curve, the colour of its `SeriesN` class, the axis limits as drawn, the
+  unit of each axis, whether a curve is a single point). The workbook gets one XY scatter chart
+  (`xl/charts/chartN.xml`, straight lines, no markers; a dot for a single point) per plot, placed at
+  the plot's position on the Report sheet in the size of the SVG, instead of the picture
+  (no picture next to it: the chart replaces it, so the two cannot disagree). The data is on a
+  last sheet, "Plot data" (two columns per curve, headers in rows 1 and 2, values from row 3), the
+  series refer to those ranges and carry a cache of the values, so editing a cell redraws the
+  chart. Axis limits are fixed to those of the SVG, titles are the plot variable and the curve's
+  expression with their units, a legend appears when there is more than one curve. What a chart
+  loses against the SVG: the faint fill under a `y = f(x)` curve, the exact fonts, the grid
+  style. The matching of plots to drawings is by order: the n-th `<svg class="plot">` of the page
+  takes the n-th captured plot; when there are fewer captured plots, the rest stay pictures.
+  The chart XML is written in ECMA-376 schema order (Excel asks to repair a part otherwise) and is
+  checked for that order by `tools/xlsx_check.py` and a unit test; real Excel was not available,
+  so it is verified with openpyxl and LibreOffice only.
 * **Variables:** every variable in the order it was first assigned, with its last value, as name,
   value, unit. A vector or matrix names the sheet that holds it.
 * **One sheet per vector or matrix:** the elements, each row with its unit.
@@ -194,7 +212,7 @@ complex value is text ("3 + 2i"). It is checked by `calcpad-core/tests/excel_exp
 `calcpad-docx/tests/xlsx_report.rs`, `tools/xlsx_check.py` (every sample through the CLI, read
 with openpyxl, and printed by LibreOffice) and the browser check.
 
-Not done: native Excel charts (the pictures are not editable), live formulas (the cells hold the
+Not done: live formulas (the cells hold the
 calculated values and the expressions as text), and conditional output of `#if` blocks other
 than what the page shows.
 

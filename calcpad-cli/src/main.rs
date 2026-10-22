@@ -207,6 +207,7 @@ fn main() -> ExitCode {
     let mut out_of_scope: Option<String> = None;
     let mut expressions: Vec<String> = Vec::new();
     let mut captured = Vec::new();
+    let mut plots = Vec::new();
     let html = if has_macro_errors {
         calcpad_reader::code_to_html(&unwrapped)
     } else {
@@ -226,8 +227,14 @@ fn main() -> ExitCode {
         out_of_scope = parser.out_of_scope.clone();
         expressions = std::mem::take(&mut parser.open_xml_expressions);
         captured = std::mem::take(&mut parser.captured_values);
+        plots = std::mem::take(&mut parser.captured_plots);
         parser.html_result.clone()
     };
+    // For tools/xlsx_check.py: how many plot drawings the page holds, counted in its own HTML.
+    if let Ok(plots_file) = std::env::var("CALCPAD_RS_PLOTS_FILE") {
+        let n = html.matches("<svg class=\"plot\" data-plot=\"svg\"").count();
+        let _ = std::fs::write(plots_file, n.to_string());
+    }
     if let Ok(scope_file) = std::env::var("CALCPAD_RS_SCOPE_FILE") {
         let _ = std::fs::write(scope_file, out_of_scope.unwrap_or_default());
     }
@@ -243,7 +250,7 @@ fn main() -> ExitCode {
         };
         let sheets = calcpad_core::openxml::variables_export::sheets(&captured);
         let page = format!("<html><body>{}</body></html>", html);
-        let bytes = match calcpad_docx::html_to_xlsx(&page, &sheets, Some(&resolver)) {
+        let bytes = match calcpad_docx::html_to_xlsx(&page, &sheets, &plots, Some(&resolver)) {
             Ok(b) => b,
             Err(e) => {
                 eprintln!("{}", e);

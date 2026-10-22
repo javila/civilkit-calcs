@@ -16,11 +16,14 @@ pub fn docx(html: &str, expressions_json: &str) -> Vec<u8> {
     calcpad_docx::html_to_docx(html, &expressions, None)
 }
 
-/// The .xlsx bytes for a rendered page and the JSON of the variable sheets the engine made
-/// (`xlsxSheets`): the page as a "Report" sheet, then those sheets.
+/// The .xlsx bytes for a rendered page, the JSON of the variable sheets the engine made
+/// (`xlsxSheets`) and the JSON of the plots' data (`xlsxCharts`): the page as a "Report" sheet
+/// with a native chart for each plot, then those sheets.
 #[wasm_bindgen]
-pub fn xlsx(html: &str, sheets_json: &str) -> Result<Vec<u8>, JsError> {
+pub fn xlsx(html: &str, sheets_json: &str, charts_json: &str) -> Result<Vec<u8>, JsError> {
     let value: serde_json::Value = serde_json::from_str(sheets_json).map_err(|e| JsError::new(&e.to_string()))?;
     let sheets = calcpad_core::openxml::variables_export::sheets_from_json(&value);
-    calcpad_docx::html_to_xlsx(html, &sheets, None).map_err(|e| JsError::new(&e))
+    let charts: serde_json::Value = serde_json::from_str(charts_json).unwrap_or(serde_json::Value::Null);
+    let plots = calcpad_core::plotter::capture::charts_from_json(&charts);
+    calcpad_docx::html_to_xlsx(html, &sheets, &plots, None).map_err(|e| JsError::new(&e))
 }

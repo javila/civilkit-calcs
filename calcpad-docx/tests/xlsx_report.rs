@@ -109,13 +109,13 @@ fn page() -> String {
 
 #[test]
 fn the_report_sheet_comes_first_then_the_variables() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     assert_eq!(sheet_names(&book), ["Report", "Variables", "V", "Inputs"]);
 }
 
 #[test]
 fn headings_text_and_equations_are_cells_in_document_order() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let c = cells(&book, 1);
     assert_eq!(at(&c, 1, 1), Some("Description"));
     assert_eq!(at(&c, 2, 1), Some("Beam"));
@@ -153,7 +153,7 @@ fn headings_text_and_equations_are_cells_in_document_order() {
 
 #[test]
 fn a_matrix_value_links_to_its_sheet() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let c = cells(&book, 1);
     let row = c.iter().find(|(_, col, t)| *col == 2 && t == "V").unwrap().0;
     assert_eq!(at(&c, row, 3), Some("[1; 2]"));
@@ -164,7 +164,7 @@ fn a_matrix_value_links_to_its_sheet() {
 
 #[test]
 fn a_vector_written_inline_links_to_its_sheet_too() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let c = cells(&book, 1);
     let rows: Vec<u32> = c
         .iter()
@@ -181,7 +181,7 @@ fn a_vector_written_inline_links_to_its_sheet_too() {
 
 #[test]
 fn a_plain_table_is_a_cell_range_and_a_layout_table_is_read_in_order() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let c = cells(&book, 1);
     let header = c.iter().find(|(_, col, t)| *col == 1 && t == "Bar").unwrap().0;
     assert_eq!(
@@ -195,7 +195,7 @@ fn a_plain_table_is_a_cell_range_and_a_layout_table_is_read_in_order() {
 
 #[test]
 fn drawings_and_images_are_pictures_in_the_package() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let drawing = xml_part(&book, "xl/drawings/drawing1.xml");
     let mut anchors = Vec::new();
     drawing.descendants("oneCellAnchor", &mut anchors);
@@ -223,7 +223,7 @@ fn drawings_and_images_are_pictures_in_the_package() {
 
 #[test]
 fn the_variables_sheet_takes_the_units_the_text_gave() {
-    let book = html_to_xlsx(&page(), &variable_sheets(), None).unwrap();
+    let book = html_to_xlsx(&page(), &variable_sheets(), &[], None).unwrap();
     let c = cells(&book, 2);
     assert_eq!(
         (at(&c, 2, 1), at(&c, 2, 2), at(&c, 2, 3), at(&c, 2, 4)),
@@ -235,4 +235,129 @@ fn the_variables_sheet_takes_the_units_the_text_gave() {
         )
     );
     assert_eq!(at(&c, 1, 4), Some("Note"));
+}
+
+fn sample_plots() -> Vec<calcpad_core::plotter::capture::CapturedChart> {
+    use calcpad_core::plotter::capture::{CapturedChart, CapturedSeries};
+    let series = |name: &str, color: &str, k: f64| CapturedSeries {
+        name: name.into(),
+        color: color.into(),
+        points: (0..=4).map(|i| (i as f64, k * i as f64)).collect(),
+        dot: false,
+        fill: false,
+    };
+    vec![CapturedChart {
+        x_name: "x".into(),
+        x_unit: "m".into(),
+        y_unit: "kN".into(),
+        series: vec![series("2x", "FF6347", 2.0), series("3x", "9ACD32", 3.0)],
+        bounds: (-1.2e-17, 0.0, 4.0, 11.999999999999998),
+    }]
+}
+
+const PLOT_PAGE: &str = "<html><body><p>before</p><svg class=\"plot\" data-plot=\"svg\" width=\"500px\" height=\"350px\" style=\"width:370pt; height:259pt;\" viewbox=\" 0 0 500 350\"><rect width=\"500\" height=\"350\"/></svg><svg width=\"100px\" height=\"80px\"><rect width=\"100\" height=\"80\"/></svg><p>after</p></body></html>";
+
+#[test]
+fn a_plot_is_a_native_chart_with_its_data_on_its_own_sheet() {
+    let book = html_to_xlsx(PLOT_PAGE, &variable_sheets(), &sample_plots(), None).unwrap();
+    // One chart for the plot, one picture for the drawing that is not a plot.
+    let names = sheet_names(&book);
+    assert_eq!(names.last().map(String::as_str), Some("Plot data"));
+    assert!(part(&book, "xl/charts/chart1.xml").is_some());
+    assert!(part(&book, "xl/charts/chart2.xml").is_none());
+    assert!(part(&book, "xl/media/image1.png").is_some());
+    assert!(part(&book, "xl/media/image2.png").is_none());
+    let drawing = xml_part(&book, "xl/drawings/drawing1.xml");
+    let mut frames = Vec::new();
+    drawing.descendants("graphicFrame", &mut frames);
+    assert_eq!(frames.len(), 1);
+    let rels = String::from_utf8(part(&book, "xl/drawings/_rels/drawing1.xml.rels").unwrap()).unwrap();
+    assert!(rels.contains("relationships/chart\" Target=\"../charts/chart1.xml\""));
+    let types = String::from_utf8(part(&book, "[Content_Types].xml").unwrap()).unwrap();
+    assert!(types.contains("/xl/charts/chart1.xml"));
+    // The data: two columns per curve, headers in rows 1 and 2, values from row 3.
+    let data = cells(&book, names.len());
+    assert_eq!(at(&data, 2, 1), Some("x [m]"));
+    assert_eq!(at(&data, 2, 2), Some("2x [kN]"));
+    assert_eq!(at(&data, 7, 2), Some("8"));
+    assert_eq!(at(&data, 7, 4), Some("12"));
+}
+
+#[test]
+fn the_chart_xml_is_in_schema_order_and_points_at_the_data() {
+    let book = html_to_xlsx(PLOT_PAGE, &variable_sheets(), &sample_plots(), None).unwrap();
+    let chart = xml_part(&book, "xl/charts/chart1.xml");
+    let order = |el: &Element| -> Vec<String> { el.elements().map(|e| xml::local(&e.name).to_string()).collect() };
+    assert_eq!(order(&chart), ["roundedCorners", "chart", "spPr"]);
+    let c = chart.elements().find(|e| xml::local(&e.name) == "chart").unwrap();
+    assert_eq!(
+        order(c),
+        ["autoTitleDeleted", "plotArea", "legend", "plotVisOnly", "dispBlanksAs"]
+    );
+    let mut area = Vec::new();
+    chart.descendants("plotArea", &mut area);
+    assert_eq!(order(area[0]), ["layout", "scatterChart", "valAx", "valAx", "spPr"]);
+    let mut sc = Vec::new();
+    chart.descendants("scatterChart", &mut sc);
+    assert_eq!(
+        order(sc[0]),
+        ["scatterStyle", "varyColors", "ser", "ser", "axId", "axId"]
+    );
+    let mut ser = Vec::new();
+    chart.descendants("ser", &mut ser);
+    assert_eq!(
+        order(ser[0]),
+        ["idx", "order", "tx", "spPr", "marker", "xVal", "yVal", "smooth"]
+    );
+    let mut ax = Vec::new();
+    chart.descendants("valAx", &mut ax);
+    assert_eq!(
+        order(ax[0]),
+        [
+            "axId",
+            "scaling",
+            "delete",
+            "axPos",
+            "majorGridlines",
+            "title",
+            "numFmt",
+            "majorTickMark",
+            "minorTickMark",
+            "tickLblPos",
+            "spPr",
+            "crossAx",
+            "crosses",
+            "crossBetween",
+            "majorUnit"
+        ]
+    );
+    let mut f = Vec::new();
+    chart.descendants("f", &mut f);
+    let refs: Vec<String> = f.iter().map(|e| e.inner_text()).collect();
+    assert_eq!(
+        refs,
+        [
+            "'Plot data'!$A$3:$A$7",
+            "'Plot data'!$B$3:$B$7",
+            "'Plot data'!$C$3:$C$7",
+            "'Plot data'!$D$3:$D$7"
+        ]
+    );
+    // The axes carry the plotted limits and titles with units.
+    let mut max = Vec::new();
+    ax[1].descendants("max", &mut max);
+    assert_eq!(max[0].attr("val"), Some("12"));
+    // Clean limits and a round major unit, whatever noise the plotter's arithmetic left.
+    let mut unit = Vec::new();
+    ax[1].descendants("majorUnit", &mut unit);
+    assert_eq!(unit[0].attr("val"), Some("2"));
+    assert!(chart.inner_text().contains("x [m]"));
+}
+
+#[test]
+fn a_plot_without_captured_data_stays_a_picture() {
+    let book = html_to_xlsx(PLOT_PAGE, &variable_sheets(), &[], None).unwrap();
+    assert!(part(&book, "xl/charts/chart1.xml").is_none());
+    assert!(part(&book, "xl/media/image2.png").is_some());
+    assert!(!sheet_names(&book).contains(&"Plot data".to_string()));
 }

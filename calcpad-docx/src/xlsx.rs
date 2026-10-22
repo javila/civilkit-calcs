@@ -64,6 +64,8 @@ pub struct Sheet {
     /// (cell reference, target sheet name).
     pub links: Vec<(String, String)>,
     pub pictures: Vec<Picture>,
+    /// Native charts, placed like pictures.
+    pub charts: Vec<crate::xlsx_chart::Chart>,
     /// Rows above this one stay in view (0: none).
     pub freeze_rows: u32,
 }
@@ -322,6 +324,7 @@ impl Workbook {
         );
         let mut drawing_no = 0;
         let mut image_no = 0;
+        let mut chart_no = 0;
         for (i, sheet) in self.sheets.iter().enumerate() {
             let n = i + 1;
             workbook.push_str(&format!(
@@ -339,7 +342,7 @@ impl Workbook {
                 n
             ));
             let mut drawing_rid = None;
-            if !sheet.pictures.is_empty() {
+            if !sheet.pictures.is_empty() || !sheet.charts.is_empty() {
                 drawing_no += 1;
                 drawing_rid = Some("rId1");
                 entries.push(Entry {
@@ -386,6 +389,23 @@ impl Workbook {
                         cx,
                         cy
                     ));
+                }
+                for (k, c) in sheet.charts.iter().enumerate() {
+                    chart_no += 1;
+                    let rid = sheet.pictures.len() + k + 1;
+                    entries.push(Entry {
+                        name: format!("xl/charts/chart{}.xml", chart_no),
+                        data: crate::xlsx_chart::chart_xml(c).into_bytes(),
+                    });
+                    content_types.push_str(&format!(
+                        "<Override PartName=\"/xl/charts/chart{}.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.drawingml.chart+xml\"/>",
+                        chart_no
+                    ));
+                    rels.push_str(&format!(
+                        "<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart\" Target=\"../charts/chart{}.xml\"/>",
+                        rid, chart_no
+                    ));
+                    drawing.push_str(&crate::xlsx_chart::anchor_xml(c, rid, rid + 1));
                 }
                 drawing.push_str("</xdr:wsDr>");
                 rels.push_str("</Relationships>");

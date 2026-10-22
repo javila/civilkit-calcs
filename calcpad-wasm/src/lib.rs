@@ -250,8 +250,10 @@ pub fn convert(request_json: &str, unwrap: bool) -> String {
         out["openXmlExpressions"] = serde_json::json!(expressions);
     }
     // The variable sheets for the Excel export; the page adds the report sheet (calcpad-docx).
-    if let Some(sheets) = xlsx {
+    if let Some((sheets, charts)) = xlsx {
         out["xlsxSheets"] = sheets;
+        // The data of each $Plot, for the native charts of the Excel export.
+        out["xlsxCharts"] = charts;
     }
     if LISTING_UNHIGHLIGHTED.with(|u| u.replace(false)) {
         out["needsHighlighter"] = serde_json::Value::Bool(true);
@@ -427,7 +429,12 @@ impl ConvertRequest {
 }
 
 /// `CalcpadService.Convert`
-type Converted = (String, Vec<CalcpadError>, Vec<String>, Option<serde_json::Value>);
+type Converted = (
+    String,
+    Vec<CalcpadError>,
+    Vec<String>,
+    Option<(serde_json::Value, serde_json::Value)>,
+);
 
 fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
     let enable_ui = r.enable_ui && !r.for_print;
@@ -471,8 +478,11 @@ fn convert_inner(r: &ConvertRequest, force_unwrapped_code: bool) -> Converted {
         errors.extend(parser.errors_list.iter().cloned());
         expressions = std::mem::take(&mut parser.open_xml_expressions);
         if r.export_xlsx {
-            xlsx = Some(calcpad_core::openxml::variables_export::sheets_to_json(
-                &calcpad_core::openxml::variables_export::sheets(&parser.captured_values),
+            xlsx = Some((
+                calcpad_core::openxml::variables_export::sheets_to_json(
+                    &calcpad_core::openxml::variables_export::sheets(&parser.captured_values),
+                ),
+                calcpad_core::plotter::capture::charts_to_json(&parser.captured_plots),
             ));
         }
         // Model bindings (docs/model-bindings.md): mark each bound input. No model is connected

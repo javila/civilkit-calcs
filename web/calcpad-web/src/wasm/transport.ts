@@ -193,8 +193,8 @@ class EngineWorker {
     }
 
     /** The Excel workbook of a rendered page and the variable sheets (calcpad-docx-wasm). */
-    xlsx(html: string, sheetsJson: string, signal?: AbortSignal | null): Promise<Uint8Array> {
-        return this.post<Uint8Array>({ kind: 'xlsx', html, sheets: sheetsJson }, signal);
+    xlsx(html: string, sheetsJson: string, chartsJson: string, signal?: AbortSignal | null): Promise<Uint8Array> {
+        return this.post<Uint8Array>({ kind: 'xlsx', html, sheets: sheetsJson, charts: chartsJson }, signal);
     }
 
     /** The Word document of a rendered page (calcpad-docx-wasm, loaded on first use). */
@@ -429,7 +429,7 @@ export function installWasmTransport(): WasmTransport {
             request.enableUi = false;
             request.includeLineAnchors = false;
             const out = JSON.parse(await engine.convert(JSON.stringify(request), false, signal)) as {
-                status?: number; error?: string; html?: string; xlsxSheets?: unknown;
+                status?: number; error?: string; html?: string; xlsxSheets?: unknown; xlsxCharts?: unknown;
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             if (!out.xlsxSheets) {
@@ -437,7 +437,7 @@ export function installWasmTransport(): WasmTransport {
             }
             let html = out.html ?? '';
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
-            const bytes = await engine.xlsx(html, JSON.stringify(out.xlsxSheets), signal);
+            const bytes = await engine.xlsx(html, JSON.stringify(out.xlsxSheets), JSON.stringify(out.xlsxCharts ?? []), signal);
             return new Response(new Uint8Array(bytes), {
                 status: 200,
                 headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
