@@ -8,3 +8,6 @@
   Cache-Control: public, max-age=31536000, immutable
 /calcs/report-fonts/*
   Cache-Control: public, max-age=31536000, immutable
+/calcs/py/micropython/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=86400
