@@ -164,8 +164,10 @@ const PAL_PROGRAMMING: Section[] = [
                         ['#break', '#break\n', 'Leave the loop', ], ['#continue', '#continue\n', 'Next iteration'],
                     ], { test: '#repeat 3\n    #if x > 1\n        {}\n    #end if\n#loop' }),
                     lines('Python (runs in the browser)', [
-                        ['#python', '#python\nimport numpy as np\nx = np.linspace(0, 1, 5)\nprint(x.sum())\nexport(total=float(x.sum()))\n#end python\n', 'Python block: print text and export variables back to the worksheet'],
-                        ['#python plot', '#python\nimport numpy as np\nimport matplotlib.pyplot as plt\nx = np.linspace(0, 6.28, 50)\nplt.plot(x, np.sin(x), label=\"sin\")\nplt.xlabel(\"x\")\nplt.grid(True)\nplt.legend()\nplt.show()\n#end python\n', 'Python block with a matplotlib plot'],
+                        ['#python', '#python\nimport numpy as np\nx = np.linspace(0, 1, 5)\nprint(x.sum())\nexport(total=float(x.sum()))\n#end python\n', 'Python block: print text and export variables back to the worksheet',
+                            '```python\nimport numpy as np\nx = np.linspace(0, 1, 5)\nprint(x.sum())\nexport(total=float(x.sum()))\n```\n'],
+                        ['#python plot', '#python\nimport numpy as np\nimport matplotlib.pyplot as plt\nx = np.linspace(0, 6.28, 50)\nplt.plot(x, np.sin(x), label=\"sin\")\nplt.xlabel(\"x\")\nplt.grid(True)\nplt.legend()\nplt.show()\n#end python\n', 'Python block with a matplotlib plot',
+                            '```python\nimport numpy as np\nimport matplotlib.pyplot as plt\nx = np.linspace(0, 6.28, 50)\nplt.plot(x, np.sin(x), label=\"sin\")\nplt.xlabel(\"x\")\nplt.grid(True)\nplt.legend()\nplt.show()\n```\n'],
                     ], { skip: 'the engine does not run Python: the page runs #python blocks before it (e2e/python-check.mjs)' }),
                     lines('Macros and definitions', [
                         ['#def', '#def name$ = text\n', 'Inline string macro'],

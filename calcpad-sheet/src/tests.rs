@@ -148,6 +148,14 @@ fn every_sample_compiles_cleanly() {
         }
         let src = std::fs::read_to_string(&p).unwrap();
         assert!(is_sheet(&src), "{p:?} has the marker");
+        // The engine alone cannot run a python fence: the page runs it first (web/e2e/python-check.mjs runs these samples).
+        if src.contains("```python") {
+            let c = compile(&src);
+            assert!(c.diagnostics.is_empty(), "{p:?}: {:?}", c.diagnostics);
+            assert!(c.text.contains("#python\n") && c.text.contains("\n#end python"));
+            assert_eq!(c.map.len(), c.text.lines().count());
+            continue;
+        }
         let (c, _, errs) = render(&src);
         no_errors(&format!("{p:?}"), &errs, &c);
         assert_eq!(c.map.len(), c.text.lines().count());
@@ -546,4 +554,60 @@ fn deflection_samples_values() {
         t.contains("= 3.75 mm") && t.contains("= 60 kN · m") && t.contains("= 11.25 mm"),
         "{t}"
     );
+}
+
+#[test]
+fn python_fence_becomes_a_python_block() {
+    let src = "<!--sheet-->\n# T\n\n```python\nimport numpy as np\nfor i in range(2):\n    export(a=i)\n```\n\nx: 1";
+    let c = compile(src);
+    let lines: Vec<&str> = c.text.split('\n').collect();
+    let at = lines.iter().position(|l| *l == "#python").expect("opens a block");
+    assert_eq!(
+        &lines[at..at + 5],
+        [
+            "#python",
+            "import numpy as np",
+            "for i in range(2):",
+            "    export(a=i)",
+            "#end python"
+        ]
+    );
+    // every line of the block maps to its own sheet line
+    assert_eq!(c.map[at], 3);
+    assert_eq!(c.map[at + 1], 4);
+    assert_eq!(c.map[at + 3], 6);
+    assert_eq!(c.map[at + 4], 7);
+    assert!(c.diagnostics.is_empty(), "{:?}", c.diagnostics.len());
+}
+
+#[test]
+fn python_fence_keeps_indentation_relative_to_its_block() {
+    let src = "<!--sheet-->\nif 1 > 0:\n    ```python\n    if True:\n        print(1)\n    ```\n";
+    let c = compile(src);
+    assert!(
+        c.text.contains("#python\nif True:\n    print(1)\n#end python"),
+        "{}",
+        c.text
+    );
+}
+
+#[test]
+fn python_fence_is_not_renamed_or_formatted_as_a_sheet() {
+    let src = "<!--sheet-->\nphi: 2\n```python\nphi = 3   # not sheet syntax: a | b\n```\n";
+    let c = compile(src);
+    assert!(c.text.contains("\nphi = 3   # not sheet syntax: a | b\n"), "{}", c.text);
+    assert_eq!(crate::format::format(src), src);
+}
+
+#[test]
+fn an_unclosed_python_fence_is_an_error_and_is_closed() {
+    let c = compile("<!--sheet-->\n```python\nx = 1\n");
+    assert!(c.text.trim_end().ends_with("#end python"));
+    assert!(c.diagnostics.iter().any(|d| matches!(d.severity, Severity::Error)));
+}
+
+#[test]
+fn a_plain_code_fence_is_still_prose() {
+    let c = compile("<!--sheet-->\n```rust\nlet a = 1;\n```\n");
+    assert!(!c.text.contains("#python"), "{}", c.text);
 }

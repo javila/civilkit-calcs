@@ -169,6 +169,10 @@ written, and so is everything between a `calcpad` fence:
 ```
 ````
 
+A fence with the language `python` is a Python block (docs/python-blocks.md): it compiles to `#python` ... `#end python`, its lines
+are copied as written (no renaming, indentation kept), and what it prints, draws and `export`s becomes part of the sheet. Names it
+exports can be used by the quantity lines after it.
+
 Sheet lines and raw lines share one worksheet, so they alternate freely: a raw block reads
 the variables defined by sheet lines above it and defines variables that sheet lines below it
 use, and prose, quantities, LaTeX and raw Calcpad can come in any order. To make that work

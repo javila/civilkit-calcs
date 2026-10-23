@@ -122,6 +122,8 @@ struct Block {
 
 enum Fence {
     Calcpad,
+    /// A ```python fence: its lines are the body of a `#python` block, indentation kept.
+    Python(usize),
     Code(usize),
 }
 
@@ -451,6 +453,18 @@ impl<'a> Comp<'a> {
                             self.emit(r, idx);
                         }
                     }
+                    Fence::Python(strip) => {
+                        self.mark(idx, LineKind::Raw);
+                        if closes {
+                            fence = None;
+                            self.emit("#end python", idx);
+                        } else {
+                            let (w, _, n) = leading(line);
+                            let extra = w.saturating_sub(*strip);
+                            let s = format!("{}{}", " ".repeat(extra), line[n..].trim_end());
+                            self.emit(s, idx);
+                        }
+                    }
                     Fence::Code(strip) => {
                         let (w, _, n) = leading(line);
                         let extra = w.saturating_sub(*strip);
@@ -566,6 +580,11 @@ impl<'a> Comp<'a> {
                 if info.eq_ignore_ascii_case("calcpad") {
                     self.flush_prose();
                     fence = Some(Fence::Calcpad);
+                } else if info.eq_ignore_ascii_case("python") {
+                    self.flush_prose();
+                    self.mark(idx, LineKind::Raw);
+                    self.emit("#python", idx);
+                    fence = Some(Fence::Python(strip));
                 } else {
                     self.prose.push(Pl {
                         text: body,
@@ -613,6 +632,11 @@ impl<'a> Comp<'a> {
                 idx,
                 kind: PKind::Normal,
             });
+        }
+        if let Some(Fence::Python(_)) = fence {
+            let last = lines.len().saturating_sub(1);
+            self.diag(last, Severity::Error, "the python fence is never closed with ```");
+            self.emit("#end python", last);
         }
         if math.is_some() {
             let (buf, start) = math.take().unwrap();
