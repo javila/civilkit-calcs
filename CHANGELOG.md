@@ -9,19 +9,9 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
-## [26.10.5] - 2026-10-24
+## [26.10.6] - 2026-10-24
 
 ### Added
-- A sheet accepts Calcpad's own `#python` ... `#end python` pair as a Python block, the same block as a `python` fence (a pasted block no longer turns into sheet lines).
-- `numpy.linalg` and `scipy.linalg` in Python blocks, computed by the Calcpad engine (the code behind `lsolve`, `inverse`, `det`,
-  `cholesky`, `eigenvals`, `svd` in Calcpad lines), so Python and Calcpad lines give one answer: `solve`, `inv`, `det`,
-  `cholesky`, `eigh`, `eigvalsh`, `svd`, `matrix_rank`, `cond`, `pinv`, `norm`; `scipy.linalg.solve`, `cholesky`, `cho_factor`,
-  `cho_solve`, `solve_triangular`. A singular matrix is a `LinAlgError` on its Python line; unsupported calls (`lstsq`, `qr`,
-  `eig` of a non-symmetric matrix) say so in a `NotImplementedError`. A new `calcpad-linalg-wasm` module (345 KB, 138 KB
-  gzipped) is downloaded only by a block that mentions linalg, scipy, dot, matmul or `@`. Large float matrix products
-  (about 46 by 46 and up) go to the engine as well, with identical values and about 7 times faster.
-  Solving a 120 by 120 system takes 87 ms instead of 1.5 s in a hand-written Python loop. docs/python-blocks.md.
-- `tools/build_wasm.sh linalg` builds the new module.
 - The Plotly API in Python blocks, so an interactive chart needs no HTML and no JavaScript: `import plotly.graph_objects as go` (also
   `plotly.graph_objs`), `go.Figure`, the common trace classes (`Scatter`, `Bar`, `Heatmap`, `Scatter3d` and others), `add_trace`,
   `update_layout`, `update_xaxes`, `update_yaxes`, `update_traces`, `add_shape`, `add_vline`, `add_hline`, `fig.show()`, and
@@ -35,11 +25,27 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 - A "Beam Explorer: Plotly from Python" sample (also as a sheet): the same three-span beam, solved in Python and explored with a native load case
   menu, a load factor slider (0.50 to 2.00 in steps of 0.05) and a point load position slider, with an envelope band and support lines, in 190 kB of figure data.
   `web/e2e/python-check.mjs` checks its plotted hogging moments against a three-moment solution, and that the real menu and sliders change the plotted data.
-- A "Plane Truss by the Stiffness Method" sample in the Python group: a statically determinate truss assembled in loops and solved with `np.linalg.solve`, member forces and reactions recovered and drawn with matplotlib (tension and compression coloured, deflected shape), and a Calcpad member check on the exported maxima. `web/e2e/python-check.mjs` checks its member forces, reactions and deflections against hand values (method of joints, virtual work), and now also covers a bare `#python` block in a sheet, exported names with an underscore or a capital in a sheet, the section properties calculation, and the Sections group in the Samples browser.
 
 ### Changed
 - The raw HTML and JavaScript beam explorer is kept as "Beam Explorer: Python Results in Raw JS Plotly" (the example of the script route; it
   can combine controls and compute a readout, which Plotly's own controls cannot), and the Plotly API sample comes first in the Python group.
+
+## [26.10.5] - 2026-10-24
+
+### Added
+- A sheet accepts Calcpad's own `#python` ... `#end python` pair as a Python block, the same block as a `python` fence (a pasted block no longer turns into sheet lines).
+- `numpy.linalg` and `scipy.linalg` in Python blocks, computed by the Calcpad engine (the code behind `lsolve`, `inverse`, `det`,
+  `cholesky`, `eigenvals`, `svd` in Calcpad lines), so Python and Calcpad lines give one answer: `solve`, `inv`, `det`,
+  `cholesky`, `eigh`, `eigvalsh`, `svd`, `matrix_rank`, `cond`, `pinv`, `norm`; `scipy.linalg.solve`, `cholesky`, `cho_factor`,
+  `cho_solve`, `solve_triangular`. A singular matrix is a `LinAlgError` on its Python line; unsupported calls (`lstsq`, `qr`,
+  `eig` of a non-symmetric matrix) say so in a `NotImplementedError`. A new `calcpad-linalg-wasm` module (345 KB, 138 KB
+  gzipped) is downloaded only by a block that mentions linalg, scipy, dot, matmul or `@`. Large float matrix products
+  (about 46 by 46 and up) go to the engine as well, with identical values and about 7 times faster.
+  Solving a 120 by 120 system takes 87 ms instead of 1.5 s in a hand-written Python loop. docs/python-blocks.md.
+- `tools/build_wasm.sh linalg` builds the new module.
+- A "Plane Truss by the Stiffness Method" sample in the Python group: a statically determinate truss assembled in loops and solved with `np.linalg.solve`, member forces and reactions recovered and drawn with matplotlib (tension and compression coloured, deflected shape), and a Calcpad member check on the exported maxima. `web/e2e/python-check.mjs` checks its member forces, reactions and deflections against hand values (method of joints, virtual work), and now also covers a bare `#python` block in a sheet, exported names with an underscore or a capital in a sheet, the section properties calculation, and the Sections group in the Samples browser.
+
+### Changed
 - The "Section Properties from numpy Arrays" sample is now "Built-up Section Properties" in a new Sections group, written with vectors and `hprod` and no Python: the units carry through and the report shows every substitution. The Python group keeps the samples where Python is the better tool.
 - docs/python-blocks.md records why ulab (a numpy-like MicroPython module) was measured and not shipped: it is 10 times faster
   than the engine for dense solves, but a second, different numpy (2-D only, no `@` or `.sum()`) and 430 KB more wasm.

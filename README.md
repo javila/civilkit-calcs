@@ -184,15 +184,17 @@ node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, picture
 node ../tools/set_version.mjs --check
 ```
 
-## Checked at 26.10.5
+## Checked at 26.10.6
 
-`cargo test` passes for `civilkit-calcs-sheet` (51 tests) and `calcpad-linalg-wasm` (13), and all wasm modules were rebuilt.
-`web/e2e/python-check.mjs` (108 checks: the earlier Python checks plus the plane truss against hand values from the method of
-joints and virtual work, a bare `#python` block in a sheet, exported names in the sheet's spelling, linear algebra on the engine,
-and the Samples browser groups) and `web/e2e/browser-check.mjs` (123 checks, all 106 bundled samples open without errors) pass.
-The beam explorer's chart loads Plotly from its CDN, so its checks need a network connection and are skipped without one.
-Not re-run for this release: `cargo fmt --check` and `clippy`, the full workspace `cargo test`, and the ribbon, sheet, import
-and C-style check scripts. The Word and Excel exports have been opened in LibreOffice and openpyxl, not in Microsoft Office.
+`web/e2e/python-check.mjs` (169 checks: the earlier Python checks, the plane truss against hand values, linear algebra on the
+engine, and the Plotly API: figure JSON, lazy loading, errors that name the unsupported call, the offline note, the Word and
+Excel placeholder, a real chart render in light and dark, and clicks on the native dropdown and both sliders) and
+`web/e2e/browser-check.mjs` (123 checks, all bundled samples open without errors) pass on the merged build, and `sheet-check`
+passed on the Plotly branch. At 26.10.5, `cargo test` passed for `civilkit-calcs-sheet` (51 tests) and `calcpad-linalg-wasm` (13).
+The Plotly chart loads Plotly.js from its CDN, so its checks need a network connection and are skipped without one.
+Not re-run for this release: `cargo test` after the Plotly merge, `tsc`, `cargo fmt --check` and `clippy`, the full workspace
+`cargo test`, and the ribbon, import and C-style check scripts. The Word and Excel exports have been opened in LibreOffice and
+openpyxl, not in Microsoft Office.
 
 ## Contributing
 
