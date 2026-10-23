@@ -9,6 +9,26 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
+## [26.10.4] - 2026-10-23
+
+### Added
+- Python blocks. A worksheet can hold `#python` ... `#end python` blocks, and a sheet a fenced ```python block, that run on
+  MicroPython in a worker before the engine and become part of the worksheet: `print` output as text, matplotlib figures as
+  inline SVG, and numbers handed back with `export(name=value)` as Calcpad definitions (a number, a vector, a matrix).
+  `export_data` defines values without printing them, for a chart to read. The runtime (a 0.4 MB wasm, MIT licensed,
+  with small numpy and matplotlib.pyplot stand-ins, about 240 KB gzipped in all) loads only when a worksheet has a block.
+  The first run in each tab asks "This worksheet runs Python code"; a script has no network or file access, runs at most 10 s
+  and has capped output. Preview, Report, Print PDF, Word and Excel carry the results. Python cannot read Calcpad variables
+  yet. Design, sandbox limits and a compatibility table: docs/python-blocks.md.
+- The editor treats a block as Python: no Calcpad errors on its lines, names it exports are defined for the lines after it,
+  the prettifier and Format Document leave it alone. In a sheet the ribbon inserts a `python` fence.
+- Four Python samples: "Beam Explorer: Python Solve, Plotly Charts" (a three-span beam solved by the stiffness method in
+  numpy, with an interactive Plotly chart driven by the exported results; also as a sheet), a beam moment diagram, a function
+  plot, and section properties from numpy arrays. Math > Programming has `#python` entries.
+
+### Changed
+- The Samples browser shows the source of a Python sample instead of running it.
+
 ## [26.10.3] - 2026-10-23
 
 ### Added

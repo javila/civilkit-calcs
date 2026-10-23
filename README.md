@@ -184,18 +184,18 @@ node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, picture
 node ../tools/set_version.mjs --check
 ```
 
-## Checked at 26.10.3
+## Checked at 26.10.4
 
-`cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean; `cargo test` ran 5369 tests
-with none failing (3 ignored); every wasm module was rebuilt (the sheet compiler is 95 KB, 44 KB gzipped; the engine
-module is unchanged in size); `web/e2e/sheet-check.mjs` (sheet samples, LaTeX, error mapping, mixing with raw
-Calcpad, the compiled view, Convert to Calcpad, Word and Excel, `.sheet` open, edit, save and reopen, prettify,
-go to definition, hover, references, the ribbon, Text Formatting and Insert tab forms, New, the changelog link),
-`web/e2e/verify-ribbon-sheet.mjs` (407 ribbon inserts in sheet form through the compiler and the engine),
-`web/e2e/import-check.mjs` and `web/e2e/ribbon-check.mjs --lint` pass. `web/e2e/browser-check.mjs` passed 119 checks
-on the build served at `/`; its mapped-controls step (`select-map-check.mjs`, real clicks in a preview that is
-replaced by every render) failed intermittently on a machine under heavy load, and it does the same on the 26.10.2
-build, so it is not counted as passed here.
+`cargo fmt --check` is clean; `cargo clippy --all-targets -- -D warnings` is clean for the two crates this release
+changed (`civilkit-calcs-highlighter`, `civilkit-calcs-sheet`), whose tests pass (all 44 of the sheet crate; the
+highlighter's whole suite, including 14 python-block tests); the engine, docx, highlighter, importer and sheet wasm modules were rebuilt.
+`web/e2e/python-check.mjs` (new: lazy loading, the once-per-tab question and Not now, print text, SVG figure, exports used
+by later lines, error line mapping in Calcpad and in sheets, timeout, sandbox, Report, Word and Excel, the ribbon in
+both modes, the four Python samples, and the beam explorer's chart against a three-moment solution) passes. So do
+`web/e2e/ribbon-check.mjs --lint`, `web/e2e/verify-ribbon-sheet.mjs` (407 inserts), `web/e2e/sheet-check.mjs`,
+`web/e2e/import-check.mjs`, `web/e2e/c-style-check.mjs` and `web/e2e/browser-check.mjs` (123 checks). The explorer's chart
+loads Plotly from its CDN, so its checks need a network connection and are skipped without one. The full `cargo test` of
+the workspace was not re-run for this release.
 
 ## Contributing
 
