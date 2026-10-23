@@ -11,6 +11,8 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p target/tmp && export TMPDIR="$PWD/target/tmp"
 OUT=web/calcpad-web/public/wasm
+# Panic messages embed source paths; keep the builder's home folder out of the shipped modules.
+export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/build"
 
 for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_xmcd_wasm; do
   case $m in
