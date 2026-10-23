@@ -14,6 +14,9 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 ### Added
 - A sheet accepts Calcpad's own `#python` ... `#end python` pair as a Python block, the same block as a `python` fence (a pasted block no longer turns into sheet lines).
 
+### Changed
+- The "Section Properties from numpy Arrays" sample is now "Built-up Section Properties" in a new Sections group, written with vectors and `hprod` and no Python: the units carry through and the report shows every substitution. The Python group keeps the samples where Python is the better tool.
+
 ### Fixed
 - In a sheet, the names a Python block hands over with `export()` use the sheet's spelling, so `export(sigma_c=2)`, `phi` and `Mstar` are found by the lines below the block as `σ_c`, `φ` and `M_star`.
 

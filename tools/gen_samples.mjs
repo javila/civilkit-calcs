@@ -96,7 +96,7 @@ function plainMath(tex) {
         .replace(/[{}]/g, '');
 }
 
-const GROUP_ORDER = ['Beams', 'Reinforced Concrete', 'Steel', 'Loads', 'Frames', 'Dynamics', 'Nonlinear', 'Soil Mechanics', 'Maths & plotting', 'Python'];
+const GROUP_ORDER = ['Beams', 'Reinforced Concrete', 'Steel', 'Loads', 'Frames', 'Dynamics', 'Nonlinear', 'Soil Mechanics', 'Sections', 'Maths & plotting', 'Python'];
 
 const cpdFiles = (dir) => readdirSync(dir).filter((f) => f.endsWith('.cpd')).map((f) => join(dir, f));
 const folders = [
@@ -319,7 +319,7 @@ const OWN_TITLES = {
     'Continuous beam explorer': ['Beam Explorer: Python Solve, Plotly Charts', 'A three-span beam solved in Python (stiffness matrix, numpy, matplotlib) for several load cases and a moving point load; the results drive an interactive Plotly chart with hover values, a load case menu and sliders, and a Calcpad design check.'],
     'Beam moment diagram with matplotlib': ['Beam Moment Diagram with matplotlib', 'A #python block draws the moment diagram of a simply supported beam with numpy and matplotlib and exports the maximum moment; the Calcpad lines after it check that moment against a capacity.'],
     'Function plot with matplotlib': ['Function Plot with matplotlib', 'A #python block plots a damped oscillation and a bar chart side by side with matplotlib and exports the peak value.'],
-    'Section properties from numpy arrays': ['Section Properties from numpy Arrays', 'numpy arrays in a #python block give the centroid and second moment of area of a built-up section; Calcpad uses them for a bending stress.'],
+    'Built-up section properties': ['Built-up Section Properties', 'Vectors and hprod give the centroid and second moment of area of a built-up section with units carried through, and a bending stress follows.'],
 };
 if (existsSync(OWN)) {
     for (const folder of readdirSync(OWN).filter((d) => statSync(join(OWN, d)).isDirectory()).sort()) {

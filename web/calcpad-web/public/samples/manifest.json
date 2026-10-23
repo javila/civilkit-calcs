@@ -8,6 +8,7 @@
   "Dynamics",
   "Nonlinear",
   "Soil Mechanics",
+  "Sections",
   "Maths & plotting",
   "Python"
  ],
@@ -1586,6 +1587,21 @@
    "assets": []
   },
   {
+   "id": "sections-built-up-section-properties",
+   "title": "Built-up Section Properties",
+   "group": "Sections",
+   "folder": "Sections",
+   "file": "samples/Sections/Built-up section properties.cpd",
+   "upstream": "own/Sections/Built-up section properties.cpd",
+   "description": "Vectors and hprod give the centroid and second moment of area of a built-up section with units carried through, and a bending stress follows.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "python": false,
+   "assets": []
+  },
+  {
    "id": "engineering-custom-units-currency-units",
    "title": "Currency Units",
    "group": "Maths & plotting",
@@ -2116,21 +2132,6 @@
    "file": "samples/Python/Function plot with matplotlib.cpd",
    "upstream": "own/Python/Function plot with matplotlib.cpd",
    "description": "A #python block plots a damped oscillation and a bar chart side by side with matplotlib and exports the peak value.",
-   "codes": [],
-   "ui": false,
-   "scripts": false,
-   "read": false,
-   "python": true,
-   "assets": []
-  },
-  {
-   "id": "python-section-properties-from-numpy-arrays",
-   "title": "Section Properties from numpy Arrays",
-   "group": "Python",
-   "folder": "Python",
-   "file": "samples/Python/Section properties from numpy arrays.cpd",
-   "upstream": "own/Python/Section properties from numpy arrays.cpd",
-   "description": "numpy arrays in a #python block give the centroid and second moment of area of a built-up section; Calcpad uses them for a bending stress.",
    "codes": [],
    "ui": false,
    "scripts": false,
