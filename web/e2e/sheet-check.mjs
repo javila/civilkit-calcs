@@ -129,8 +129,10 @@ await result('Beam bending check');
 await page.click('[data-ribbon-btn=x-compiled]');
 await page.waitForSelector('[data-testid=compiled-view] .view-lines');
 const compiled = (await page.locator('[data-testid=compiled-view]').innerText()).replace(/\u00a0/g, ' ');
-check(compiled.includes('M_star = w * L^2 / 8|kN*m') && compiled.includes('#if utilisation'), 'Show compiled Calcpad shows the generated Calcpad');
-await page.keyboard.press('Escape');
+check(compiled.includes('M_star = w * L^2 / 8|kN*m') && compiled.includes('#if utilisation') && !compiled.includes('sheet-note') && compiled.includes("'maximum bending moment"), 'Show compiled Calcpad shows hand-written looking Calcpad: plain comments, no styled spans');
+check(await page.locator('.monaco-editor').first().isVisible(), 'the compiled view sits beside the editor and does not hide it');
+if (shots) await page.screenshot({ path: join(shots, 'sheet-with-compiled-view.png') });
+await page.locator('#cprs-compiled button', { hasText: 'Close' }).click();
 const bodies = await page.evaluate(async () => {
     const content = window.calcpadActiveEditor.getValue();
     const post = async (ep) => { const r = await fetch(`/api/calcpad/${ep}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, forPrint: true }) }); const b = new Uint8Array(await r.arrayBuffer()); return [r.status, String.fromCharCode(b[0], b[1]), b.length]; };

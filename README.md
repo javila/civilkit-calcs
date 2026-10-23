@@ -78,14 +78,19 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
   not yet. The generic specification is in [docs/model-bindings.md](docs/model-bindings.md).
 * **Worksheet scripts:** scripts in worksheets run only from a library list, under a
   Content Security Policy, with the print frame sandboxed (DEVIATIONS.md, D3).
-* **Sheet syntax (our addition, not part of CalcpadCE):** a Markdown-like way to write a
-  worksheet: prose, `name: expression -> unit | note` lines, LaTeX, indented `for`/`while`/`if`
-  blocks, plots, and `>>` lines that pass raw Calcpad through. It compiles to the Calcpad
-  worksheet language and runs on the same engine (it is a front end, not a second engine), so
-  units, vectors, plots and the Word and Excel exports all work. The compiler is the crate
-  `calcpad-sheet` in its own 38 KB gzipped wasm (`calcpad-sheet-wasm`); the preview renders LaTeX
-  with the bundled KaTeX, loaded only when a sheet has a formula. Errors and lint markers are
-  mapped back to sheet lines. See [docs/sheet-syntax.md](docs/sheet-syntax.md).
+* **Sheet syntax (our addition, not part of CalcpadCE):** the main way to write a worksheet here. Markdown
+  prose, `name: expression -> unit | note` lines, LaTeX, indented `for` (with `step`), `while` and `if` blocks
+  with `break` and `continue`, plots, and `>>` lines that pass raw Calcpad through. File > New and the quick-access New
+  button open a sheet; New Calcpad worksheet opens the advanced syntax. A sheet compiles to the Calcpad worksheet language
+  and runs on the same engine (a front end, not a second engine), so units, vectors, plots and the Word and
+  Excel exports all work, and Show compiled / Convert to Calcpad give the Calcpad a person would write. The
+  compiler is the crate `calcpad-sheet` in its own 39 KB gzipped wasm (`calcpad-sheet-wasm`); the preview
+  renders LaTeX with the bundled KaTeX, loaded only when a sheet has a formula. The editor formats, completes,
+  highlights, and goes to definition, finds references and hovers on a sheet's names; errors and lint markers
+  are mapped back to sheet lines; the ribbon and Insert tab insert sheet forms. See
+  [docs/sheet-syntax.md](docs/sheet-syntax.md).
+* **Changelog:** a button on the Resources tab and a link in About open
+  [CHANGELOG.md](CHANGELOG.md) on GitHub.
 * **Known deviations** from CalcpadCE's behaviour are listed one by one, with the test that pins
   each, in [DEVIATIONS.md](DEVIATIONS.md). Not supported: raster (SkiaSharp) plots,
   `#ProjectPath`/`#LibraryPath` path roots, and compiled `.cpdz` worksheets.

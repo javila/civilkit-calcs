@@ -39,16 +39,17 @@ export function newSheet(tabs: TabsLike): void {
     tabs.newUntitled(NEW_SHEET_TEXT);
 }
 
-function modal(title: string, sub: string): { box: HTMLDivElement; bar: HTMLDivElement; close: () => void } {
+/** A panel docked to the right of the editor (not modal: the sheet stays editable beside it). */
+function panel(title: string, sub: string): { box: HTMLDivElement; bar: HTMLDivElement; close: () => void } {
     document.getElementById('cprs-compiled')?.remove();
     const back = document.createElement('div');
     back.id = 'cprs-compiled';
-    back.style.cssText = 'position:fixed;inset:0;z-index:2000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35)';
+    back.style.cssText = 'position:fixed;top:0;right:0;bottom:0;z-index:1500;display:flex;pointer-events:none';
     const box = document.createElement('div');
-    box.setAttribute('role', 'dialog');
+    box.setAttribute('role', 'complementary');
     box.setAttribute('aria-label', title);
-    box.style.cssText = 'width:min(980px,94vw);height:min(720px,88vh);display:flex;flex-direction:column;border-radius:6px;font:13px system-ui,sans-serif;' +
-        'background:var(--vscode-editor-background,#fff);color:var(--vscode-foreground,#222);border:1px solid var(--vscode-panel-border,#ccc);box-shadow:0 8px 28px rgba(0,0,0,.35)';
+    box.style.cssText = 'pointer-events:auto;width:min(620px,48vw);height:100%;display:flex;flex-direction:column;font:13px system-ui,sans-serif;' +
+        'background:var(--vscode-editor-background,#fff);color:var(--vscode-foreground,#222);border-left:1px solid var(--vscode-panel-border,#ccc);box-shadow:-6px 0 22px rgba(0,0,0,.25)';
     const head = document.createElement('div');
     head.style.cssText = 'display:flex;align-items:center;gap:12px;padding:8px 12px;border-bottom:1px solid var(--vscode-panel-border,#ddd)';
     const h = document.createElement('b');
@@ -65,28 +66,29 @@ function modal(title: string, sub: string): { box: HTMLDivElement; bar: HTMLDivE
     box.append(head);
     back.append(box);
     document.body.append(back);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && box.contains(document.activeElement)) { e.stopPropagation(); close(); } };
     const close = () => { back.remove(); document.removeEventListener('keydown', onKey, true); };
     x.onclick = close;
-    back.onmousedown = (e) => { if (e.target === back) close(); };
     document.addEventListener('keydown', onKey, true);
     return { box, bar, close };
 }
 
-/** A read-only view of the Calcpad the active sheet compiles to; line numbers are the sheet's lines. */
+/**
+ * A read-only view of the Calcpad the active sheet compiles to, beside the editor. The line numbers are
+ * the sheet's lines, and the view follows the sheet as it is edited.
+ */
 export async function showCompiled(editor: monaco.editor.IStandaloneCodeEditor | null | undefined): Promise<void> {
     const model = editor?.getModel();
-    if (!model || !isSheetText(model.getValue())) {
-        const { box, close } = modal('Show compiled Calcpad', 'The active file is not a sheet.');
+    if (!editor || !model || !isSheetText(model.getValue())) {
+        const { box } = panel('Show compiled Calcpad', 'The active file is not a sheet.');
         const p = document.createElement('p');
         p.style.padding = '12px';
-        p.textContent = `A sheet starts with the line ${SHEET_MARKER}. Use File > New sheet to start one.`;
+        p.textContent = `A sheet starts with the line ${SHEET_MARKER}. Use File > New to start one.`;
         box.append(p);
-        void close;
         return;
     }
-    const c = await compileSheet(model.getValue(), true);
-    const { box, bar } = modal('Compiled Calcpad', 'Read only. The line numbers are the lines of your sheet.');
+    let c = await compileSheet(model.getValue(), true);
+    const { box, bar } = panel('Compiled Calcpad', 'Read only. Line numbers are your sheet\'s lines.');
     const holder = document.createElement('div');
     holder.style.cssText = 'flex:1;min-height:0';
     holder.setAttribute('data-testid', 'compiled-view');
@@ -111,9 +113,19 @@ export async function showCompiled(editor: monaco.editor.IStandaloneCodeEditor |
         lineNumbersMinChars: 4,
         wordWrap: 'on',
     });
-    // The dialog owns the editor: dispose it with the dialog.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const follow = model.onDidChangeContent(() => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            void compileSheet(model.getValue(), true).then((next) => {
+                c = next;
+                view.setValue(next.text);
+            });
+        }, 400);
+    });
+    // The panel owns the editor: dispose both with it.
     const obs = new MutationObserver(() => {
-        if (!document.body.contains(holder)) { view.dispose(); obs.disconnect(); }
+        if (!document.body.contains(holder)) { view.dispose(); follow.dispose(); clearTimeout(timer); obs.disconnect(); }
     });
     obs.observe(document.body, { childList: true });
 }

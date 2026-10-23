@@ -9,6 +9,36 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
+## [26.10.3] - 2026-10-23
+
+### Added
+- Sheet syntax, now the default way to start a worksheet: Markdown prose, `name: expression -> unit | note` lines,
+  LaTeX in prose (`$...$`, `$$...$$`, rendered with KaTeX, bundled and loaded on first use), vectors and matrices,
+  conditions, plots, indented `for` (with `step`), `while`, `repeat` and `if` / `else if` / `else` blocks with
+  `break` and `continue`, and `>>` lines and `calcpad` fences that pass raw Calcpad through. It compiles to the
+  Calcpad language and runs on the same engine, so units, vectors, plots and the Word and Excel exports work.
+  A sheet starts with `<!--sheet-->` or is a `.sheet` file. The compiler is a new crate (`calcpad-sheet`, not
+  published) in its own WebAssembly module (84 KB, 39 KB gzipped, loaded on first use). Grammar: docs/sheet-syntax.md.
+- Editor support for sheets: colours, name completions, Format Document, go to definition, find references, hover,
+  semantic highlighting of names; engine errors, report links and lint markers report the sheet line.
+- Show compiled Calcpad and Convert to Calcpad (Resources tab) for a sheet.
+- In a sheet the ribbon, the Text Formatting tab (Markdown bold, italic, headings, lists, links, code) and the
+  sidebar Insert tab insert the sheet form of each item; items with no sheet form insert raw Calcpad as `>>` lines
+  and are marked.
+- File > New and the quick-access New button open a new sheet (Ctrl+N too in the desktop app); New Calcpad worksheet opens the Calcpad
+  syntax. The first tab of a fresh start is a sheet that mentions both.
+- Eight sheet samples at the top of the Samples dialog, including sheet versions of the bundled beam deflection
+  and cantilever examples.
+- Changelog button on the Resources tab and a What's new link in About (GitHub, new tab).
+- Checks: `web/e2e/sheet-check.mjs` and `web/e2e/verify-ribbon-sheet.mjs` (every ribbon insert, in sheet form,
+  through the compiler and the engine).
+
+### Changed
+- The compiled Calcpad of a sheet reads as hand-written: headings are heading lines, a paragraph of plain text is
+  one text line, Markdown blocks are used only for prose that needs them (lists, tables, emphasis, links, code),
+  notes are plain comments in the compiled view (a style class in the page), and blank lines between sections
+  are kept.
+
 ## [26.10.2] - 2026-10-23
 
 ### Added
@@ -25,6 +55,10 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 - `calcpad-import-xmcd` (not published): the converter behind Import worksheet, with a batch runner that reports
   what converted over a folder of worksheets; mapping tables and limits are in docs/worksheet-import.md.
 - THIRD_PARTY_LICENSES.md lists the 16 additional Rust crates the importer pulls in (94 in the build graph).
+
+### Fixed
+- Relative `#include` paths resolve for a worksheet that has a source path (the Frames samples): the active sheet
+  is given a path in the editor's requests.
 
 ## [26.10.1] - 2026-10-22
 
