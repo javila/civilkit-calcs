@@ -654,3 +654,20 @@ fn a_name_exported_from_python_is_defined_for_the_lines_after_it() {
     assert!(c.text.contains("σ_c=2.0"), "{}", c.text);
     assert!(c.text.contains("σ_c"), "{}", c.text);
 }
+
+#[test]
+fn a_bare_python_block_in_a_sheet_is_a_python_block() {
+    let src = "<!--sheet-->\n#python\nphi = 3   # not sheet syntax: a | b\nexport(sigma_c=phi)\n#end python\nx: sigma_c * 2\n";
+    let c = compile(src);
+    assert!(c.text.contains("#python\nphi = 3   # not sheet syntax: a | b\nexport(σ_c=phi)\n#end python"), "{}", c.text);
+    assert!(!c.text.contains("#markdown"), "{}", c.text);
+    assert!(c.diagnostics.is_empty(), "{:?}", c.diagnostics);
+    assert_eq!(crate::format::format(src), src);
+}
+
+#[test]
+fn an_unclosed_bare_python_block_is_an_error_and_is_closed() {
+    let c = compile("<!--sheet-->\n#python\nx = 1\n");
+    assert!(c.text.trim_end().ends_with("#end python"), "{:?}", c.text);
+    assert!(!c.diagnostics.is_empty());
+}

@@ -86,12 +86,14 @@ pub fn format(src: &str) -> String {
     let raw: Vec<&str> = src.split('\n').map(|l| l.strip_suffix('\r').unwrap_or(l)).collect();
     let mut kinds: Vec<L> = Vec::new();
     let mut fence = false;
+    let mut hash_python = false;
     let mut math = false;
     for l in &raw {
         let t = l.trim();
         if fence {
-            if t.starts_with("```") {
+            if (hash_python && t.eq_ignore_ascii_case("#end python")) || (!hash_python && t.starts_with("```")) {
                 fence = false;
+                hash_python = false;
             }
             kinds.push(L::Other(l.trim_end().to_string()));
             continue;
@@ -100,6 +102,12 @@ pub fn format(src: &str) -> String {
             if t == "$$" {
                 math = false;
             }
+            kinds.push(L::Other(l.trim_end().to_string()));
+            continue;
+        }
+        if t.eq_ignore_ascii_case("#python") {
+            fence = true;
+            hash_python = true;
             kinds.push(L::Other(l.trim_end().to_string()));
             continue;
         }

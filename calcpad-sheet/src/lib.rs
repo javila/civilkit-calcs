@@ -124,7 +124,8 @@ struct Block {
 enum Fence {
     Calcpad,
     /// A ```python fence: its lines are the body of a `#python` block, indentation kept.
-    Python(usize, pyexport::ExportScan),
+    /// (indent to strip, export-name scan, opened by a bare `#python` line instead of a fence)
+    Python(usize, pyexport::ExportScan, bool),
     Code(usize),
 }
 
@@ -442,7 +443,10 @@ impl<'a> Comp<'a> {
                 }
             }
             if let Some(f) = &mut fence {
-                let closes = line.trim_start().starts_with("```");
+                let closes = match f {
+                    Fence::Python(_, _, true) => line.trim().eq_ignore_ascii_case("#end python"),
+                    _ => line.trim_start().starts_with("```"),
+                };
                 match f {
                     Fence::Calcpad => {
                         if closes {
@@ -454,7 +458,7 @@ impl<'a> Comp<'a> {
                             self.emit(r, idx);
                         }
                     }
-                    Fence::Python(strip, scan) => {
+                    Fence::Python(strip, scan, _) => {
                         self.mark(idx, LineKind::Raw);
                         if closes {
                             fence = None;
@@ -576,6 +580,14 @@ impl<'a> Comp<'a> {
             let body = format!("{}{}", " ".repeat(extra), content);
             let can_stmt = !self.stack.is_empty() || indent <= 3;
 
+            if content.trim().eq_ignore_ascii_case("#python") {
+                // Calcpad's own spelling of a Python block, as people paste it: the same block as a python fence.
+                self.flush_prose();
+                self.mark(idx, LineKind::Raw);
+                self.emit("#python", idx);
+                fence = Some(Fence::Python(strip, pyexport::ExportScan::default(), true));
+                continue;
+            }
             if content.starts_with("```") {
                 let info = content.trim_start_matches('`').trim();
                 if info.eq_ignore_ascii_case("calcpad") {
@@ -585,7 +597,7 @@ impl<'a> Comp<'a> {
                     self.flush_prose();
                     self.mark(idx, LineKind::Raw);
                     self.emit("#python", idx);
-                    fence = Some(Fence::Python(strip, pyexport::ExportScan::default()));
+                    fence = Some(Fence::Python(strip, pyexport::ExportScan::default(), false));
                 } else {
                     self.prose.push(Pl {
                         text: body,
@@ -634,9 +646,10 @@ impl<'a> Comp<'a> {
                 kind: PKind::Normal,
             });
         }
-        if let Some(Fence::Python(..)) = fence {
+        if let Some(Fence::Python(_, _, hash)) = fence {
             let last = lines.len().saturating_sub(1);
-            self.diag(last, Severity::Error, "the python fence is never closed with ```");
+            let msg = if hash { "the #python block is never closed with #end python" } else { "the python fence is never closed with ```" };
+            self.diag(last, Severity::Error, msg);
             self.emit("#end python", last);
         }
         if math.is_some() {
