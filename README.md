@@ -48,7 +48,7 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
 
 * **Engine:** the Rust engine, compiled to WebAssembly, replaces the .NET engine and the server it
   runs in. The page answers the server API itself (`web/calcpad-web/src/wasm/transport.ts`).
-  The engine wasm is 1.74 MB raw and 656 KB gzipped; it is built at opt-level `s`, which ran a heavy
+  The engine wasm is 1.73 MB raw and 656 KB gzipped; it is built at opt-level `s`, which ran a heavy
   `$Map` sheet 1.5 times faster than the size-optimised build.
 * **Editor services in a second wasm:** the highlighter, linter, prettifier, go-to-definition and
   the snippet library are a separate module (`calcpad-highlighter-wasm`, 351 KB gzipped) that loads

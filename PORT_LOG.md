@@ -275,3 +275,49 @@ pictures. `tools/xlsx_check.py` checks all 101 samples: 407 charts for 407 plot 
 XML child order, ranges and cached values against the data sheet, and LibreOffice prints
 every workbook that holds a chart. Not tested in Excel itself. Sizes: engine 1,871,455 bytes
 (651,073 gzipped), docx 1,735,197 bytes (687,035 gzipped).
+
+## Speeding up the heavy sheets (second profile)
+
+The heavy sheets spend their time in the interpreter, in the custom functions that `$Integral`
+and `$Map` evaluate millions of times, and in unit arithmetic. What was changed, all without
+changing any output (the 105 samples render byte for byte the same in vector mode, one that draws
+random numbers excepted):
+
+* The command line tool installs a small-block allocator (`calcpad_core::fast_alloc`):
+  per-thread free lists for blocks up to 512 bytes. The system allocator took about 40 % of the
+  run time of Soil Stress and Deformations. The library never installs it. In the browser build
+  it measured within 3 % of dlmalloc, so the wasm module keeps dlmalloc.
+* A unit is one allocation instead of about six: the powers and factors are stored in the unit
+  (at most nine dimensions), and the identity of the C# `_powers` array, which multiplication
+  and division test for, is an id that `copy` and `alias` inherit. Results of multiplication,
+  division and powers are written straight into their `Rc` block. A move of the 160 byte struct
+  and a zero fill were each a bulk-memory call in the wasm build (V8 does not inline those),
+  and together were a fifth of the time of the heavy sheet there.
+* The result cache of custom functions hashes its `u64` keys with a multiply instead of SipHash.
+* Constants and real operands are used by reference instead of being cloned.
+
+Instructions retired and cycles on Apple silicon (`/usr/bin/time -l`), which do not depend on
+how busy the machine is, unlike the clock (median of 3 runs, one run for Soil Stress):
+
+| sheet | before: instructions / cycles | now | original engine |
+|---|---|---|---|
+| Soil Stress and Deformations | 371 G / 146 G (72 s CPU) | 136 G / 69 G (33 s) | 141 G / 73 G (31 s) |
+| Rectangular Slab FEA | 51 G / 21 G (12.3 s) | 34 G / 14.5 G (8.3 s) | 33 G / 19 G (10.1 s) |
+| Flat Slab FEA | 49 G / 22 G (12.0 s) | 32 G / 16 G (8.8 s) | 37 G / 23 G (12.1 s) |
+| Deep Beam FEA | 7.1 G / 4.3 G | 6.0 G / 3.8 G | 18 G / 15 G |
+
+The browser build (renderer CPU time in Chromium, which includes about 2 s of code generation):
+Soil Stress 91 s became 55 s, Rectangular Slab FEA 15 s became 13.5 s, Flat Slab FEA 14.7 s became 13.2 s.
+
+The 25.9 s recorded above for Soil Stress was taken on a quiet machine. The sheet is 366 G
+instructions and 113 G cycles; a core at 3.2 GHz needs 35 s for that cycle count, so 26 s needs an
+IPC above 4 as well, which only an idle machine gives. On a busy one (load 50 to 200) the same binary
+took 57 to 75 s of CPU time: the cores ran at 1.6 to 2.0 GHz on average (cycles divided by CPU
+time). The engine did not get slower: the build of that commit and the current public line retire the
+same number of instructions (367.4 G and 366.5 G), and raster and vector mode do the same work (raster
+output is computed and then refused). Compare builds by instructions and cycles, not by seconds.
+
+Tried and dropped: an arena for the result cache (no change in instructions), wasm-opt levels
+`-O2`, `-O3` and `-Os` instead of `-Oz` (no change in speed, 20 KB more at `-O3`), the small-block
+allocator in the wasm module (3 % at best), and opt-level `s` for the native build (same
+instruction count as level 3, so the wasm slowdown is the browser's code generator, not the level).
