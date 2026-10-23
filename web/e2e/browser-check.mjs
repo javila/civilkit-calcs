@@ -637,6 +637,8 @@ for (const s of SAMPLES.filter((x) => x.upstream.includes(sampleFilter))) {
     await page.locator('.cprs-s-search').fill(s.title);
     await page.locator(`.cprs-s-item[data-sample-id="${s.id}"]`).click();
     await page.locator('.cprs-s-open').click();
+    // A Python sample asks before it runs (once per tab; a fresh untitled copy is a fresh tab).
+    if (s.python) await page.locator('#cprs-python-yes').click({ timeout: 20000 });
     let got = null;
     // Soil Stress and Deformations takes about a minute in WebAssembly, more on a busy machine.
     for (let i = 0; i < 750 && !got; i++) {
@@ -906,7 +908,7 @@ const subFailed = requests.filter((r) => r.url.includes('/calcs/') && r.url.ends
 check(subFailed > 0, 'under /calcs/ the engine is fetched from /calcs/wasm/');
 
 // ---- 3. no calculation request left the page ---------------------------------------------
-const STATIC = /^\/(calcs\/)?(|index\.html|samples\/.*|sheet-samples\/.*|assets\/.*|wasm\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
+const STATIC = /^\/(calcs\/)?(|index\.html|samples\/.*|sheet-samples\/.*|assets\/.*|wasm\/.*|py\/.*|fonts\/.*|report-fonts\/.*|ui-assets\/.*|icon\.png|favicon\.ico)$/;
 const remote = requests.filter((r) => !r.url.startsWith('data:') && !r.url.startsWith('blob:'));
 const api = remote.filter((r) => new URL(r.url).pathname.includes('/api/'));
 // Other origins: only the exact library files on the list (and the one added in the test).

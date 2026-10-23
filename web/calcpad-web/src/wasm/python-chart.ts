@@ -123,7 +123,7 @@ export function renderFigure(specText: string): string {
         const col = ax.index % ncols;
         parts.push(drawAxes(ax, col * cellW, top + row * cellH, cellW, cellH, `${uid}-${ax.index}`, single));
     }
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="cprs-py-figure" style="max-width:100%;height:auto" role="img">`
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="cprs-py-figure" style="max-width:100%;height:auto;box-sizing:border-box" role="img">`
         + `<rect width="${W}" height="${H}" fill="#fff"/>${parts.join('')}</svg>`;
 }
 

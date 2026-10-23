@@ -85,10 +85,15 @@ function load(base: string): Promise<Loaded> {
 /** Removes the ways a script could reach the network or storage if it ever got hold of the global object. */
 function lockDown(): void {
     const g = self as unknown as Record<string, unknown>;
-    for (const k of ['XMLHttpRequest', 'WebSocket', 'EventSource', 'importScripts', 'indexedDB', 'caches', 'BroadcastChannel',
-        'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection', 'navigator', 'crypto', 'localStorage', 'sessionStorage']) {
+    for (const k of ['XMLHttpRequest', 'WebSocket', 'EventSource', 'indexedDB', 'caches', 'BroadcastChannel',
+        'Worker', 'SharedWorker', 'WebTransport', 'RTCPeerConnection']) {
         try { Object.defineProperty(g, k, { configurable: true, writable: true, value: undefined }); } catch { /* not removable */ }
     }
+    // Emscripten's loader tells a worker from a shell by `typeof importScripts == "function"`, and a new interpreter starts
+    // for every calculation, so the name stays and the function refuses.
+    try {
+        Object.defineProperty(g, 'importScripts', { configurable: true, writable: true, value: () => { throw new Error('not available to a worksheet script'); } });
+    } catch { /* not replaceable */ }
 }
 
 async function start(msg: StartMsg): Promise<void> {

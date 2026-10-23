@@ -138,6 +138,32 @@ def loadtxt(fname, dtype=float, comments="#", delimiter=None, skiprows=0, **kw):
     return array(rows, dtype)
 
 
+def diff(a, n=1):
+    v = asarray(a).tolist()
+    if v and isinstance(v[0], list):
+        raise _ni("diff of a 2-D array")
+    for _ in range(n):
+        v = [v[i + 1] - v[i] for i in range(len(v) - 1)]
+    return array(v)
+
+
+def trapezoid(y, x=None, dx=1.0):
+    ys = asarray(y).tolist()
+    xs = asarray(x).tolist() if x is not None else [i * dx for i in range(len(ys))]
+    total = 0.0
+    for i in range(len(ys) - 1):
+        total += (xs[i + 1] - xs[i]) * (ys[i] + ys[i + 1]) / 2
+    return total
+
+
+trapz = trapezoid
+
+
+def eye(n, m=None, k=0, dtype=float):
+    m = n if m is None else m
+    return array([[1 if j - i == k else 0 for j in range(m)] for i in range(n)], dtype)
+
+
 # Names numpy has that this subset does not. Every public name this subset lacks raises NotImplementedError (see _route.py), listed here or not: the
 # real numpy decides, which also reports a genuine typo. The list is documentation of what is known to exist; private and dunder names stay AttributeError.
 _NOT_IMPLEMENTED = ("""

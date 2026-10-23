@@ -1,0 +1,24 @@
+"Centroid and second moment of area from numpy arrays
+'The parts of a built-up section are numpy arrays in a <b>#python</b> block: areas, centroid heights and the parallel axis theorem. The block exports the centroid <i>y_c</i> (mm) and <i>I_x</i> (mm^4); Calcpad then works out a bending stress.
+#python
+import numpy as np
+
+b = np.array([200.0, 12.0, 150.0])      # widths, mm
+h = np.array([16.0, 300.0, 20.0])       # heights, mm
+y = np.array([8.0, 166.0, 324.0])       # part centroids above the base, mm
+
+A = b * h
+y_c = float((A * y).sum() / A.sum())
+I_own = b * h**3 / 12
+I_x = float((I_own + A * (y - y_c)**2).sum())
+
+print("Areas (mm^2):", A.tolist())
+print("Centroid:", round(y_c, 2), "mm")
+print("Second moment of area:", round(I_x / 1e6, 2), "x 10^6 mm^4")
+export(y_c=y_c, I_x=I_x, A_tot=float(A.sum()))
+#end python
+"Bending stress
+M = 40kN*m
+y_t = 340mm - y_c*1mm
+I = I_x*1mm^4
+σ = M*y_t/I|MPa

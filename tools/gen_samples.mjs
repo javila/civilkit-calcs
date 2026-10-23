@@ -96,7 +96,7 @@ function plainMath(tex) {
         .replace(/[{}]/g, '');
 }
 
-const GROUP_ORDER = ['Beams', 'Reinforced Concrete', 'Steel', 'Loads', 'Frames', 'Dynamics', 'Nonlinear', 'Soil Mechanics', 'Maths & plotting'];
+const GROUP_ORDER = ['Beams', 'Reinforced Concrete', 'Steel', 'Loads', 'Frames', 'Dynamics', 'Nonlinear', 'Soil Mechanics', 'Maths & plotting', 'Python'];
 
 const cpdFiles = (dir) => readdirSync(dir).filter((f) => f.endsWith('.cpd')).map((f) => join(dir, f));
 const folders = [
@@ -309,6 +309,31 @@ for (const [top, folder] of folders) {
             ...(missing.length ? { missingAssets: missing } : {}),
         });
         notice.push(`- \`Examples/${rel}\``);
+    }
+}
+// Worksheets written for this app (tools/own_samples/<group>/), not copied from upstream. A sheet with a #python block
+// cannot be rendered by the engine alone (the page runs the block first), so it is not render-checked here;
+// e2e/python-check.mjs runs every one of them in the browser.
+const OWN = join(repo, 'tools', 'own_samples');
+const OWN_TITLES = {
+    'Beam moment diagram with matplotlib': ['Beam Moment Diagram with matplotlib', 'A #python block draws the moment diagram of a simply supported beam with numpy and matplotlib and exports the maximum moment; the Calcpad lines after it check that moment against a capacity.'],
+    'Function plot with matplotlib': ['Function Plot with matplotlib', 'A #python block plots a damped oscillation and a bar chart side by side with matplotlib and exports the peak value.'],
+    'Section properties from numpy arrays': ['Section Properties from numpy Arrays', 'numpy arrays in a #python block give the centroid and second moment of area of a built-up section; Calcpad uses them for a bending stress.'],
+};
+if (existsSync(OWN)) {
+    for (const folder of readdirSync(OWN).filter((d) => statSync(join(OWN, d)).isDirectory()).sort()) {
+        for (const [name, [title, desc]] of Object.entries(OWN_TITLES)) {
+            const src = join(OWN, folder, `${name}.cpd`);
+            if (!existsSync(src)) continue;
+            const text = readFileSync(src, 'utf8');
+            mkdirSync(join(out, folder), { recursive: true });
+            writeFileSync(join(out, folder, `${name}.cpd`), text);
+            samples.push({
+                id: `${folder}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                title, group: folder, folder, file: posix.join('samples', folder, `${name}.cpd`), upstream: `own/${folder}/${name}.cpd`,
+                description: desc, codes: [], ui: false, scripts: false, read: false, python: /^#python\s*$/mi.test(text), assets: [],
+            });
+        }
     }
 }
 const seen = new Map();
