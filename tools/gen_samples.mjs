@@ -318,6 +318,7 @@ const OWN = join(repo, 'tools', 'own_samples');
 const OWN_TITLES = {
     'Continuous beam explorer': ['Beam Explorer: Python Solve, Plotly Charts', 'A three-span beam solved in Python (stiffness matrix, numpy, matplotlib) for several load cases and a moving point load; the results drive an interactive Plotly chart with hover values, a load case menu and sliders, and a Calcpad design check.'],
     'Beam moment diagram with matplotlib': ['Beam Moment Diagram with matplotlib', 'A #python block draws the moment diagram of a simply supported beam with numpy and matplotlib and exports the maximum moment; the Calcpad lines after it check that moment against a capacity.'],
+    'Plane truss by the stiffness method': ['Plane Truss by the Stiffness Method', 'A statically determinate plane truss is assembled and solved in a #python block (global stiffness matrix in loops, np.linalg.solve), the member forces and reactions are recovered and drawn with matplotlib, and the Calcpad lines after the block check the governing members.'],
     'Function plot with matplotlib': ['Function Plot with matplotlib', 'A #python block plots a damped oscillation and a bar chart side by side with matplotlib and exports the peak value.'],
     'Built-up section properties': ['Built-up Section Properties', 'Vectors and hprod give the centroid and second moment of area of a built-up section with units carried through, and a bending stress follows.'],
 };

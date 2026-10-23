@@ -22,6 +22,7 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
   (about 46 by 46 and up) go to the engine as well, with identical values and about 7 times faster.
   Solving a 120 by 120 system takes 87 ms instead of 1.5 s in a hand-written Python loop. docs/python-blocks.md.
 - `tools/build_wasm.sh linalg` builds the new module.
+- A "Plane Truss by the Stiffness Method" sample in the Python group: a statically determinate truss assembled in loops and solved with `np.linalg.solve`, member forces and reactions recovered and drawn with matplotlib (tension and compression coloured, deflected shape), and a Calcpad member check on the exported maxima. `web/e2e/python-check.mjs` checks its member forces, reactions and deflections against hand values (method of joints, virtual work), and now also covers a bare `#python` block in a sheet, exported names with an underscore or a capital in a sheet, the section properties calculation, and the Sections group in the Samples browser.
 
 ### Changed
 - The "Section Properties from numpy Arrays" sample is now "Built-up Section Properties" in a new Sections group, written with vectors and `hprod` and no Python: the units carry through and the report shows every substitution. The Python group keeps the samples where Python is the better tool.

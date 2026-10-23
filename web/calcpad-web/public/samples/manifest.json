@@ -2138,6 +2138,21 @@
    "read": false,
    "python": true,
    "assets": []
+  },
+  {
+   "id": "python-plane-truss-by-the-stiffness-method",
+   "title": "Plane Truss by the Stiffness Method",
+   "group": "Python",
+   "folder": "Python",
+   "file": "samples/Python/Plane truss by the stiffness method.cpd",
+   "upstream": "own/Python/Plane truss by the stiffness method.cpd",
+   "description": "A statically determinate plane truss is assembled and solved in a #python block (global stiffness matrix in loops, np.linalg.solve), the member forces and reactions are recovered and drawn with matplotlib, and the Calcpad lines after the block check the governing members.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "python": true,
+   "assets": []
   }
  ]
 }
