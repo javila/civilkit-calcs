@@ -5,8 +5,11 @@
 //! The grammar is documented in docs/sheet-syntax.md.
 
 pub mod expr;
+mod format;
 mod names;
 mod tex;
+
+pub use format::format;
 
 use std::collections::HashSet;
 
@@ -42,6 +45,18 @@ pub struct Def {
     pub line: usize,
 }
 
+/// What a line of the sheet is, for the editor (which lines are code, which are prose).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineKind {
+    Blank,
+    Prose,
+    Quantity,
+    Block,
+    Raw,
+    Plot,
+    Condition,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     /// Write formulas as italic TeX source instead of placeholders (for a Calcpad file that
@@ -59,6 +74,8 @@ pub struct Compiled {
     /// True when the output carries formula placeholders.
     pub uses_latex: bool,
     pub defs: Vec<Def>,
+    /// The kind of each sheet line (0 based).
+    pub kinds: Vec<LineKind>,
 }
 
 pub fn compile(src: &str) -> Compiled {
@@ -83,6 +100,7 @@ pub fn compile_with(src: &str, opts: &Options) -> Compiled {
         diagnostics: c.diags,
         uses_latex: c.latex,
         defs: c.defs,
+        kinds: c.kinds,
     }
 }
 
@@ -107,6 +125,21 @@ enum Fence {
     Code(usize),
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum PKind {
+    Normal,
+    Code,
+    Display,
+    Blank,
+}
+
+/// A line of prose waiting to be written.
+struct Pl {
+    text: String,
+    idx: usize,
+    kind: PKind,
+}
+
 struct Stmt {
     sheet: String,
     calcpad: String,
@@ -122,13 +155,14 @@ struct Comp<'a> {
     out: Vec<String>,
     map: Vec<usize>,
     diags: Vec<Diagnostic>,
-    prose: Vec<(String, usize)>,
+    prose: Vec<Pl>,
+    /// A blank sheet line seen since the last output line: written as a blank line before the next one.
+    pending_blank: Option<usize>,
+    kinds: Vec<LineKind>,
     latex: bool,
     stack: Vec<Block>,
     seq: usize,
 }
-
-const NOTE_STYLE: &str = "color:#6b7280;font-style:italic;margin-left:.6em";
 
 /// Leading whitespace: (width with a tab as 4, mixed tabs and spaces, byte length).
 fn leading(line: &str) -> (usize, bool, usize) {
@@ -161,6 +195,8 @@ impl<'a> Comp<'a> {
             map: Vec::new(),
             diags: Vec::new(),
             prose: Vec::new(),
+            pending_blank: None,
+            kinds: Vec::new(),
             latex: false,
             stack: Vec::new(),
             seq: 0,
@@ -183,24 +219,140 @@ impl<'a> Comp<'a> {
     }
 
     fn emit(&mut self, s: impl Into<String>, line: usize) {
+        if let Some(b) = self.pending_blank.take() {
+            if !self.out.is_empty() && self.out.last().is_some_and(|l| !l.is_empty()) {
+                self.out.push(String::new());
+                self.map.push(b);
+            }
+        }
         self.out.push(s.into());
         self.map.push(line);
     }
 
-    fn flush_prose(&mut self) {
-        while self.prose.last().is_some_and(|(s, _)| s.trim().is_empty()) {
-            self.prose.pop();
+    fn mark(&mut self, line: usize, kind: LineKind) {
+        if let Some(k) = self.kinds.get_mut(line) {
+            *k = kind;
         }
-        let start = self.prose.iter().position(|(s, _)| !s.trim().is_empty());
-        let Some(start) = start else {
-            self.prose.clear();
+    }
+
+    /// Writes the waiting prose as a person would write it in Calcpad: a heading as a heading line,
+    /// a paragraph of plain text as one text line, and Markdown (lists, tables, emphasis, links,
+    /// code) in `#markdown` blocks, which the engine renders.
+    fn flush_prose(&mut self) {
+        let lines = std::mem::take(&mut self.prose);
+        let mut trailing = None;
+        type Para = (PKind, Vec<(String, usize)>, Option<usize>);
+        let mut paras: Vec<Para> = Vec::new();
+        let mut open = false;
+        let mut blank_before: Option<usize> = None;
+        for l in lines {
+            match l.kind {
+                PKind::Blank => {
+                    open = false;
+                    trailing = Some(l.idx);
+                    blank_before = Some(l.idx);
+                    continue;
+                }
+                PKind::Display => {
+                    paras.push((PKind::Display, vec![(l.text, l.idx)], blank_before.take()));
+                    open = false;
+                }
+                PKind::Code => {
+                    match paras.last_mut() {
+                        Some((PKind::Code, v, _)) if open => v.push((l.text, l.idx)),
+                        _ => paras.push((PKind::Code, vec![(l.text, l.idx)], blank_before.take())),
+                    }
+                    open = true;
+                }
+                PKind::Normal => {
+                    // A heading is a paragraph of its own, whatever surrounds it.
+                    let is_heading = heading(&l.text).is_some();
+                    match paras.last_mut() {
+                        Some((PKind::Normal, v, _)) if open && !is_heading => v.push((l.text, l.idx)),
+                        _ => paras.push((PKind::Normal, vec![(l.text, l.idx)], blank_before.take())),
+                    }
+                    open = !is_heading;
+                }
+            }
+            trailing = None;
+        }
+        let plain_tex = self.opts.plain_tex;
+        let mut md: Vec<(String, usize)> = Vec::new();
+        let mut first = true;
+        for (kind, ls, blank) in paras {
+            let at = ls[0].1;
+            let gap = blank.unwrap_or(at);
+            // Plain output for this paragraph, if it has one.
+            let mut plain: Option<Vec<String>> = None;
+            match kind {
+                PKind::Display => {
+                    let mut used = false;
+                    let t = ls[0].0.clone();
+                    plain = Some(vec![format!("'{}", tex::block(&t, plain_tex))]);
+                    let _ = &mut used;
+                    self.latex = self.latex || !plain_tex;
+                }
+                PKind::Normal => {
+                    if let Some((level, text)) = heading(&ls[0].0).filter(|_| ls.len() == 1) {
+                        if !needs_md(&tex::mask(text)) {
+                            let h = tex::inline(text, plain_tex, false, false, &mut self.latex);
+                            plain = Some(vec![if level == 3 {
+                                format!("\"{h}")
+                            } else {
+                                format!("'<h{level}>{h}</h{level}>")
+                            }]);
+                        }
+                    } else if ls.iter().all(|(t, _)| !needs_md(&tex::mask(t))) {
+                        let joined = ls.iter().map(|(t, _)| t.trim()).collect::<Vec<_>>().join(" ");
+                        let h = tex::inline(&joined, plain_tex, false, false, &mut self.latex);
+                        plain = Some(vec![format!("'{h}")]);
+                    }
+                }
+                PKind::Code | PKind::Blank => {}
+            }
+            match plain {
+                Some(out) => {
+                    self.flush_md(&mut md);
+                    if !first && blank.is_some() {
+                        self.pending_blank = blank;
+                    }
+                    for o in out {
+                        self.emit(o, at);
+                    }
+                }
+                None => {
+                    if !md.is_empty() {
+                        md.push((String::new(), gap));
+                    } else if !first && blank.is_some() {
+                        self.pending_blank = blank;
+                    }
+                    for (t, i) in ls {
+                        let t = if kind == PKind::Code {
+                            t
+                        } else {
+                            tex::inline(&t, plain_tex, false, true, &mut self.latex)
+                        };
+                        md.push((t, i));
+                    }
+                }
+            }
+            first = false;
+        }
+        self.flush_md(&mut md);
+        if !first {
+            self.pending_blank = trailing;
+        }
+    }
+
+    fn flush_md(&mut self, md: &mut Vec<(String, usize)>) {
+        if md.is_empty() {
             return;
-        };
-        let lines: Vec<(String, usize)> = self.prose.drain(..).skip(start).collect();
-        let (first, last) = (lines[0].1, lines[lines.len() - 1].1);
+        }
+        let first = md[0].1;
+        let last = md[md.len() - 1].1;
         self.emit("#markdown", first);
-        for (s, l) in lines {
-            self.emit(s, l);
+        for (t, i) in md.drain(..) {
+            self.emit(t, i);
         }
         self.emit("#end markdown", last);
     }
@@ -257,6 +409,7 @@ impl<'a> Comp<'a> {
     fn close(&mut self) {
         let b = self.stack.pop().unwrap();
         self.flush_prose();
+        self.pending_blank = None;
         if !b.had_body {
             self.diag(
                 b.header_line,
@@ -268,11 +421,12 @@ impl<'a> Comp<'a> {
     }
 
     fn text_line(&mut self, s: &str) -> String {
-        let h = tex::inline(s, self.opts.plain_tex, true, &mut self.latex);
+        let h = tex::inline(s, self.opts.plain_tex, true, false, &mut self.latex);
         format!("'{h}")
     }
 
     fn run(&mut self, lines: &[&str]) {
+        self.kinds = vec![LineKind::Blank; lines.len()];
         let mut fence: Option<Fence> = None;
         let mut math: Option<(Vec<String>, usize)> = None;
         let mut marker_seen = false;
@@ -293,6 +447,7 @@ impl<'a> Comp<'a> {
                         } else {
                             self.raw_defs(line);
                             let r = self.raw(line.trim_start_matches([' ', '\t']));
+                            self.mark(idx, LineKind::Raw);
                             self.emit(r, idx);
                         }
                     }
@@ -300,7 +455,11 @@ impl<'a> Comp<'a> {
                         let (w, _, n) = leading(line);
                         let extra = w.saturating_sub(*strip);
                         let s = format!("{}{}", " ".repeat(extra), line[n..].trim_end());
-                        self.prose.push((s, idx));
+                        self.prose.push(Pl {
+                            text: s,
+                            idx,
+                            kind: PKind::Code,
+                        });
                         if closes {
                             fence = None;
                         }
@@ -322,7 +481,13 @@ impl<'a> Comp<'a> {
             let trimmed = line.trim();
             if trimmed.is_empty() {
                 if !self.prose.is_empty() {
-                    self.prose.push((String::new(), idx));
+                    self.prose.push(Pl {
+                        text: String::new(),
+                        idx,
+                        kind: PKind::Blank,
+                    });
+                } else if !self.out.is_empty() {
+                    self.pending_blank = Some(idx);
                 }
                 continue;
             }
@@ -357,6 +522,7 @@ impl<'a> Comp<'a> {
                 {
                     let h = content_t[..content_t.len() - 1].trim_end();
                     self.flush_prose();
+                    self.pending_blank = None;
                     if h == "else" {
                         self.emit("#else", idx);
                     } else {
@@ -369,6 +535,7 @@ impl<'a> Comp<'a> {
                             }
                         }
                     }
+                    self.mark(idx, LineKind::Block);
                     let t = self.stack.last_mut().unwrap();
                     t.body_indent = None;
                     t.had_body = false;
@@ -400,7 +567,11 @@ impl<'a> Comp<'a> {
                     self.flush_prose();
                     fence = Some(Fence::Calcpad);
                 } else {
-                    self.prose.push((body, idx));
+                    self.prose.push(Pl {
+                        text: body,
+                        idx,
+                        kind: PKind::Code,
+                    });
                     fence = Some(Fence::Code(strip));
                 }
                 continue;
@@ -410,6 +581,7 @@ impl<'a> Comp<'a> {
                 let rest = rest.strip_prefix(' ').unwrap_or(rest);
                 self.raw_defs(rest);
                 let r = self.raw(rest);
+                self.mark(idx, LineKind::Raw);
                 self.emit(r, idx);
                 continue;
             }
@@ -435,8 +607,12 @@ impl<'a> Comp<'a> {
                 Some(r) => format!("{}{}", " ".repeat(extra), r),
                 None => body,
             };
-            let text = tex::inline(&text, self.opts.plain_tex, false, &mut self.latex);
-            self.prose.push((text, idx));
+            self.mark(idx, LineKind::Prose);
+            self.prose.push(Pl {
+                text,
+                idx,
+                kind: PKind::Normal,
+            });
         }
         if math.is_some() {
             let (buf, start) = math.take().unwrap();
@@ -454,10 +630,12 @@ impl<'a> Comp<'a> {
     }
 
     fn display(&mut self, t: &str, line: usize) {
-        self.latex = self.latex || !self.opts.plain_tex;
-        self.prose.push((String::new(), line));
-        self.prose.push((tex::block(t, self.opts.plain_tex), line));
-        self.prose.push((String::new(), line));
+        self.mark(line, LineKind::Prose);
+        self.prose.push(Pl {
+            text: t.to_string(),
+            idx: line,
+            kind: PKind::Display,
+        });
     }
 
     /// Reads a line that starts a block, is a one line conditional, a plot or a list of
@@ -467,6 +645,7 @@ impl<'a> Comp<'a> {
             let head = head.trim_end();
             if let Some(b) = self.header(head, idx, indent) {
                 self.flush_prose();
+                self.mark(idx, LineKind::Block);
                 self.stack.push(b);
                 return true;
             }
@@ -480,13 +659,35 @@ impl<'a> Comp<'a> {
             }
             return false;
         }
+        if content == "break" || content == "continue" {
+            if self.stack.iter().any(|b| b.kind != Kind::If) {
+                self.flush_prose();
+                self.emit(format!("#{content}"), idx);
+                return true;
+            }
+            self.diag(
+                idx,
+                Severity::Warning,
+                format!("'{content}' outside a loop; read as text"),
+            );
+            return false;
+        }
         if content.starts_with("if ") && self.one_line_if(content, idx) {
+            self.mark(idx, LineKind::Condition);
             return true;
         }
         if let Some(p) = content.strip_prefix("plot ") {
-            return self.plot(p, idx);
+            let ok = self.plot(p, idx);
+            if ok {
+                self.mark(idx, LineKind::Plot);
+            }
+            return ok;
         }
-        self.quantities(content, idx)
+        let ok = self.quantities(content, idx);
+        if ok {
+            self.mark(idx, LineKind::Quantity);
+        }
+        ok
     }
 
     fn header(&mut self, head: &str, idx: usize, indent: usize) -> Option<Block> {
@@ -519,6 +720,10 @@ impl<'a> Comp<'a> {
             let p = c.find(" in ")?;
             let var = c[..p].trim();
             let range = c[p + 4..].trim();
+            let (range, step) = match range.rfind(" step ") {
+                Some(q) => (range[..q].trim(), Some(range[q + 6..].trim())),
+                None => (range, None),
+            };
             if !names::is_name(var) {
                 return None;
             }
@@ -532,8 +737,26 @@ impl<'a> Comp<'a> {
                 let a = expr::translate(&range[..d], &self.ctx(false)).ok()?;
                 let b = expr::translate(&range[d + 2..], &self.ctx(false)).ok()?;
                 self.flush_prose();
-                self.emit(format!("#for {v} = {a} : {b}"), idx);
+                match step {
+                    None => self.emit(format!("#for {v} = {a} : {b}"), idx),
+                    Some(st) => {
+                        // The engine's #for has no step: count the steps and compute the value.
+                        let st = expr::translate(st, &self.ctx(false)).ok()?;
+                        self.seq += 1;
+                        let n = self.seq;
+                        self.emit(
+                            format!("#for loopi{n} = 1 : floor(({b} - {a})/({st}) + 0.000000001) + 1"),
+                            idx,
+                        );
+                        self.emit("#hide", idx);
+                        self.emit(format!("{v} = {a} + (loopi{n} - 1)*({st})"), idx);
+                        self.emit("#show", idx);
+                    }
+                }
             } else {
+                if step.is_some() {
+                    return None;
+                }
                 let seq = expr::translate(range, &self.ctx(false)).ok()?;
                 self.seq += 1;
                 let n = self.seq;
@@ -609,6 +832,9 @@ impl<'a> Comp<'a> {
 
     /// The output lines of one branch: a quoted text or quantities. `commit` records the names.
     fn action(&mut self, a: &str, commit: bool) -> Option<Vec<String>> {
+        if a == "break" || a == "continue" {
+            return Some(vec![format!("#{a}")]);
+        }
         if a.len() >= 2 && a.starts_with('"') && a.ends_with('"') && !a[1..a.len() - 1].contains('"') {
             let t = if commit {
                 self.text_line(&a[1..a.len() - 1])
@@ -718,10 +944,13 @@ impl<'a> Comp<'a> {
             let mut text = stmt_text(s);
             if i + 1 == n {
                 if let Some(nt) = &note {
-                    let h = tex::inline(nt, self.opts.plain_tex, true, &mut self.latex);
-                    text.push_str(&format!(
-                        " '<span class=\"sheet-note\" style=\"{NOTE_STYLE}\">{h}</span>"
-                    ));
+                    let h = tex::inline(nt, self.opts.plain_tex, true, false, &mut self.latex);
+                    // Plain Calcpad gets a plain comment; the page styles the class (SHEET_CSS in sheet.ts).
+                    if self.opts.plain_tex {
+                        text.push_str(&format!(" '{h}"));
+                    } else {
+                        text.push_str(&format!(" '<span class=\"sheet-note\">{h}</span>"));
+                    }
                 }
             }
             self.emit(text, idx);
@@ -732,39 +961,7 @@ impl<'a> Comp<'a> {
     /// `name: expression [-> unit]` or `name = expression`, several separated by `;`, then
     /// an optional `| note`. None if any part is not one.
     fn parse_quantities(&self, content: &str, allow_note: bool) -> Option<(Vec<Stmt>, Option<String>)> {
-        let top = expr::top_level(content);
-        let mut main = content;
-        let mut note = None;
-        if allow_note {
-            let cs: Vec<(usize, char)> = top.clone();
-            for (k, &(p, c)) in cs.iter().enumerate() {
-                if c == '|' {
-                    let dbl = cs.get(k + 1).is_some_and(|&(q, d)| d == '|' && q == p + 1)
-                        || (k > 0 && cs[k - 1].1 == '|' && cs[k - 1].0 + 1 == p);
-                    if !dbl {
-                        main = &content[..p];
-                        let n = content[p + 1..].trim();
-                        if !n.is_empty() {
-                            note = Some(n.to_string());
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        let mtop = expr::top_level(main);
-        let mut parts = Vec::new();
-        let mut start = 0;
-        for &(p, c) in &mtop {
-            if c == ';' {
-                parts.push(&main[start..p]);
-                start = p + 1;
-            }
-        }
-        parts.push(&main[start..]);
-        if parts.last().is_some_and(|p| p.trim().is_empty()) && parts.len() > 1 {
-            parts.pop();
-        }
+        let (parts, note) = split_line(content, allow_note);
         let mut out = Vec::new();
         for part in parts {
             out.push(self.parse_stmt(part.trim())?);
@@ -840,6 +1037,116 @@ impl<'a> Comp<'a> {
             unit,
         })
     }
+}
+
+/// A quantity line split into its statements (on `;` outside brackets) and its `| note`
+/// (the first single `|`; `||` is the logical or).
+pub(crate) fn split_line(content: &str, allow_note: bool) -> (Vec<&str>, Option<String>) {
+    let top = expr::top_level(content);
+    let mut main = content;
+    let mut note = None;
+    if allow_note {
+        for (k, &(p, c)) in top.iter().enumerate() {
+            if c == '|' {
+                let dbl = top.get(k + 1).is_some_and(|&(q, d)| d == '|' && q == p + 1)
+                    || (k > 0 && top[k - 1].1 == '|' && top[k - 1].0 + 1 == p);
+                if !dbl {
+                    main = &content[..p];
+                    let n = content[p + 1..].trim();
+                    if !n.is_empty() {
+                        note = Some(n.to_string());
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    let mut parts = Vec::new();
+    let mut start = 0;
+    for &(p, c) in &expr::top_level(main) {
+        if c == ';' {
+            parts.push(&main[start..p]);
+            start = p + 1;
+        }
+    }
+    parts.push(&main[start..]);
+    if parts.last().is_some_and(|p| p.trim().is_empty()) && parts.len() > 1 {
+        parts.pop();
+    }
+    (parts, note)
+}
+
+/// True if `content` is a line of quantities (the same test the compiler applies).
+pub(crate) fn is_quantity_line(content: &str) -> bool {
+    let none = HashSet::new();
+    let o = Options::default();
+    Comp::new(&o, &none).parse_quantities(content, true).is_some()
+}
+
+/// The first top-level `:` or `=` of a statement (not part of a comparison), as a byte position.
+pub(crate) fn find_sep(s: &str) -> Option<usize> {
+    for &(p, c) in &expr::top_level(s) {
+        if c == ':' {
+            return Some(p);
+        }
+        if c == '=' {
+            let prev = s[..p].chars().last();
+            let next = s[p + 1..].chars().next();
+            if matches!(prev, Some('<' | '>' | '!' | '=')) || next == Some('=') {
+                return None;
+            }
+            return Some(p);
+        }
+    }
+    None
+}
+
+/// `# text` to `###### text`: the level and the text.
+fn heading(line: &str) -> Option<(usize, &str)> {
+    let t = line.trim_start();
+    let n = t.chars().take_while(|c| *c == '#').count();
+    if (1..=6).contains(&n) && t[n..].starts_with(' ') {
+        Some((n, t[n..].trim()))
+    } else {
+        None
+    }
+}
+
+/// True if a line of prose has Markdown in it that only the Markdown renderer can write: lists,
+/// quotes, tables, emphasis, code, links, backslashes and the like.
+fn needs_md(l: &str) -> bool {
+    let t = l.trim_start();
+    if t.starts_with(['-', '+', '>', '|', '#']) {
+        return true;
+    }
+    let digits = t.chars().take_while(char::is_ascii_digit).count();
+    if digits > 0 && t[digits..].starts_with(['.', ')']) {
+        return true;
+    }
+    if l.ends_with("  ")
+        || l.contains("==")
+        || l.contains("++")
+        || l.contains("http://")
+        || l.contains("https://")
+        || l.contains("www.")
+    {
+        return true;
+    }
+    let cs: Vec<char> = l.chars().collect();
+    for (i, &c) in cs.iter().enumerate() {
+        match c {
+            '*' | '`' | '[' | '\\' | '~' | '^' => return true,
+            '_' => {
+                let before = i == 0 || cs[i - 1].is_whitespace();
+                let after = i + 1 >= cs.len() || cs[i + 1].is_whitespace();
+                if before || after {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn rhs_all_pos(_s: &str, from: usize, q: usize) -> bool {

@@ -1,7 +1,7 @@
 //! WebAssembly binding of the sheet syntax compiler (civilkit-calcs-sheet). One function does
 //! the work: `compile` answers a JSON string, so the boundary stays a single call.
 
-use calcpad_sheet::{compile_with, is_sheet as is_sheet_text, Options, Severity};
+use calcpad_sheet::{compile_with, format as format_sheet, is_sheet as is_sheet_text, LineKind, Options, Severity};
 use wasm_bindgen::prelude::*;
 
 fn quote(s: &str, out: &mut String) {
@@ -20,7 +20,7 @@ fn quote(s: &str, out: &mut String) {
     out.push('"');
 }
 
-/// The compiled worksheet as JSON: `{ text, map, diagnostics, latex, defs }`. Lines are 0 based.
+/// The compiled worksheet as JSON: `{ text, map, diagnostics, latex, defs, kinds }`. Lines are 0 based.
 /// With `plain_tex` formulas are written as italic TeX source instead of placeholders.
 pub fn compile_json(src: &str, plain_tex: bool) -> String {
     let c = compile_with(src, &Options { plain_tex });
@@ -56,13 +56,32 @@ pub fn compile_json(src: &str, plain_tex: bool) -> String {
         quote(&d.calcpad, &mut o);
         o.push_str(&format!(",\"line\":{}}}", d.line));
     }
-    o.push_str("]}");
+    o.push_str("],\"kinds\":\"");
+    // One letter per sheet line: b blank, p prose, q quantity, k block, r raw, g plot, c condition.
+    for k in &c.kinds {
+        o.push(match k {
+            LineKind::Blank => 'b',
+            LineKind::Prose => 'p',
+            LineKind::Quantity => 'q',
+            LineKind::Block => 'k',
+            LineKind::Raw => 'r',
+            LineKind::Plot => 'g',
+            LineKind::Condition => 'c',
+        });
+    }
+    o.push_str("\"}");
     o
 }
 
 #[wasm_bindgen]
 pub fn compile(src: &str, plain_tex: bool) -> String {
     compile_json(src, plain_tex)
+}
+
+/// The sheet, prettified (docs/sheet-syntax.md).
+#[wasm_bindgen]
+pub fn format(src: &str) -> String {
+    format_sheet(src)
 }
 
 #[wasm_bindgen]

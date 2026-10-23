@@ -20,11 +20,15 @@ pub fn escape_html(s: &str) -> String {
 }
 
 /// The placeholder for one formula. `plain` writes the TeX source as italic text instead
-/// (for a Calcpad file that has to read without the page).
-pub fn span(tex: &str, display: bool, plain: bool) -> String {
+/// (for a Calcpad file that has to read without the page). `md` says the text goes through the
+/// Markdown pass, which would touch readable TeX, so the source is written as character references.
+pub fn span(tex: &str, display: bool, plain: bool, md: bool) -> String {
     let tex = tex.trim();
     if plain {
-        return format!("<span class=\"sheet-tex-src\"><i>{}</i></span>", encode(tex));
+        if md {
+            return format!("<span class=\"sheet-tex-src\"><i>{}</i></span>", encode(tex));
+        }
+        return format!("<i>{}</i>", escape_html(tex));
     }
     format!(
         "<span class=\"sheet-tex\"{} data-tex=\"{}\"></span>",
@@ -37,7 +41,7 @@ pub fn span(tex: &str, display: bool, plain: bool) -> String {
 pub fn block(tex: &str, plain: bool) -> String {
     let tex = tex.trim();
     if plain {
-        return format!("<p class=\"sheet-tex-src\"><i>{}</i></p>", encode(tex));
+        return format!("<p><i>{}</i></p>", escape_html(tex));
     }
     format!(
         "<div class=\"sheet-tex\" data-display=\"1\" data-tex=\"{}\"></div>",
@@ -47,7 +51,17 @@ pub fn block(tex: &str, plain: bool) -> String {
 
 /// Replaces the formulas of a line of prose. Code spans and `\$` are left alone. Sets `used`
 /// when a formula was found.
-pub fn inline(line: &str, plain: bool, esc: bool, used: &mut bool) -> String {
+pub fn inline(line: &str, plain: bool, esc: bool, md: bool, used: &mut bool) -> String {
+    inline_with(line, esc, used, &|tex, display| span(tex, display, plain, md))
+}
+
+/// The line with every formula replaced by a letter, for asking what else the line contains.
+pub fn mask(line: &str) -> String {
+    let mut used = false;
+    inline_with(line, false, &mut used, &|_, _| "x".to_string())
+}
+
+fn inline_with(line: &str, esc: bool, used: &mut bool, make: &dyn Fn(&str, bool) -> String) -> String {
     let cs: Vec<char> = line.chars().collect();
     let mut out = String::new();
     let mut i = 0;
@@ -93,7 +107,7 @@ pub fn inline(line: &str, plain: bool, esc: bool, used: &mut bool) -> String {
             if cs.get(i + 1) == Some(&'$') {
                 if let Some(end) = find(&cs, i + 2, true) {
                     let tex: String = cs[i + 2..end].iter().collect();
-                    out.push_str(&span(&tex, true, plain));
+                    out.push_str(&make(&tex, true));
                     *used = true;
                     i = end + 2;
                     continue;
@@ -101,7 +115,7 @@ pub fn inline(line: &str, plain: bool, esc: bool, used: &mut bool) -> String {
             } else if cs.get(i + 1).is_some_and(|n| !n.is_whitespace()) {
                 if let Some(end) = find(&cs, i + 1, false) {
                     let tex: String = cs[i + 1..end].iter().collect();
-                    out.push_str(&span(&tex, false, plain));
+                    out.push_str(&make(&tex, false));
                     *used = true;
                     i = end + 1;
                     continue;
@@ -152,9 +166,9 @@ mod tests {
     #[test]
     fn finds_formulas() {
         let mut used = false;
-        let s = inline("the cost is $5 and $6.", false, false, &mut used);
+        let s = inline("the cost is $5 and $6.", false, false, false, &mut used);
         assert!(!used && s == "the cost is $5 and $6.");
-        let s = inline("here $x_1$ is a span and `$y$` is code", false, false, &mut used);
+        let s = inline("here $x_1$ is a span and `$y$` is code", false, false, false, &mut used);
         assert!(used);
         assert!(s.contains("data-tex=\"x&#95;1\""));
         assert!(s.contains("`$y$`"));
@@ -163,7 +177,7 @@ mod tests {
     #[test]
     fn display_spans() {
         let mut used = false;
-        let s = inline("so $$a^2$$ holds", false, false, &mut used);
+        let s = inline("so $$a^2$$ holds", false, false, false, &mut used);
         assert!(s.contains("data-display=\"1\"") && s.contains("a&#94;2"));
     }
 }

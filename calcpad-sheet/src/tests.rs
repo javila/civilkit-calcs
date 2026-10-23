@@ -120,9 +120,10 @@ fn latex_sample() {
     assert!(html.contains("class=\"sheet-tex\""));
     // 54e6 N.mm x 150 mm / 8.5e7 mm4 = 95.29 MPa.
     assert!(text(&html).contains("= 95.29 MPa"));
-    assert!(compile_with(&sample("LaTeX prose"), &Options { plain_tex: true })
-        .text
-        .contains("sheet-tex-src"));
+    // Plain Calcpad (Show compiled, Convert, Word and Excel): the TeX source in italics, readable.
+    let plain = compile_with(&sample("LaTeX prose"), &Options { plain_tex: true }).text;
+    assert!(plain.contains("<i>\\sigma = \\frac{M\\,y}{I}</i>"), "{plain}");
+    assert!(!plain.contains("&#"), "no character references in plain output");
 }
 
 #[test]
@@ -188,13 +189,136 @@ fn names_typeset() {
 #[test]
 fn prose_stays_prose() {
     let c = compile("# Title\n\nNote: see the drawing below.\nThe load is 5 kN applied here.\n\n- a: item\n");
-    assert_eq!(lines(&c)[0], "#markdown");
-    assert!(c.text.contains("Note: see the drawing below."));
-    assert!(!c.text.contains(" = "));
-    assert_eq!(*lines(&c).last().unwrap(), "#end markdown");
+    // A heading and a plain paragraph are written as a person would; the list needs Markdown.
+    assert_eq!(
+        lines(&c),
+        [
+            "'<h1>Title</h1>",
+            "",
+            "'Note: see the drawing below. The load is 5 kN applied here.",
+            "",
+            "#markdown",
+            "- a: item",
+            "#end markdown"
+        ]
+    );
+    assert_eq!(c.map, vec![0, 1, 2, 4, 5, 5, 5]);
     // A backslash forces text.
     let c = compile("\\fy: 300 MPa");
-    assert!(c.text.contains("\nfy: 300 MPa\n"));
+    assert_eq!(c.text, "'fy: 300 MPa\n");
+}
+
+#[test]
+fn headings_and_paragraphs_are_hand_written_calcpad() {
+    let c = compile("# One\n## Two\n### Three\n#### Four\n\nPlain words.\nMore plain words.\n\nSome *emphasis* here.\n\nMore plain.\n");
+    assert_eq!(
+        lines(&c),
+        [
+            "'<h1>One</h1>",
+            "'<h2>Two</h2>",
+            "\"Three",
+            "'<h4>Four</h4>",
+            "",
+            "'Plain words. More plain words.",
+            "",
+            "#markdown",
+            "Some *emphasis* here.",
+            "#end markdown",
+            "",
+            "'More plain."
+        ]
+    );
+    // Words with underscores (f_y) and a lone asterisk are not Markdown emphasis in prose with spaces around.
+    let c = compile("Use f_y for the yield stress.\n");
+    assert_eq!(c.text, "'Use f_y for the yield stress.\n");
+}
+
+#[test]
+fn notes_are_plain_comments_in_plain_calcpad() {
+    let src = "x: 5 kN | the load\ny: 2 m\n";
+    let page = compile(src).text;
+    assert_eq!(page, "x = 5 kN '<span class=\"sheet-note\">the load</span>\ny = 2 m\n");
+    let plain = compile_with(src, &Options { plain_tex: true }).text;
+    assert_eq!(plain, "x = 5 kN 'the load\ny = 2 m\n");
+}
+
+#[test]
+fn blank_lines_are_kept_between_sections() {
+    let c = compile("a: 1\n\n\nb: 2\nif b > 1:\n    c: 3\n\n    d: 4\ne: 5");
+    assert_eq!(
+        lines(&c),
+        [
+            "a = 1",
+            "",
+            "b = 2",
+            "#if b > 1",
+            "c = 3",
+            "",
+            "d = 4",
+            "#end if",
+            "e = 5"
+        ]
+    );
+}
+
+#[test]
+fn step_break_and_continue() {
+    let c = compile("for i in 0..10 step 2:\n    if i > 6:\n        break\n    s: i\n");
+    assert_eq!(
+        lines(&c),
+        [
+            "#for loopi1 = 1 : floor((10 - 0)/(2) + 0.000000001) + 1",
+            "#hide",
+            "i = 0 + (loopi1 - 1)*(2)",
+            "#show",
+            "#if i > 6",
+            "#break",
+            "#end if",
+            "s = i",
+            "#loop"
+        ]
+    );
+    let (html, errs) = run(&c.text);
+    assert!(errs.is_empty(), "{errs:?}");
+    // 0, 2, 4, 6 then i = 8 breaks: the loop ran for i = 0, 2, 4, 6.
+    let t = text(&html);
+    assert!(t.contains("s = i = 6") && !t.contains("s = i = 8"), "{t}");
+    // A step down, and continue.
+    let c = compile("for i in 5..1 step -2:\n    if i == 3:\n        continue\n    s: i\n");
+    let (html, errs) = run(&c.text);
+    assert!(errs.is_empty(), "{errs:?}");
+    let t = text(&html);
+    assert!(
+        t.contains("s = i = 5") && t.contains("s = i = 1") && !t.contains("s = i = 3"),
+        "{t}"
+    );
+    // One-line form and outside a loop.
+    let c = compile("while n > 0:\n    if n == 2: break\n    n: n - 1\n");
+    assert!(c.text.contains("#if n ≡ 2\n#break\n#end if"));
+    let c = compile("break\n");
+    assert!(c.diagnostics.iter().any(|d| d.message.contains("outside a loop")));
+}
+
+#[test]
+fn line_kinds() {
+    let c = compile("<!--sheet-->\n# T\na: 1\n>> b = 2\nplot a for x in 0..1\nif a > 0:\n    c: 3\n\ntext");
+    assert_eq!(c.kinds.len(), 9);
+    use LineKind::*;
+    assert_eq!(
+        c.kinds,
+        vec![Blank, Prose, Quantity, Raw, Plot, Block, Quantity, Blank, Prose]
+    );
+}
+
+#[test]
+fn format_is_idempotent_and_leaves_prose() {
+    let src = "<!--sheet-->\n# T\n## Inputs\nL:6 m|span\nfy :  300 MPa   |  yield\nMs: fy*Ze->kN*m\n\n\nprose  with   spaces  \n>> raw   line\nx=1 ;y : 2\n";
+    let once = format(src);
+    assert_eq!(once, format(&once));
+    assert!(once.contains(">> raw   line") && once.contains("prose  with   spaces\n"));
+    // The prettified sheet compiles to the same Calcpad.
+    let flat = |t: String| t.replace(' ', "").replace("\n\n", "\n");
+    assert_eq!(flat(compile(src).text), flat(compile(&once).text));
 }
 
 #[test]
@@ -218,7 +342,10 @@ fn conditions_and_plots() {
     assert_eq!(&l[6..9], ["#if a ≡ 2", "b = 1", "#end if"]);
     assert_eq!(l[9], "$Plot{ f(x) & g(x) @ x = 0 : a * 2 }");
     let bad = compile("plot f(x) for x in 0");
-    assert!(bad.text.contains("#markdown"), "an invalid plot line stays text");
+    assert!(
+        bad.text.contains("'plot f(x) for x in 0"),
+        "an invalid plot line stays text"
+    );
 }
 
 #[test]
@@ -387,15 +514,36 @@ fn deterministic_with_consistent_map() {
 
 #[test]
 fn prose_only_input_round_trips_through_markdown() {
-    let src =
-        "# H\n\nSome *text* with a [link](http://example.com).\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![alt](pic.png)\n";
+    let src = "Some *text* with a [link](http://example.com).\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![alt](pic.png)\n";
     let c = compile(src);
-    let body: Vec<&str> = lines(&c)[1..lines(&c).len() - 1].to_vec();
-    assert_eq!(body.join("\n"), src.trim_end());
+    // One markdown block, the text untouched.
+    let l = lines(&c);
+    assert_eq!(l[0], "#markdown");
+    assert_eq!(l[1..l.len() - 1].join("\n"), src.trim_end());
 }
 
 #[test]
 fn marker_detection() {
     assert!(is_sheet("\n  <!--sheet-->\na: 1"));
     assert!(!is_sheet("a = 1\n<!--sheet-->"));
+}
+
+#[test]
+fn deflection_samples_values() {
+    let (c, html, errs) = render(&sample("Beam deflection"));
+    no_errors("deflection", &errs, &c);
+    let t = text(&html);
+    // EI = 30 GPa x 160000 cm4 = 48000 kN.m2; d = 5 x 30 x 6^4 / (384 x 48000) = 10.55 mm; phi = 30 x 6^3 / (24 x 48000) = 0.005625 (shown as 0.00562).
+    assert!(t.contains("= 48000 kN · m 2"), "{t}");
+    assert!(t.contains("= 10.55 mm"), "{t}");
+    assert!(t.contains("= 0.00562"), "{t}");
+    assert!(html.contains("<svg"), "the deflection curve is drawn");
+    let (c, html, errs) = render(&sample("Cantilever tip load"));
+    no_errors("cantilever", &errs, &c);
+    let t = text(&html);
+    // 20 x 3^3 / (3 x 48000) = 3.75 mm; M = 20 x 3 = 60 kN.m; for a load of 3 P: 11.25 mm.
+    assert!(
+        t.contains("= 3.75 mm") && t.contains("= 60 kN · m") && t.contains("= 11.25 mm"),
+        "{t}"
+    );
 }

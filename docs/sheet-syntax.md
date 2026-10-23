@@ -14,9 +14,11 @@ A file is a sheet when its first non-blank line is
 ```
 
 or when its name ends in `.sheet` (the editor adds the marker line when it opens one, so the
-text and the editor mode always agree). **New sheet (Markdown style)** in the File menu or the
-Resources tab starts one. Use **Show compiled** to see the Calcpad a sheet becomes (its line
-numbers are the sheet's lines) and **Convert to Calcpad** to replace the sheet with that text.
+text and the editor mode always agree). **File > New** and the quick-access New button (and Ctrl+N in the desktop app) open a
+new sheet; **New Calcpad worksheet** (second in the File menu, and on the Resources tab) opens the
+advanced syntax. Use **Show compiled** to see the Calcpad a sheet becomes (its line numbers are the
+sheet's lines) and **Convert to Calcpad** to replace the sheet with that text. Both give Calcpad
+as a person would write it, so a sheet is also a way to learn the Calcpad language.
 
 ## Example
 
@@ -39,8 +41,11 @@ if utilisation <= 1: "OK" else: "Fails"
 Anything that is not one of the line kinds below is Markdown prose: `#` to `######` headings,
 paragraphs, `**bold**`, `*italic*`, `-` and numbered lists, pipe tables, links,
 `![alt](file)` images (library files, as in Calcpad), `` `code` `` and fenced code blocks. The
-compiler wraps each run of prose in a `#markdown ... #end markdown` block, so the engine's own
-Markdown renderer does the work.
+compiler writes prose the way a person would write it in Calcpad. A heading becomes a heading
+line (`# Title` is `'<h1>Title</h1>`, and `### Heading` is `"Heading`); a paragraph of plain text,
+even over several lines, becomes one text line (`'text`); only prose that really contains Markdown
+(lists, tables, quotes, emphasis, links, code, backslashes) goes in a `#markdown ... #end markdown`
+block, which the engine's own Markdown renderer handles. Blank lines between sections are kept.
 
 A line that would read as a quantity but is prose (`Note: see the drawing`) is prose already,
 because its right side is not an expression. To force prose, start the line with a backslash.
@@ -64,7 +69,9 @@ f(x): x^2 + 1
 ```
 
 * The line shows what a Calcpad equation line shows: the name, the expression, the values
-  substituted and the result with its units. The note follows in a muted style.
+  substituted and the result with its units. The note follows in a muted style (a `sheet-note`
+  class, styled by the page). In the compiled view and in Convert to Calcpad a note is a plain
+  Calcpad comment: `x = 5 kN 'the load`.
 * **Names** are letters, digits, `_` and primes. Greek spellings become Greek letters:
   `phi` is φ, `sigma_c` is σ with subscript c, `Delta_T` is Δ with subscript T, and a Greek
   spelling followed by a capital or a digit (`phiMs`, `sigma2`) is the letter and the rest.
@@ -125,11 +132,14 @@ while n > 0:
 | --- | --- |
 | `if c:` / `else if c:` / `else:` | `#if c` / `#else if c` / `#else`, closed by `#end if` |
 | `for i in a..b:` | `#for i = a : b`, closed by `#loop` |
+| `for i in a..b step s:` | an index loop of `floor((b - a)/s) + 1` passes, with hidden lines that set `i` (the step may be negative) |
+| `break`, `continue` | `#break`, `#continue` (inside a loop; `if c: break` works on one line) |
 | `for x in v:` | an index loop over the vector `v` (a name or a literal), hidden helper lines set `x` |
 | `while c:` | `#while c` ... `#loop` |
 | `repeat n:` | `#repeat n` ... `#loop` |
 
-The range has no step. Quantity lines in a loop give exactly the report a Calcpad loop gives
+The step is written `step s` after the range (`for i in 0..10 step 2:`); a range without it counts
+by one. Quantity lines in a loop give exactly the report a Calcpad loop gives
 (a test compares them). A header whose condition is not an expression (`If the load is
 large:`) is prose, with a warning if it starts with a keyword.
 
@@ -179,27 +189,41 @@ lines too. "Unused variable" hints are dropped for sheets, since every quantity 
 
 ## Not supported, and the limits
 
-* No `for` step (`1..10..2`); no `break`, `continue` or `repeat` without a count (use `>>`).
+* No `repeat` without a count (use `>>`); no step on a loop over a vector.
 * No units on vector or matrix literals; no nested brackets; no symbolic algebra (the engine
   is numeric, as Calcpad is).
-* The prettifier, symbol lookup and semantic highlighting of Calcpad do not apply to a
-  sheet; the sheet has its own colours and completions (names defined in the sheet, Greek
-  names, block snippets).
+* Calcpad's own highlighting, symbol lookup and prettifier do not apply to a sheet; the sheet
+  has its own (next section).
 * A formula in Word or Excel is its TeX source, not Office Math.
 * A name that is a Calcpad function (`gamma`, `beta`) as a variable keeps working only when
   written the Calcpad way; function calls are not renamed unless the sheet defines the function.
 * `Convert to Calcpad` is one way: the Calcpad text is not turned back into a sheet.
 
+## The editor
+
+A sheet has its own colours and completions (names defined in the sheet, Greek spellings, block
+snippets), and these work on names:
+
+* **Format Document** (Shift+Alt+F) prettifies: one space around `:`, `|` and `->` and after
+  `;`, a blank line before each heading, runs of blank lines collapsed, and the colons of a run
+  of quantity lines aligned. Expressions, prose, `>>` lines, fences and formulas are not touched,
+  and formatting twice changes nothing.
+* **Go to definition** (F12), **find references** and **hover** (the defining line and the
+  Calcpad spelling) work on the names a sheet defines; references are searched in code lines, not
+  in prose. Names are also coloured by semantic highlighting.
+* **Show compiled** and **Convert to Calcpad**, above.
+
 ## Ribbon and the Insert tab
 
 In a sheet the ribbon and the sidebar's Insert tab insert the sheet form: Heading is
 `## Heading`, Text is a prose line, Table is a pipe table, Plot is a `plot` line, the
-conditions and loops are the indented blocks, a definition such as `c = 299792458m/s` is
+conditions and loops are the indented blocks, and the Text Formatting tab writes Markdown
+(Bold `**x**`, Italic `*x*`, H1 to H5, Bullets and Numbered lists, Link, Code), a definition such as `c = 299792458m/s` is
 `c: 299792458 m/s`. Functions, operators, Greek letters, units and constants are the same in
 both syntaxes (with the argument and matrix punctuation above). Anything with no sheet form
 (`#UI` forms, `$Map`, directives, macros) inserts its Calcpad text as `>>` lines, and its
-button carries a small `>>` mark and a tooltip saying so. Each open file has its own mode and
-the ribbon follows the active tab.
+button carries a small `>>` mark and a tooltip saying so; the sidebar's Insert tab does the same.
+Each open file has its own mode and the ribbon and the Insert tab follow the active tab.
 
 `web/e2e/verify-ribbon-sheet.mjs` runs the sheet form of every ribbon button and palette entry
 through the compiler and the engine.
