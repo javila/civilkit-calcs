@@ -191,6 +191,9 @@ impl Calculator {
     pub fn evaluate_operator(&self, index: i64, a: &Value, b: &Value) -> CResult<Value> {
         if self.is_complex {
             complex_calculator::evaluate_operator(index, &a.as_complex(), &b.as_complex())
+        } else if let (Value::Real(x), Value::Real(y)) = (a, b) {
+            // The common case, without copying the operands (as_real clones a real value).
+            real_calculator::evaluate_operator(index, x, y)
         } else {
             real_calculator::evaluate_operator(index, &a.as_real(), &b.as_real())
         }
@@ -199,6 +202,8 @@ impl Calculator {
     pub fn evaluate_function(&self, index: i64, a: &Value) -> CResult<Value> {
         if self.is_complex {
             complex_calculator::evaluate_function(self, index, &a.as_complex())
+        } else if let Value::Real(x) = a {
+            real_calculator::evaluate_function(self, index, x)
         } else {
             real_calculator::evaluate_function(self, index, &a.as_real())
         }
@@ -207,6 +212,8 @@ impl Calculator {
     pub fn evaluate_function2(&self, index: i64, a: &Value, b: &Value) -> CResult<Value> {
         if self.is_complex {
             complex_calculator::evaluate_function2(self, index, &a.as_complex(), &b.as_complex())
+        } else if let (Value::Real(x), Value::Real(y)) = (a, b) {
+            real_calculator::evaluate_function2(self, index, x, y)
         } else {
             real_calculator::evaluate_function2(self, index, &a.as_real(), &b.as_real())
         }

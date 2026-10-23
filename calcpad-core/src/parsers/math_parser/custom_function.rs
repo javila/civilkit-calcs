@@ -6,6 +6,7 @@
 //! One struct covers all arities here.
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::hash::{BuildHasherDefault, Hasher};
 use std::rc::Rc;
 
 use super::compiler::Expr;
@@ -35,10 +36,36 @@ pub const MAX_CACHE_SIZE: usize = 1000;
 /// default, null, in the dictionary).
 pub type CachedResult = Option<Value>;
 
+/// Hasher for the cache's `u64` keys (already a mix of the argument bits): a multiply and two
+/// shifts instead of SipHash. The map is only looked up, never iterated, so the order of its
+/// entries cannot show in any output.
+#[derive(Default)]
+pub struct MixHasher(u64);
+
+impl Hasher for MixHasher {
+    #[inline]
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    #[inline]
+    fn write_u64(&mut self, i: u64) {
+        let mut x = self.0 ^ i;
+        x ^= x >> 32;
+        x = x.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        self.0 = x ^ (x >> 29);
+    }
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
 /// The `Dictionary<IScalarValue, IValue>` (or `Dictionary<Tuple, IValue>`) of CustomFunction1/2.
 #[derive(Default)]
 pub struct ResultCache {
-    buckets: HashMap<u64, Vec<(Vec<Value>, CachedResult)>>,
+    buckets: HashMap<u64, Vec<(Vec<Value>, CachedResult)>, BuildHasherDefault<MixHasher>>,
     count: usize,
 }
 

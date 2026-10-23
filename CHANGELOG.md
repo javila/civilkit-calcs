@@ -28,6 +28,11 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 
 ### Changed
 - The Samples browser shows the source of a Python sample instead of running it.
+- Faster calculation of the heaviest worksheets, with identical output. Soil Stress and Deformations runs on 37 %
+  of the instructions in the command line tool (72 s of CPU time became 33 s on a busy machine) and in 60 % of the
+  CPU time in the browser; Rectangular Slab FEA on 67 % of the instructions in the command line tool. Units are one
+  allocation instead of about six, the command line tool uses a small-block allocator, and the result cache of
+  custom functions hashes with a multiply. The engine wasm is 2 KB smaller.
 
 ## [26.10.3] - 2026-10-23
 
