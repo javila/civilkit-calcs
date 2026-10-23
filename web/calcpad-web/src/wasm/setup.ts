@@ -6,6 +6,8 @@ import type { WasmTransport } from './transport';
 import { type TabsLike, WebFiles } from './web-files';
 import LibrariesSettings from './LibrariesSettings.vue';
 import LibrariesInsert from './LibrariesInsert.vue';
+import { ref } from 'vue';
+import { looksLikeLine, sheetInsert } from './sheet-insert';
 import { installEmptyEditorLink, SamplesBrowser } from './samples';
 import { XmcdImport } from './xmcd-import';
 
@@ -49,5 +51,16 @@ export function installWebFiles(transport: WasmTransport, host: Host): WebFiles 
 
 /** The sections the browser build adds to the sidebar (see CalcpadSettingsTab/CalcpadInsertTab). */
 export function webExtensions() {
-    return { settingsSections: [LibrariesSettings], insertSections: [LibrariesInsert] };
+    // The active file's mode, for the Insert tab: in a sheet, an item with no sheet form inserts raw Calcpad.
+    const sheetMode = ref(false);
+    setInterval(() => {
+        const e = (window as unknown as { calcpadActiveEditor?: { getModel(): { getLanguageId(): string } | null } }).calcpadActiveEditor;
+        sheetMode.value = e?.getModel()?.getLanguageId() === 'calcpad-sheet';
+    }, 400);
+    return {
+        settingsSections: [LibrariesSettings],
+        insertSections: [LibrariesInsert],
+        sheetMode,
+        insertIsRaw: (text: string) => sheetInsert(text, looksLikeLine(text)).raw,
+    };
 }

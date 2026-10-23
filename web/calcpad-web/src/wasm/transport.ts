@@ -20,7 +20,7 @@ import { reportHeadMarkup } from './report-fonts';
 import { uiAssetsMarkup } from './ui-assets';
 import { libraries } from './library-list';
 import { applyScriptPolicy } from './script-policy';
-import { compileSheet, isSheetRequest, remapErrors, remapHtml, sheetLine } from './sheet';
+import { compileSheet, isSheetRequest, remapErrors, remapHtml, sheetLine, withSheetCss } from './sheet';
 import type { SheetCompiled } from './sheet';
 import { hasTex, renderTex } from './sheet-tex';
 
@@ -436,7 +436,7 @@ export function installWasmTransport(): WasmTransport {
             let html = out.html ?? '';
             if (sh) {
                 out.errors = remapErrors((out.errors ?? []) as { sourceLine?: number }[], sh.sheet);
-                if (!unwrap) html = remapHtml(html, sh.sheet);
+                if (!unwrap) html = withSheetCss(remapHtml(html, sh.sheet));
                 if (hasTex(html)) html = await renderTex(html);
             }
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));

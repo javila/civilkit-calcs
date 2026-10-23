@@ -309,7 +309,7 @@ const PAL_CALCULUS: Section[] = [lines('Sums and calculus', [
 
 
 export const QUICK: RibbonButton[] = [
-    action('q-new', 'New', 'file', 'New worksheet (Ctrl+N)', 'new'),
+    action('q-new', 'New', 'file', 'New sheet (Ctrl+N)', 'newsheet'),
     action('q-open', 'Open', 'open', 'Open a worksheet (Ctrl+O)', 'open'),
     action('q-save', 'Save', 'save', 'Save (Ctrl+S)', 'save'),
     action('q-undo', 'Undo', 'undo', 'Undo (Ctrl+Z)', 'undo'),
@@ -456,15 +456,15 @@ export const RIBBON: RibbonTab[] = [
     },
     {
         id: 'textfmt', label: 'Text Formatting', groups: [
-            { name: 'Headings', buttons: [1, 2, 3, 4, 5].map(n => big(`tf-h${n}`, `H${n}`, 'heading', `Heading ${n}`, { text: `<h${n}>{sel}</h${n}>`, test: "'{}" })),
+            { name: 'Headings', buttons: [1, 2, 3, 4, 5].map(n => big(`tf-h${n}`, `H${n}`, 'heading', `Heading ${n}`, { text: `<h${n}>{sel}</h${n}>`, test: "'{}", sheet: `${'#'.repeat(n)} {sel}` })),
             },
             { name: 'Font', buttons: [
-                big('tf-b', 'Bold', 'bold', 'Bold (select text first)', { text: '<b>{sel}</b>', test: "'a {} b" }),
-                big('tf-i', 'Italic', 'italic', 'Italic', { text: '<i>{sel}</i>', test: "'a {} b" }),
+                big('tf-b', 'Bold', 'bold', 'Bold (select text first)', { text: '<b>{sel}</b>', test: "'a {} b", sheet: '**{sel}**' }),
+                big('tf-i', 'Italic', 'italic', 'Italic', { text: '<i>{sel}</i>', test: "'a {} b", sheet: '*{sel}*' }),
                 big('tf-u', 'Underline', 'underline', 'Underline', { text: '<u>{sel}</u>', test: "'a {} b" }),
-                big('tf-s', 'Strike', 'strike', 'Strike through', { text: '<s>{sel}</s>', test: "'a {} b" }),
-                small('tf-sub', 'Subscript', 'sub', 'Subscript', { text: '<sub>{sel}</sub>', test: "'a {} b" }),
-                small('tf-sup', 'Superscript', 'sub', 'Superscript', { text: '<sup>{sel}</sup>', test: "'a {} b" }),
+                big('tf-s', 'Strike', 'strike', 'Strike through', { text: '<s>{sel}</s>', test: "'a {} b", sheet: '~~{sel}~~' }),
+                small('tf-sub', 'Subscript', 'sub', 'Subscript', { text: '<sub>{sel}</sub>', test: "'a {} b", sheet: '~{sel}~' }),
+                small('tf-sup', 'Superscript', 'sub', 'Superscript', { text: '<sup>{sel}</sup>', test: "'a {} b", sheet: '^{sel}^' }),
             ] },
             { name: 'Colour', buttons: [
                 big('tf-red', 'Red', 'colour', 'Red text', { text: '<span class="err">{sel}</span>', test: "'a {} b" }),
@@ -473,14 +473,16 @@ export const RIBBON: RibbonTab[] = [
                 small('tf-ref', 'Reference', 'link', 'A right-aligned reference to a design code', { text: '<span class="ref">{sel}</span>', test: "'a {} b" }),
             ] },
             { name: 'Paragraph', buttons: [
+                small('tf-link', 'Link', 'link', 'A link (select the text first)', { text: '<a href="https://example.com">{sel}</a>', test: "'a {} b", sheet: '[{sel}](https://example.com)' }),
+                small('tf-code', 'Code', 'source', 'Code in a text line', { text: '<code>{sel}</code>', test: "'a {} b", sheet: '`{sel}`' }),
                 big('tf-p', 'Paragraph', 'text', 'A paragraph', { text: '<p>{sel}</p>', test: "'{}" }),
                 big('tf-br', 'Line break', 'br', 'A line break', { text: '<br/>', test: "'a {} b" }),
-                big('tf-hr', 'Rule', 'hr', 'A horizontal rule', { text: "'<hr/>\n", line: true }),
+                big('tf-hr', 'Rule', 'hr', 'A horizontal rule', { text: "'<hr/>\n", line: true, sheet: '---\n' }),
                 big('tf-page', 'Page break', 'page', 'Start a new page when printing', { text: "'<div style=\"page-break-after:always\"></div>\n", line: true }),
             ] },
             { name: 'Lists', buttons: [
-                big('tf-ul', 'Bullets', 'list', 'A bulleted list', { text: "'<ul><li>First</li><li>Second</li></ul>\n", line: true }),
-                big('tf-ol', 'Numbered', 'olist', 'A numbered list', { text: "'<ol><li>First</li><li>Second</li></ol>\n", line: true }),
+                big('tf-ul', 'Bullets', 'list', 'A bulleted list', { text: "'<ul><li>First</li><li>Second</li></ul>\n", line: true, sheet: '- First\n- Second\n' }),
+                big('tf-ol', 'Numbered', 'olist', 'A numbered list', { text: "'<ol><li>First</li><li>Second</li></ol>\n", line: true, sheet: '1. First\n2. Second\n' }),
                 big('tf-fold', 'Fold', 'fold', 'A section that folds in the report', { text: "'<div class=\"fold\">\n'<b>Heading</b> (click to unfold)\n'<p>Content</p>\n'</div>\n", line: true }),
             ] },
             { name: 'Library', buttons: [
@@ -545,6 +547,7 @@ export const RIBBON: RibbonTab[] = [
             ] },
             { name: 'Sheet syntax', buttons: [
                 action('x-newsheet', 'New sheet', 'file', 'New sheet (Markdown style): prose, name: value lines and LaTeX that compile to Calcpad', 'newsheet'),
+                action('x-newcalcpad', 'New Calcpad', 'file', 'New Calcpad worksheet (the advanced syntax)', 'newcalcpad'),
                 action('x-compiled', 'Show compiled', 'list', 'Show the Calcpad the active sheet compiles to', 'showcompiled'),
                 action('x-convert', 'Convert to Calcpad', 'report', 'Replace the active sheet with its compiled Calcpad', 'convertsheet'),
             ] },
@@ -555,6 +558,7 @@ export const RIBBON: RibbonTab[] = [
             { name: 'Help', buttons: [
                 action('x-docs', 'Documentation', 'help', 'Open the CalcpadCE documentation (the worksheet language)', 'docs'),
                 action('x-keys', 'Shortcuts', 'keyboard', 'List the keyboard shortcuts in the output panel', 'shortcuts'),
+                action('x-changelog', 'Changelog', 'list', 'What changed in each version (opens GitHub in a new tab)', 'changelog'),
                 action('x-about', 'About', 'info', 'About this editor', 'about'),
             ] },
             { name: 'View', buttons: [

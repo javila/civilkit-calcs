@@ -47,7 +47,8 @@ import { attachQuickTyper } from './editor/quick-type';
 import { attachOperatorReplacer } from './editor/operator-replacer';
 import { attachAutoIndenter } from './editor/auto-indent';
 import { registerFormattingCommands, getParseMode } from './editor/formatting-commands';
-import { sheetInsert } from './wasm/sheet-insert';
+import { looksLikeLine, sheetInsert } from './wasm/sheet-insert';
+import { NEW_SHEET_TEXT, WELCOME_SHEET_TEXT } from './wasm/sheet-ui';
 import { registerFormatDocumentProvider } from './editor/format-document';
 import { setActiveDocumentKeyResolver, getActiveDocumentKey, type EditorBridge } from './editor/bridge';
 import { EditorGroup } from './editor/editor-group';
@@ -133,13 +134,7 @@ function getEmptyPreviewHtml(theme: 'light' | 'dark'): string {
 }
 
 function getSampleContent(): string {
-    return `'CivilKit Calcs
-'Enter your calculations below
-
-a = 3
-b = 4
-c = sqrt(a^2 + b^2)
-`;
+    return WELCOME_SHEET_TEXT;
 }
 
 /**
@@ -1311,13 +1306,21 @@ async function bootstrap(): Promise<void> {
             // the same content without the #val wrapper or the ' quotes.
             // In a sheet the sidebar's snippets insert their sheet forms (wasm/sheet-insert.ts).
             const sheet = editor.getModel()?.getLanguageId() === 'calcpad-sheet';
-            const insert = sheet
-                ? sheetInsert(text, text.endsWith('\n')).text
+            // A line goes on a line of its own: after the cursor's line when that has text.
+            const asLine = sheet && looksLikeLine(text);
+            const shape = sheet ? sheetInsert(text, asLine) : null;
+            const model = editor.getModel();
+            const midLine = !!model && asLine && model.getLineContent(selection.startLineNumber).trim() !== '';
+            const insert = shape
+                ? (midLine ? '\n' : '') + (asLine && !shape.text.endsWith('\n') ? shape.text + '\n' : shape.text)
                 : getParseMode(editor, activeBridge) === 'cpd'
                     ? text
                     : stripCpdSnippetWrapper(text);
+            const at = midLine && model
+                ? { startLineNumber: selection.endLineNumber, startColumn: model.getLineMaxColumn(selection.endLineNumber), endLineNumber: selection.endLineNumber, endColumn: model.getLineMaxColumn(selection.endLineNumber) }
+                : selection;
             editor.executeEdits('calcpad-insert', [{
-                range: selection,
+                range: at,
                 text: insert,
                 forceMoveMarkers: true,
             }]);
@@ -1615,7 +1618,7 @@ async function bootstrap(): Promise<void> {
         void handleEmptyGroup(g);
     };
     appInstance.onNewTabRequest = (groupId: string) => {
-        groups.get(groupId)?.tabs.newUntitled();
+        groups.get(groupId)?.tabs.newUntitled(NEW_SHEET_TEXT);
     };
     // Preview right-click "Open Full HTML": raw HTML in a new unsaved tab in
     // the same group, mirroring vscode-calcpad's "View Webview Source".
@@ -2728,7 +2731,7 @@ async function bootstrap(): Promise<void> {
             // Ctrl+N - new tab.
             if ((e.key === 'n' || e.key === 'N') && !e.shiftKey && !e.altKey) {
                 e.preventDefault();
-                tabs.newUntitled();
+                tabs.newUntitled(NEW_SHEET_TEXT);
                 return;
             }
             // Ctrl+P - toggle preview.

@@ -26,6 +26,7 @@ export interface RibbonCtx {
 const UPSTREAM_URL = 'https://github.com/imartincei/CalcpadCE';
 const PROJECT_URL = 'https://github.com/mageaustralia/civilkit-calcs';
 const DOCS_URL = UPSTREAM_URL;
+const CHANGELOG_URL = `${PROJECT_URL}/blob/main/CHANGELOG.md`;
 const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? '';
 const UPSTREAM_VERSION = import.meta.env.VITE_UPSTREAM_VERSION ?? '';
 const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
@@ -59,8 +60,18 @@ function dialog(title: string, paragraphs: string[]): void {
     for (const p of paragraphs) {
         const el = document.createElement('p');
         el.style.margin = '6px 0';
-        const m = /^(.*?)(https?:\/\/\S+)$/.exec(p);
-        if (m) {
+        const md = /^(.*?)\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)(.*)$/.exec(p);
+        const m = md ? null : /^(.*?)(https?:\/\/\S+)$/.exec(p);
+        if (md) {
+            el.append(md[1]);
+            const a = document.createElement('a');
+            a.href = md[3];
+            a.textContent = md[2];
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.style.color = 'var(--vscode-textLink-foreground,#0060c0)';
+            el.append(a, md[4]);
+        } else if (m) {
             el.append(m[1]);
             const a = document.createElement('a');
             a.href = m[2];
@@ -88,8 +99,9 @@ function dialog(title: string, paragraphs: string[]): void {
 
 type Handler = (c: RibbonCtx, arg: string) => void;
 export const ACTIONS: Record<string, Handler> = {
-    new: c => c.files.newWorksheet(),
     newsheet: c => newSheet(c.files.o.tabs()),
+    newcalcpad: c => c.files.newWorksheet(),
+    changelog: () => void window.open(CHANGELOG_URL, '_blank', 'noopener'),
     showcompiled: c => void showCompiled(c.editor()),
     convertsheet: c => void convertToCalcpad(c.editor()),
     open: c => void c.files.open(),
@@ -136,6 +148,7 @@ export const ACTIONS: Record<string, Handler> = {
         `Built on CalcpadCE ${UPSTREAM_VERSION} (MIT), by Nedelcho Ganchovski (Proektsoft) and contributors. The engine is reimplemented in Rust and runs in your browser.`,
         `CalcpadCE: ${UPSTREAM_URL}`,
         `This project: ${PROJECT_URL}`,
+        `What's new: [the changelog](${CHANGELOG_URL})`,
         'MIT licence. Not affiliated with the CalcpadCE authors.',
     ]),
 };

@@ -34,7 +34,8 @@
               v-for="item in group.items"
               :key="item.tag"
               class="symbol-btn"
-              :title="buildTooltip(item)"
+              :class="{ 'raw-insert': isRaw(item) }"
+              :title="buildTooltip(item) + (isRaw(item) ? RAW_NOTE : '')"
               @click="insertItem(item)"
             >
               {{ item.tag }}
@@ -62,7 +63,8 @@
         :key="item.tag"
         @click="insertItem(item)"
         class="insert-item"
-        :title="buildTooltip(item)"
+        :class="{ 'raw-insert': isRaw(item) }"
+        :title="buildTooltip(item) + (isRaw(item) ? RAW_NOTE : '')"
       >
         <div class="item-display">{{ formatDisplayText(item) }}</div>
         <div v-if="formatSecondaryText(item)" class="item-description">
@@ -108,7 +110,16 @@ const emit = defineEmits<{
   insertImage: []
 }>()
 
-const extensions = inject<{ insertSections?: Component[] }>('calcpadExtensions', {})
+const extensions = inject<{
+  insertSections?: Component[]
+  /** A host that has a second authoring syntax: true in a file written in it. */
+  sheetMode?: { value: boolean }
+  /** True when the item's text can only be inserted as raw Calcpad in that syntax (it is marked). */
+  insertIsRaw?: (text: string) => boolean
+}>('calcpadExtensions', {})
+const RAW_NOTE = ' (inserts raw Calcpad with >> in a sheet)'
+const isRaw = (item: InsertItem): boolean =>
+  !!extensions.sheetMode?.value && !!extensions.insertIsRaw?.(formatInsertText(item))
 
 // State
 const searchTerm = ref('')
@@ -413,9 +424,11 @@ const createTreeItem = (item: InsertItem) => {
 
   const button = document.createElement('button')
   button.className = 'tree-item'
+  const raw = isRaw(item)
+  if (raw) button.classList.add('raw-insert')
 
   // Use description for tooltip with parameter breakdown
-  button.title = buildTooltip(item)
+  button.title = buildTooltip(item) + (raw ? RAW_NOTE : '')
 
   // Use insert (or label) as display text with § replaced by param names
   button.textContent = formatDisplayText(item)
@@ -439,6 +452,16 @@ watch(
   { immediate: true, deep: true }
 )
 
+// The marks of the tree depend on the file's mode.
+watch(
+  () => extensions.sheetMode?.value,
+  () => {
+    nextTick(() => {
+      buildTreeStructure()
+    })
+  }
+)
+
 // Watch for search term changes to rebuild tree when clearing search
 watch(
   () => searchTerm.value,
@@ -452,6 +475,20 @@ watch(
   }
 )
 </script>
+
+<style>
+/* In a sheet an item with no sheet form inserts raw Calcpad; a small mark says so. */
+.raw-insert { position: relative; }
+.raw-insert::after {
+  content: '>>';
+  position: absolute;
+  right: 3px;
+  top: 0;
+  font: 700 8px/1 var(--vscode-editor-font-family, monospace);
+  color: var(--vscode-descriptionForeground, #888);
+  pointer-events: none;
+}
+</style>
 
 <style scoped>
 .insert-tab {

@@ -57,6 +57,11 @@ function raw(text: string): string {
     return lines.map(l => `>> ${l}`).join('\n') + (nl ? '\n' : '');
 }
 
+/** Whether a snippet with no flag of its own is a line: a command or text line (`#...`, `$...`, `'...`, `\"...`) or several lines. */
+export function looksLikeLine(text: string): boolean {
+    return text.includes('\n') || /^[#$'"]/.test(text);
+}
+
 /** The insert of an entry in a sheet. `sheet` is the entry's own friendly form, if it has one. */
 export function sheetInsert(text: string, line: boolean, sheet?: string): SheetInsert {
     if (sheet !== undefined) return { text: sheet, line, raw: false };

@@ -406,8 +406,8 @@ body{display:flex;flex-direction:column}
             menu.appendChild(d);
         };
         const mod = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctrl';
-        item('New', () => this.newWorksheet());
-        item('New sheet (Markdown style)', () => newSheet(this.o.tabs()));
+        item('New sheet', () => newSheet(this.o.tabs()));
+        item('New Calcpad worksheet', () => this.newWorksheet());
         item('Open...', () => void this.open(), `${mod}+O`);
         if (this.o.importer) item('Import worksheet...', () => void this.o.importer!.pick());
         if (this.o.openSamples) item('Samples...', () => this.o.openSamples!());

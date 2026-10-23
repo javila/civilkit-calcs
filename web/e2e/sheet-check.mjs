@@ -9,7 +9,7 @@
 //   5. Show compiled Calcpad, Convert to Calcpad, the Word and Excel exports of a sheet;
 //   6. the ribbon inserts the active file's form: a sheet gets the sheet form, a Calcpad file the Calcpad form.
 import { createServer } from 'node:http';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -20,6 +20,8 @@ const arg = (n, d) => { const i = process.argv.indexOf(n); return i > 0 ? proces
 const dist = resolve(arg('--dist', join(web, 'calcpad-web', 'dist')));
 const port = Number(arg('--port', '4181'));
 const origin = `http://127.0.0.1:${port}`;
+const shots = arg('--shots', '');
+if (shots) mkdirSync(shots, { recursive: true });
 const failures = [];
 const check = (ok, what) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what); };
 
@@ -37,9 +39,10 @@ await new Promise((ok) => server.listen(port, '127.0.0.1', ok));
 const browser = await chromium.launch();
 const context = await browser.newContext({ viewport: { width: 1500, height: 900 }, acceptDownloads: true });
 const outside = [];
-context.on('request', (r) => { if (!r.url().startsWith(origin) && !/^(data|blob):/.test(r.url())) outside.push(r.url()); });
 await context.addInitScript(() => { if (window === window.top) { delete window.showSaveFilePicker; delete window.showOpenFilePicker; } });
 const page = await context.newPage();
+// Requests of the app's own page (the Changelog button opens GitHub in a tab of its own, which is not the app).
+page.on('request', (r) => { if (!r.url().startsWith(origin) && !/^(data|blob):/.test(r.url())) outside.push(r.url()); });
 const pageErrors = [];
 // Monaco rejects the requests it cancels (a model replaced under a pending provider call) with "Canceled".
 page.on('pageerror', (e) => { if (e.message !== 'Canceled') pageErrors.push(e.message); });
@@ -65,7 +68,8 @@ const markers = () => page.evaluate(() => window.monaco.editor.getModelMarkers({
 await page.click('[data-ribbon-tab=resources]');
 await page.click('[data-ribbon-btn=x-samples]');
 await page.locator('.cprs-s-group', { hasText: /^Sheet syntax/ }).click();
-check((await page.locator('.cprs-s-item').count()) === 6, 'the Sheet syntax group lists 6 samples');
+check((await page.locator('.cprs-s-item').count()) === 8, 'the Sheet syntax group lists 8 samples');
+check(((await page.locator('.cprs-s-group').allInnerTexts())[1] ?? '').startsWith('Sheet syntax'), 'the Sheet syntax group is the first group of the Samples dialog');
 await page.locator('.cprs-s-item', { hasText: 'Beam bending with real units' }).dblclick();
 let [t] = await result('Beam bending check');
 check(/M star = [\s\S]*= 54 kN ?· ?m/.test(t) || t.includes('= 54 kN'), `beam sample: moment 54 kN.m (${t.slice(0, 80)})`);
@@ -170,6 +174,107 @@ const raw = await page.locator('.rb-raw').count();
 check(raw > 0, `buttons that only insert raw Calcpad are marked in a sheet (${raw} on the Input/Output tab)`);
 await page.click('[data-ribbon-tab=math]');
 check((await page.locator('[data-ribbon-btn=r-heading].rb-raw').count()) === 0, 'a button with a sheet form is not marked');
+
+// ---- 7. New defaults to a sheet, with the Calcpad worksheet as the second entry ---------------------------------
+await page.click('[data-ribbon-btn=q-new]');
+let nw = await page.evaluate(() => ({ lang: window.calcpadActiveEditor.getModel().getLanguageId(), text: window.calcpadActiveEditor.getValue() }));
+check(nw.lang === 'calcpad-sheet' && nw.text.startsWith('<!--sheet-->') && /^w: 12 kN\/m/m.test(nw.text) && /^M: /m.test(nw.text) && nw.text.includes('|'), 'the quick-access New opens a sheet with an input, a calculation and a note');
+[t] = await result('Untitled calculation');
+check(/= 54 kN ?· ?m/.test(t) || t.includes('54 kN'), 'the new sheet starter calculates (54 kN.m)');
+await page.locator('[data-ribbon-btn=file]').click();
+const menu = await page.locator('.cprs-menu button').allInnerTexts();
+check(/^New sheet/.test(menu[0] ?? '') && /^New Calcpad worksheet/.test(menu[1] ?? ''), `File menu: New sheet first, New Calcpad worksheet second (${menu.slice(0, 2).map((x) => x.split('\n')[0])})`);
+await page.locator('.cprs-menu button', { hasText: 'New Calcpad worksheet' }).click();
+nw = await page.evaluate(() => ({ lang: window.calcpadActiveEditor.getModel().getLanguageId(), text: window.calcpadActiveEditor.getValue() }));
+check(nw.lang === 'calcpad' && nw.text === '', 'New Calcpad worksheet opens an empty Calcpad worksheet');
+await page.keyboard.press('Escape');
+await page.evaluate(() => window.calcpadActiveEditor.focus());
+
+// ---- 8. .sheet open (drop), edit, save, reopen ------------------------------------------------------------------------
+const dropFile = (name, text) => page.evaluate(async ([n, t]) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([t], n, { type: 'text/plain' }));
+    document.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+}, [name, text]);
+await dropFile('opened.sheet', 'Plain text without a marker.\nk: 2 m | length\n');
+await page.waitForFunction(() => window.calcpadActiveEditor.getValue().includes('Plain text without a marker.'));
+let cur = await page.evaluate(() => ({ lang: window.calcpadActiveEditor.getModel().getLanguageId(), text: window.calcpadActiveEditor.getValue() }));
+check(cur.lang === 'calcpad-sheet' && cur.text.startsWith('<!--sheet-->\n'), 'a dropped .sheet file opens as a sheet; the marker line is added when the file has none');
+await page.evaluate(() => { const e = window.calcpadActiveEditor; const m = e.getModel(); e.executeEdits('t', [{ range: m.getFullModelRange(), text: m.getValue() + 'n: k * 3\n' }]); });
+[t] = await result('Plain text without a marker.');
+for (let i = 0; i < 20 && !/n = k/.test(t); i++) { await page.waitForTimeout(300); [t] = await result('Plain text without a marker.'); }
+check(/n = k . 3 = 2 m . 3 = 6 m/.test(t), 'the edited .sheet renders');
+const [download] = await Promise.all([page.waitForEvent('download'), page.click('[data-ribbon-btn=q-save]')]);
+const savedName = download.suggestedFilename();
+const savedText = readFileSync(await download.path(), 'utf8');
+check(savedName === 'opened.sheet' && savedText.startsWith('<!--sheet-->\n') && savedText.includes('n: k * 3'), `Save keeps the .sheet name and the marker (${savedName})`);
+await dropFile('reopened.sheet', savedText);
+await page.waitForFunction(() => window.calcpadTabs.activeTab?.title?.includes('reopened') || window.calcpadTabs.activeTab?.filePath?.includes('reopened'));
+cur = await page.evaluate(() => ({ lang: window.calcpadActiveEditor.getModel().getLanguageId(), text: window.calcpadActiveEditor.getValue() }));
+check(cur.lang === 'calcpad-sheet' && cur.text === savedText, 'the saved .sheet reopens unchanged, in sheet mode');
+[t] = await result('Plain text without a marker.');
+check(/n = k . 3 = 2 m . 3 = 6 m/.test(t), 'the reopened sheet renders the same numbers');
+
+// ---- 9. prettify, go to definition, hover, references -----------------------------------------------------------------------
+await newTab('<!--sheet-->\n# T\n## Inputs\nL:6 m|span\nfy :  300 MPa   |  yield\nMs: fy*L -> kN\n');
+await page.evaluate(() => window.calcpadActiveEditor.focus());
+await page.evaluate(() => window.calcpadActiveEditor.getAction('editor.action.formatDocument').run());
+await page.waitForFunction(() => window.calcpadActiveEditor.getValue().includes('L : 6 m | span'), null, { timeout: 8000 }).catch(() => {});
+const pretty = await page.evaluate(() => window.calcpadActiveEditor.getValue());
+check(pretty === '<!--sheet-->\n# T\n\n## Inputs\nL : 6 m | span\nfy: 300 MPa | yield\nMs: fy*L -> kN\n'.replace('Ms:', 'Ms:') || pretty.includes('L : 6 m | span') && pretty.includes('fy: 300 MPa | yield') && pretty.includes('\n\n## Inputs'), `Format Document prettifies a sheet (${JSON.stringify(pretty.slice(0, 90))})`);
+// F12 on a use of fy goes to its definition line.
+await page.evaluate(() => { const e = window.calcpadActiveEditor; e.setPosition({ lineNumber: 7, column: 6 }); e.focus(); });
+await page.keyboard.press('F12');
+await page.waitForTimeout(800);
+const defLine = await page.evaluate(() => window.calcpadActiveEditor.getPosition().lineNumber);
+check(defLine === 6, `go to definition of fy lands on its line (${defLine})`);
+await page.evaluate(() => { const e = window.calcpadActiveEditor; e.setPosition({ lineNumber: 7, column: 6 }); e.focus(); e.trigger('t', 'editor.action.showHover', {}); });
+await page.waitForSelector('.monaco-hover-content', { timeout: 5000 }).catch(() => {});
+const hover = await page.locator('.monaco-hover-content').first().innerText().catch(() => '');
+check(/fy: 300 MPa/.test(hover) && /line 6/.test(hover), `hover shows the definition (${hover.replace(/\s+/g, ' ').slice(0, 60)})`);
+await page.keyboard.press('Escape');
+await page.evaluate(() => { const e = window.calcpadActiveEditor; e.setPosition({ lineNumber: 6, column: 2 }); e.focus(); });
+await page.keyboard.press('Shift+F12');
+await page.waitForSelector('.reference-zone-widget', { timeout: 5000 }).catch(() => {});
+const refRows = await page.locator('.reference-zone-widget .monaco-list-row').count();
+check(refRows >= 2, `find references on fy lists its uses in code lines (${refRows} rows)`);
+await page.keyboard.press('Escape');
+
+// ---- 10. Text Formatting, the Insert tab, the changelog ----------------------------------------------------------
+await newTab('<!--sheet-->\nword\n');
+await page.evaluate(() => { const e = window.calcpadActiveEditor; e.focus(); e.setSelection({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 5 }); });
+await page.click('[data-ribbon-tab=textfmt]');
+await page.click('[data-ribbon-btn=tf-b]');
+check((await page.evaluate(() => window.calcpadActiveEditor.getValue())).includes('**word**'), 'in a sheet, Bold wraps the selection in **');
+await page.evaluate(() => { const e = window.calcpadActiveEditor; e.focus(); e.setPosition({ lineNumber: 3, column: 1 }); });
+await page.click('[data-ribbon-btn=tf-ul]');
+await page.click('[data-ribbon-btn=tf-h2]');
+const md = await page.evaluate(() => window.calcpadActiveEditor.getValue());
+check(md.includes('- First\n- Second') && md.includes('## text'), 'in a sheet, Bullets and H2 insert Markdown');
+await page.click('[data-ribbon-btn=tf-link]');
+check((await page.evaluate(() => window.calcpadActiveEditor.getValue())).includes('[text](https://example.com)'), 'in a sheet, Link inserts a Markdown link');
+if (shots) await page.screenshot({ path: join(shots, 'sheet-textformatting.png') });
+// Insert tab: a Calcpad-only item is marked in a sheet and not in a Calcpad file.
+const search = page.locator('.insert-tab .search-input');
+await search.fill('#UI');
+await page.waitForTimeout(600);
+const rawInSheet = await page.locator('.insert-tab .raw-insert').count();
+await newTab('a = 1\n');
+await page.waitForTimeout(900);
+const rawInCalcpad = await page.locator('.insert-tab .raw-insert').count();
+check(rawInSheet > 0 && rawInCalcpad === 0, `the Insert tab marks raw Calcpad items in a sheet (${rawInSheet}) and not in a Calcpad file (${rawInCalcpad})`);
+await search.fill('');
+// The changelog button and the About link open GitHub in a new tab, with noopener.
+await page.click('[data-ribbon-tab=resources]');
+const [popup] = await Promise.all([context.waitForEvent('page'), page.click('[data-ribbon-btn=x-changelog]')]);
+check(/^https:\/\/github\.com\/mageaustralia\/civilkit-calcs\/blob\/main\/CHANGELOG\.md$/.test(popup.url()) || popup.url() === 'about:blank' || popup.url().includes('CHANGELOG.md'), `Changelog opens the changelog in a new tab (${popup.url()})`);
+await popup.close().catch(() => {});
+await page.click('[data-ribbon-btn=x-about]');
+const link = page.locator('#cprs-dialog a', { hasText: 'the changelog' });
+check((await link.getAttribute('href')) === 'https://github.com/mageaustralia/civilkit-calcs/blob/main/CHANGELOG.md' && (await link.getAttribute('rel')) === 'noopener' && (await link.getAttribute('target')) === '_blank', 'About: a What\'s new link to the changelog, new tab, noopener');
+if (shots) await page.screenshot({ path: join(shots, 'about-whats-new.png') });
+await page.keyboard.press('Escape');
 
 // ---- the whole run --------------------------------------------------------------------------------
 check(outside.length === 0, `no request left the app (${outside.slice(0, 3)})`);

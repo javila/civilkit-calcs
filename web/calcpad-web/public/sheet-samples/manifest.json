@@ -86,6 +86,34 @@
    "scripts": false,
    "read": false,
    "assets": []
+  },
+  {
+   "id": "sheet-beam-deflection",
+   "title": "Beam deflection (sheet version, with a plot)",
+   "group": "Sheet syntax",
+   "folder": "Sheet syntax",
+   "file": "sheet-samples/Beam deflection.sheet",
+   "upstream": "",
+   "description": "The deflection and rotation of a simply supported beam under a uniform load, with the deflection curve plotted. A short sheet version of the bundled deflection example.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": []
+  },
+  {
+   "id": "sheet-cantilever-tip-load",
+   "title": "Cantilever tip deflection (sheet version, with a loop)",
+   "group": "Sheet syntax",
+   "folder": "Sheet syntax",
+   "file": "sheet-samples/Cantilever tip load.sheet",
+   "upstream": "",
+   "description": "Tip deflection, rotation and fixed-end moment of a cantilever, and a for loop over load multiples. A short sheet version of the bundled cantilever example.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "assets": []
   }
  ]
 }

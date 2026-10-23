@@ -7,16 +7,31 @@ import { compileSheet, isSheetText, SHEET_MARKER } from './sheet';
 import type { TabsLike } from './web-files';
 
 export const NEW_SHEET_TEXT = `${SHEET_MARKER}
-# Title
+# Untitled calculation
 
-A short description. Prose is Markdown: **bold**, *italic*, lists, tables and $x^2$ for LaTeX.
+Say what is being checked. Prose is Markdown: **bold**, lists, tables and $x^2$ formulas.
 
-## Inputs
-L: 6 m | span
+## Input
 w: 12 kN/m | design load
 
-## Results
-M: w * L^2 / 8 -> kN*m | maximum bending moment
+## Calculation
+M: w * (6 m)^2 / 8 -> kN*m | bending moment of a simply supported 6 m span
+`;
+
+/** The first tab of a fresh start: a sheet that says what a sheet is and where the other syntax lives. */
+export const WELCOME_SHEET_TEXT = `${SHEET_MARKER}
+# Welcome to CivilKit Calcs
+
+This is a sheet: Markdown prose and \`name: value unit | note\` lines, run by the Calcpad engine.
+For the advanced Calcpad syntax use **File > New Calcpad worksheet**; a sheet can also hold
+Calcpad lines, written after \`>>\`.
+
+## Input
+a: 3 m | first side
+b: 4 m | second side
+
+## Calculation
+c: sqrt(a^2 + b^2) | hypotenuse
 `;
 
 /** Opens a new untitled sheet. */

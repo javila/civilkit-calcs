@@ -62,7 +62,7 @@ function dataUrl(name: string, url: () => Promise<{ default: string }>): Promise
 
 /** A numeric character reference list (the compiler's encoding) back to text. */
 function decode(s: string): string {
-    return s.replace(/&#(\d+);/g, (_m, n: string) => String.fromCodePoint(Number(n))).replace(/&amp;/g, '&');
+    return s.replace(/&#(\d+);/g, (_m, n: string) => String.fromCodePoint(Number(n))).replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
 }
 
 const PLACEHOLDER = /<(span|div)\b([^>]*\bclass="sheet-tex"[^>]*)>\s*<\/\1>/g;

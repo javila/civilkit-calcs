@@ -22,11 +22,14 @@ export interface SheetCompiled {
     /** The output carries formula placeholders (rendered by sheet-tex.ts). */
     latex: boolean;
     defs: SheetDef[];
+    /** One letter per sheet line: b blank, p prose, q quantity, k block, r raw Calcpad, g plot, c condition. */
+    kinds: string;
 }
 
 interface SheetModule {
     default: (input?: unknown) => Promise<unknown>;
     compile: (src: string, plainTex: boolean) => string;
+    format: (src: string) => string;
 }
 
 /** The first non-blank line is the marker. Needs no wasm. */
@@ -102,4 +105,19 @@ export function remapHtml(html: string, c: SheetCompiled): string {
 /** The engine's error list with sourceLine in sheet lines (outputLine is kept). */
 export function remapErrors<T extends { sourceLine?: number }>(errors: T[], c: SheetCompiled): T[] {
     return errors.map(e => (typeof e.sourceLine === 'number' ? { ...e, sourceLine: sheetLine(c, e.sourceLine) } : e));
+}
+
+/** The prettified sheet (spacing around `:` `|` `->`, blank lines before headings, aligned colons). */
+export async function formatSheet(src: string): Promise<string> {
+    const mod = await loadSheet();
+    return mod.format(src);
+}
+
+/** The look of a quantity's note: a class in the compiled text, styled here instead of inline. */
+export const SHEET_CSS = '<style id="cprs-sheet">.sheet-note{color:#6b7280;font-style:italic;margin-left:.6em}</style>';
+
+/** Adds SHEET_CSS to a page's head. */
+export function withSheetCss(html: string): string {
+    const i = html.toLowerCase().lastIndexOf('</head>');
+    return i < 0 ? SHEET_CSS + html : html.slice(0, i) + SHEET_CSS + html.slice(i);
 }
