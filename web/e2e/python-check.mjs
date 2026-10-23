@@ -376,6 +376,143 @@ const SHEET = [
     check(!!abiRust && abiRust === abiTs, `the Rust module and the worker agree on the interface version (${abiRust})`);
 }
 
+// ---- 11. the plane truss sample against independent hand values -----------------------------------------------------
+// The sample (Python group, "Plane Truss by the Stiffness Method") is opened as a user opens it; its own block is run with one extra
+// print line, so the numbers checked are the ones the sample computes, at full precision.
+//
+// Hand derivation (kN, m; joints 1 (0,0) pin, 2 (4,0), 3 (8,0) roller, 4 (2,3), 5 (6,3); diagonals 1-4, 4-2, 2-5, 5-3 have
+// length sqrt(13), sin = s = 3/sqrt(13), cos = c = 2/sqrt(13); loads: joint 4 (+20, -40), joint 5 (0, -60), joint 2 (0, -80)):
+//   Reactions: sum Fx = 0 -> Rx1 = -20. Moments about joint 1 (x Fy - y Fx summed over the loads, plus 8 Ry3): 8 Ry3 + (2*(-40) - 3*20)
+//   + 6*(-60) + 4*(-80) = 0 -> 8 Ry3 = 820 -> Ry3 = 102.5; sum Fy = 0 -> Ry1 = 180 - 102.5 = 77.5.
+//   Method of joints (tension positive, each member force times its unit vector away from the joint):
+//     joint 1: Fy: 77.5 + s N14 = 0 -> N14 = -77.5/s = -93.143408; Fx: -20 + N12 + c N14 = 0 -> N12 = 20 + 77.5 c/s = 71.666667
+//     joint 3: Fy: 102.5 + s N53 = 0 -> N53 = -102.5/s = -123.189669; Fx: -N23 - c N53 = 0 -> N23 = 102.5 c/s = 68.333333
+//     joint 4: Fy: -40 - s N14 - s N42 = 0 -> N42 = (-40 + 77.5)/s = 37.5/s = 45.069391; Fx: 20 - c N14 + N45 + c N42 = 0 -> N45 = -96.666667
+//     joint 5: Fy: -60 - s N25 - s N53 = 0 -> N25 = (-60 + 102.5)/s = 42.5/s = 51.078643 (joint 2 and the Fx of joint 5 then close).
+//   Virtual work (unit downward load at joint 2): reactions 1/2 and 1/2, forces f12 = f23 = 1/3, f45 = -2/3, f14 = f53 = -0.5/s,
+//   f42 = f25 = 0.5/s; deflection = sum f N L / (E A) with E A = 200 * 1200 kN (chords) or 200 * 800 kN (diagonals) = 6.083367 mm.
+//   Unit load at joint 4: reactions 3/4 and 1/4, f12 = 1/2, f23 = 1/6, f45 = -1/3, f14 = -0.75/s, f42 = -0.25/s, f25 = 0.25/s, f53 = -0.25/s
+//   -> 4.090834 mm.
+{
+    const { ctx, page } = await open();
+    const m = (await page.evaluate(async () => (await fetch('samples/manifest.json')).json())).samples.find(x => x.title === 'Plane Truss by the Stiffness Method');
+    check(!!m && m.python === true && m.group === 'Python', 'the truss sample is in the Python group');
+    const src = await page.evaluate(async (f) => (await fetch(f)).text(), m.file);
+    check(!src.includes(String.fromCharCode(0x2014)), 'the truss sample has no em-dash');
+    const probe = src.replace('#end python', 'print("FULL", repr(N), repr([R_x1, R_y1, R_y3]), repr([-u[3] * 1000.0, -u[7] * 1000.0]))\n#end python');
+    check(probe !== src, 'the probe line was added to the sample block');
+    await setText(page, probe);
+    await yes(page).click({ timeout: 20000 });
+    const t = await frameText(page, 'FULL', 60000);
+    const mm = /FULL \[([^\]]*)\] \[([^\]]*)\] \[([^\]]*)\]/.exec(t);
+    check(!!mm, 'the truss block ran and printed its full-precision numbers ' + (mm ? '' : JSON.stringify(t.slice(0, 300))));
+    if (mm) {
+        const N = mm[1].split(',').map(Number), R = mm[2].split(',').map(Number), D = mm[3].split(',').map(Number);
+        const rel = (a, b) => Math.abs(a - b) / Math.max(Math.abs(b), 1e-12);
+        const s = 3 / Math.sqrt(13), c = 2 / Math.sqrt(13);
+        // member order in the sample: 1-2, 2-3, 4-5, 1-4, 4-2, 2-5, 5-3
+        const hand = [20 + 77.5 * c / s, 102.5 * c / s, -96.666666666666667, -77.5 / s, 37.5 / s, 42.5 / s, -102.5 / s];
+        const literal = [71.666667, 68.333333, -96.666667, -93.143408, 45.069391, 51.078643, -123.189669];
+        check(hand.every((h, i) => rel(h, literal[i]) < 1e-6), 'the hand values written in the comment agree with their closed forms');
+        check(N.length === 7 && N.every((v, i) => rel(v, hand[i]) < 1e-6), `member forces agree with the method of joints to 1e-6 (${N.map(v => v.toFixed(4)).join(', ')})`);
+        check(rel(R[0], -20) < 1e-6 && rel(R[1], 77.5) < 1e-6 && rel(R[2], 102.5) < 1e-6, `reactions: Rx1 = -20, Ry1 = 77.5, Ry3 = 102.5 (${R.map(v => v.toFixed(4)).join(', ')})`);
+        check(Math.abs(-20 + 20) < 1e-9 && Math.abs(R[1] + R[2] - 180) < 1e-9 && Math.abs(R[0] + 20) < 1e-9, 'the reactions satisfy equilibrium: sum Fx = 0 and sum Fy = 0');
+        // moment equilibrium about joint 1: 8 Ry3 - (2*40 + 6*60 + 4*80) - 3*20 ... loads: joint 4 at (2,3): Fx 20 Fy -40; joint 5 (6,3): Fy -60; joint 2 (4,0): Fy -80
+        const M1 = 8 * R[2] + (2 * -40 - 3 * 20) + 6 * -60 + 4 * -80;
+        check(Math.abs(M1) < 1e-9, `the reactions satisfy moment equilibrium about joint 1 (${M1.toExponential(2)})`);
+        const E = 200, L = [4, 4, 4, Math.sqrt(13), Math.sqrt(13), Math.sqrt(13), Math.sqrt(13)], A = [1200, 1200, 1200, 800, 800, 800, 800];
+        const f2 = [1 / 3, 1 / 3, -2 / 3, -0.5 / s, 0.5 / s, 0.5 / s, -0.5 / s];
+        const f4 = [0.5, 1 / 6, -1 / 3, -0.75 / s, -0.25 / s, 0.25 / s, -0.25 / s];
+        const vw = f => f.reduce((acc, fi, i) => acc + fi * hand[i] * L[i] / (E * A[i]), 0) * 1000;
+        check(rel(vw(f2), 6.083367) < 1e-6 && rel(vw(f4), 4.090834) < 1e-6, `the virtual-work values are 6.083367 and 4.090834 mm (${vw(f2).toFixed(6)}, ${vw(f4).toFixed(6)})`);
+        check(rel(D[0], vw(f2)) < 1e-6 && rel(D[1], vw(f4)) < 1e-6, `deflections at joints 2 and 4 match virtual work to 1e-6 (${D.map(v => v.toFixed(6)).join(', ')})`);
+    }
+    // the sample as shipped: no error lines, a figure, and the Calcpad lines after the block use the exports
+    await setText(page, src);
+    const t2 = (await frameText(page, 'Reactions and deflection', 60000)).replace(/\s+/g, ' ');
+    check(!/Python error|Error in "/.test(t2), 'the truss sample shows no error line');
+    check(await frameHas(page, 'svg.cprs-py-figure'), 'the truss sample draws its figure');
+    check(/Largest vertical deflection 6\.083 mm at joint 2/.test(t2), 'the printed maximum deflection is 6.083 mm at joint 2');
+    check(/Nt_max_kN = 71\.67/.test(t2) && /Nc_max_kN = 123\.19/.test(t2) && /deltamax_mm = 6\.08/.test(t2), 'the maximum tension, compression and deflection are exported');
+    check(/ηt = .*= 0\.185/.test(t2) && /ηc = .*= 0\.477/.test(t2) && /within their capacity/.test(t2), 'the Calcpad member check uses the exports (eta 0.185 and 0.477)');
+    check(/Ry1 \+ Ry3 = .*= 180 kN/.test(t2), 'the Calcpad line adds the vertical reactions to 180 kN');
+    await ctx.close();
+}
+
+// ---- 12. a sheet holding a bare #python block, and exported names with an underscore or a capital -------------------
+{
+    const { ctx, page } = await open();
+    const BARE = ['<!--sheet-->', '# Bare block', '', 'a: 5', '', '#python', 'import numpy as np', 'export(k=float(np.linspace(0, 1, 5).sum()))', '#end python', '', 'r: k * 2'].join('\n');
+    await setText(page, BARE);
+    await yes(page).click({ timeout: 20000 });
+    await frameText(page, 'Bare block');
+    const tb = (await frameText(page, 'r = k', 40000)).replace(/\s+/g, ' ');
+    check(/k = 2\.5/.test(tb) && /r = .*= 5\b/.test(tb), 'a bare #python block in a sheet runs, and a quantity line after it uses the export (r = 5) ' + JSON.stringify(tb.slice(0, 200)));
+    check(!/Python error|#end python|#python/.test(tb), 'the bare block is not shown as sheet text and gives no error');
+    const errsBare = await page.evaluate(async (content) => {
+        const r = await fetch('/api/calcpad/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+        return JSON.parse(decodeURIComponent(r.headers.get('X-Calcpad-Errors') ?? '[]'));
+    }, BARE);
+    check(errsBare.length === 0, `no error lines for the bare block ${JSON.stringify(errsBare).slice(0, 200)}`);
+
+    const NAMES = ['<!--sheet-->', '# Exported names', '', '```python', 'export(sigma_c=2.0, phi=3.0, Mstar=4.0)', '```', '', 'a: sigma_c*2', 'b: phi + 1', 'c: Mstar + 1'].join('\n');
+    await setText(page, NAMES);
+    const tn = (await frameText(page, 'c = Mstar', 40000)).replace(/\s+/g, ' ');
+    check(/a = σc · 2 = 2 · 2 = 4/.test(tn) && /b = φ \+ 1 = 3 \+ 1 = 4/.test(tn) && /c = Mstar \+ 1 = 4 \+ 1 = 5/.test(tn), 'export(sigma_c, phi, Mstar) in a sheet: a = 4, b = 4, c = 5 ' + JSON.stringify(tn.slice(0, 300)));
+    const errsNames = await page.evaluate(async (content) => {
+        const r = await fetch('/api/calcpad/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+        return JSON.parse(decodeURIComponent(r.headers.get('X-Calcpad-Errors') ?? '[]'));
+    }, NAMES);
+    check(errsNames.length === 0 && !/Python error|Undefined|error/i.test(tn), `no error lines for the exported names ${JSON.stringify(errsNames).slice(0, 200)}`);
+    await ctx.close();
+}
+
+// ---- 13. the section properties of the native sample, computed again in Python ---------------------------------------
+{
+    const { ctx, page } = await open();
+    // independent values: parts b x h with centroids y above the base
+    const b = [200, 12, 150], h = [16, 300, 20], y = [8, 166, 324];
+    const Ap = b.map((v, i) => v * h[i]);
+    const At = Ap.reduce((p, q) => p + q, 0);
+    const yc = Ap.reduce((p, q, i) => p + q * y[i], 0) / At;
+    const Ix = b.reduce((p, v, i) => p + v * h[i] ** 3 / 12 + Ap[i] * (y[i] - yc) ** 2, 0);
+    const native = (await page.evaluate(async () => (await fetch('samples/manifest.json')).json())).samples.find(x => x.title === 'Built-up Section Properties');
+    check(!!native && native.group === 'Sections' && native.python === false, 'the native section sample is in the Sections group and has no Python');
+    const nsrc = await page.evaluate(async (f) => (await fetch(f)).text(), native.file);
+    await setText(page, nsrc);
+    const tn = (await frameText(page, 'Bending stress', 40000)).replace(/\s+/g, ' ');
+    const grab = re => { const mm = re.exec(tn); return mm ? Number(mm[1]) : NaN; };
+    const nat = { yc: grab(/9800 mm2 = ([0-9.]+) mm/), Ix: grab(/= ([0-9]{6,}) mm4/), At: grab(/Atot = sum \( A \) = ([0-9]+) mm2/) };
+    const near = (a, bb) => Math.abs(a - bb) / Math.abs(bb) < 1e-4;
+    check(near(nat.yc, yc) && near(nat.At, At) && near(nat.Ix, Ix), `the native sample gives A, y_c and I_x equal to the hand values (${JSON.stringify(nat)} against ${At}, ${yc.toFixed(3)}, ${Ix.toExponential(6)})`);
+    const PY = ['"Same section in Python', '#python', 'import numpy as np', 'b = np.array([200.0, 12.0, 150.0])', 'h = np.array([16.0, 300.0, 20.0])', 'y = np.array([8.0, 166.0, 324.0])',
+        'A = b * h', 'y_c = float((A * y).sum() / A.sum())', 'I_x = float((b * h**3 / 12 + A * (y - y_c) ** 2).sum())', 'print("section", repr(float(A.sum())), repr(y_c), repr(I_x))', '#end python'].join('\n');
+    await setText(page, PY);
+    await yes(page).click({ timeout: 20000 }).catch(() => {});
+    const tp = await frameText(page, 'section 9800', 40000);
+    const pm = /section ([0-9.eE+-]+) ([0-9.eE+-]+) ([0-9.eE+-]+)/.exec(tp);
+    check(!!pm && Math.abs(Number(pm[1]) - At) < 1e-9 && Math.abs(Number(pm[2]) - yc) < 1e-9 && Math.abs(Number(pm[3]) - Ix) / Ix < 1e-12, `the same calculation in Python gives the same A, y_c and I_x (${pm ? pm.slice(1).join(' ') : tp.slice(0, 100)})`);
+    check(pm && near(Number(pm[2]), nat.yc) && near(Number(pm[3]), nat.Ix), 'the Python and the native sample agree');
+    await ctx.close();
+}
+
+// ---- 14. the sample list shows the Sections group ---------------------------------------------------------------
+{
+    const { ctx, page } = await open();
+    await page.locator('[data-ribbon-btn=file]').click();
+    await page.locator('.cprs-menu button', { hasText: 'Samples...' }).click();
+    await page.locator('.cprs-samples').waitFor({ timeout: 10000 });
+    const groupBtn = page.locator('.cprs-s-group', { hasText: /^Sections / });
+    check(await groupBtn.count() === 1, 'the Samples browser lists a Sections group');
+    await groupBtn.click();
+    const titles = await page.locator('.cprs-samples .cprs-s-item .cprs-s-title').allInnerTexts();
+    check(titles.length === 1 && titles[0] === 'Built-up Section Properties', `the Sections group holds the built-up section sample ${JSON.stringify(titles)}`);
+    await page.locator('.cprs-s-group', { hasText: /^Python / }).click();
+    const pt = await page.locator('.cprs-samples .cprs-s-item .cprs-s-title').allInnerTexts();
+    check(pt.includes('Plane Truss by the Stiffness Method') && pt.length === 4, `the Python group lists the truss sample (${pt.length} samples)`);
+    await ctx.close();
+}
+
 await browser.close();
 console.log(fails.length ? `\n${fails.length} FAILED` : '\nall passed');
 process.exit(fails.length ? 1 : 0);
