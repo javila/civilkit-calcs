@@ -26,7 +26,12 @@ const SVG_MAX = 3_000_000;       // characters of SVG per worksheet run
 const EXPORTS_MAX = 500;         // exported names per worksheet run
 const HEAP = 32 * 1024 * 1024;   // the interpreter's heap
 
+/** The request and answer format of the linear algebra module (calcpad-linalg-wasm); must equal its `abi()`. */
+const LINALG_ABI = 'calcpad-linalg-2';
+
 interface Loaded {
+    realFetch: typeof fetch;
+    base: string;
     loadMicroPython: (o: Record<string, unknown>) => Promise<any>;
     wasm: Uint8Array;
     wasmUrl: string;
@@ -34,6 +39,39 @@ interface Loaded {
 }
 
 let loaded: Promise<Loaded> | null = null;
+let lastBase = '';
+// The engine's dense linear algebra (numpy.linalg, scipy.linalg), loaded the first time a block mentions it.
+let linalgCall: ((request: string) => string) | null = null;
+let linalgError: string | null = null;
+let linalgLoading: Promise<void> | null = null;
+
+async function loadLinalg(l: Loaded): Promise<void> {
+    try {
+        const mod = (await import(/* @vite-ignore */ `${l.base}wasm/calcpad_linalg_wasm.js`)) as {
+            default: (o: { module_or_path: ArrayBuffer }) => Promise<unknown>;
+            abi: () => string;
+            linalg: (request: string) => string;
+        };
+        // 'no-cache' revalidates, so the wasm is never an older build than the glue just imported.
+        const r = await l.realFetch(`${l.base}wasm/calcpad_linalg_wasm_bg.wasm`, { cache: 'no-cache' });
+        if (!r.ok) throw new Error(`calcpad_linalg_wasm_bg.wasm: ${r.status}`);
+        await mod.default({ module_or_path: await r.arrayBuffer() });
+        if (mod.abi() !== LINALG_ABI) throw new Error(`the linear algebra module is ${mod.abi()}, this page needs ${LINALG_ABI} (reload the page)`);
+        linalgCall = mod.linalg;
+    } catch (e) {
+        linalgError = e instanceof Error ? e.message : String(e);
+    }
+}
+
+/** Loads the linear algebra module before a block that may use it runs (Python calls it synchronously, so it must be there).
+ *  A block that multiplies large matrices (`@`, dot, matmul) loads it too, because the product is done by the engine then. */
+async function ensureLinalg(source: string): Promise<void> {
+    if (linalgCall || linalgError || !/linalg|scipy|matmul|\bdot\b|@/.test(source)) return;
+    const l = await load(lastBase);
+    linalgLoading ??= loadLinalg(l);
+    await linalgLoading;
+}
+
 let session: { mp: any; state: SessionState } | null = null;
 
 interface SessionState {
@@ -75,7 +113,7 @@ function load(base: string): Promise<Loaded> {
                     return Promise.reject(new TypeError('network access is not available to a worksheet script'));
                 },
             });
-            return { loadMicroPython: mod.loadMicroPython, wasm, wasmUrl, files };
+            return { realFetch, base, loadMicroPython: mod.loadMicroPython, wasm, wasmUrl, files };
         })();
         loaded.catch(() => { loaded = null; });
     }
@@ -97,6 +135,7 @@ function lockDown(): void {
 }
 
 async function start(msg: StartMsg): Promise<void> {
+    lastBase = msg.base;
     const l = await load(msg.base);
     const state: SessionState = { parts: [], exports: [], truncated: false, chars: 0, svgChars: 0, figures: 0, hostError: null };
     let pend: number[] = [];
@@ -127,6 +166,12 @@ async function start(msg: StartMsg): Promise<void> {
             } catch (e) {
                 state.hostError ??= `figure could not be drawn: ${e instanceof Error ? e.message : String(e)}`;
             }
+        },
+        linalg(t: string): string {
+            if (linalgCall) {
+                try { return linalgCall(String(t)); } catch (e) { return JSON.stringify({ ok: false, error: `linear algebra failed: ${e instanceof Error ? e.message : String(e)}` }); }
+            }
+            return JSON.stringify({ ok: false, error: linalgError ? `the linear algebra module did not load: ${linalgError}` : 'the linear algebra module is not loaded (write numpy.linalg or scipy.linalg in the block itself)' });
         },
         export(t: string) {
             if (state.exports.length >= EXPORTS_MAX) { state.hostError ??= `a worksheet may export at most ${EXPORTS_MAX} names`; return; }
@@ -183,6 +228,7 @@ self.onmessage = async (e: MessageEvent<StartMsg | RunMsg>) => {
             await start(m);
             send({ type: 'ready', token: m.token });
         } else if (m.type === 'run') {
+            await ensureLinalg(m.source);
             send({ type: 'result', token: m.token, id: m.id, result: run(m) });
         }
     } catch (err) {

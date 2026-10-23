@@ -1,6 +1,7 @@
 // Checks `#python` blocks in the built app served at --url (default http://127.0.0.1:4180/):
 // lazy loading, the once-per-tab question, print text, an SVG figure, an exported variable used by later Calcpad lines,
 // error line mapping, the timeout, the sandbox, and the exports (Report, Word, Excel).
+// numpy.linalg / scipy.linalg on the engine's wasm module, with its error lines and its cache rules.
 //   PLAYWRIGHT_BROWSERS_PATH=... node e2e/python-check.mjs [--url U] [--out DIR]
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -277,6 +278,102 @@ const SHEET = [
         await page.screenshot({ path: join(out, 'explorer.png') });
     }
     await ctx.close();
+}
+
+// ---- 9. numpy.linalg and scipy.linalg run on the Calcpad engine --------------------------------------------
+{
+    const { ctx, page, requests } = await open();
+    const linalgLoaded = () => requests.some(u => /calcpad_linalg_wasm_bg\.wasm/.test(u));
+    // 9a. the user's own section calculation needs no engine call and does not load the linear algebra module
+    const SECTION = ['"Section', '#python', 'import numpy as np', 'b = np.array([300.0, 20.0])', 'h = np.array([20.0, 280.0])', 'y = np.array([290.0, 140.0])',
+        'A = b * h', 'y_c = float((A * y).sum() / A.sum())', 'I_x = float((b * h**3 / 12 + A * (y - y_c) ** 2).sum())', 'print("section", round(y_c, 3), round(I_x))',
+        'export(y_c=y_c, I_x=I_x)', '#end python'].join('\n');
+    await setText(page, SECTION);
+    await yes(page).click({ timeout: 20000 });
+    const s = await frameText(page, 'section');
+    check(/section 217\.586 101959080/.test(s), 'section properties from numpy arrays (b*h, (A*y).sum()/A.sum(), b*h**3/12) ' + JSON.stringify(s.slice(0, 160)));
+    check(/yc = 217\.59/.test(s.replace(/\s+/g, ' ')), 'the section centroid is exported (as yc, the sheet spelling of y_c)');
+    await page.waitForTimeout(800);
+    check(!linalgLoaded(), 'a block that does not mention linalg does not load the linear algebra module');
+
+    // 9b. solve, inv, det, cholesky, eigh, svd, scipy.linalg
+    const LINALG = ['"Linalg', '#python', 'import numpy as np', 'import numpy.linalg as la', 'from scipy import linalg as sla',
+        'A = np.array([[2.0, 1.0, -1.0], [-3.0, -1.0, 2.0], [-2.0, 1.0, 2.0]])',
+        'x = np.linalg.solve(A, np.array([8.0, -11.0, -3.0]))',
+        'print("solve", [round(float(v), 6) for v in x])',
+        'print("det", round(float(la.det(A)), 6))',
+        'print("inv", np.round(la.inv(np.array([[4.0, 7.0], [2.0, 6.0]])), 6).tolist())',
+        'S = np.array([[4.0, 12.0, -16.0], [12.0, 37.0, -43.0], [-16.0, -43.0, 98.0]])',
+        'print("chol", np.round(la.cholesky(S), 6).tolist())',
+        'print("cho_solve", [round(float(v), 6) for v in sla.cho_solve(sla.cho_factor(S), [1.0, 2.0, 3.0])], [round(float(v), 6) for v in la.solve(S, [1.0, 2.0, 3.0])])',
+        'w, v = la.eigh(np.array([[2.0, 1.0], [1.0, 2.0]]))',
+        'print("eigh", [round(float(t), 6) for t in w], round(abs(float(v[0][0])), 6))',
+        'u, s, vt = la.svd(np.array([[3.0, 0.0], [0.0, -2.0]]))',
+        'print("svd", [round(float(t), 6) for t in s])',
+        'print("at", np.round(A @ x, 6).tolist())',
+        'import numpy._array as _na',
+        'B = np.array([[(i * 7 + j * 3) % 11 / 11.0 for j in range(60)] for i in range(60)])',
+        'P1 = B @ B',
+        '_na._ENGINE_DOT_MIN = 10 ** 12',
+        'P2 = B @ B',
+        'print("matmul equal", P1.tolist() == P2.tolist())',
+        '#end python'].join('\n');
+    await setText(page, LINALG);
+    const l = await frameText(page, 'matmul equal', 60000);
+    check(/solve \[2\.0, 3\.0, -1\.0\]/.test(l), 'np.linalg.solve gives the hand-known 3x3 answer (2, 3, -1) ' + JSON.stringify(l.slice(0, 200)));
+    check(/det -1\.0\b/.test(l), 'np.linalg.det of the same matrix is -1');
+    check(/inv \[\[0\.6, -0\.7\], \[-0\.2, 0\.4\]\]/.test(l), 'np.linalg.inv of [[4,7],[2,6]]');
+    check(/chol \[\[2\.0, 0\.0, 0\.0\], \[6\.0, 1\.0, 0\.0\], \[-8\.0, 5\.0, 3\.0\]\]/.test(l), 'np.linalg.cholesky gives the lower factor [[2,0,0],[6,1,0],[-8,5,3]]');
+    check(/cho_solve \[28\.583333, -7\.666667, 1\.333333\] \[28\.583333, -7\.666667, 1\.333333\]/.test(l), 'scipy.linalg.cho_factor + cho_solve agree with solve');
+    check(/eigh \[1\.0, 3\.0\] 0\.707107/.test(l), 'np.linalg.eigh: ascending eigenvalues 1 and 3, unit eigenvectors');
+    check(/svd \[3\.0, 2\.0\]/.test(l), 'np.linalg.svd: singular values 3 and 2');
+    check(/at \[8\.0, -11\.0, -3\.0\]/.test(l), 'A @ x reproduces the right-hand side');
+    check(/matmul equal True/.test(l), 'a 60x60 product from the engine equals the Python product value for value');
+    check(linalgLoaded(), 'the linear algebra module loaded for a block that uses linalg');
+
+    // 9c. errors name the Python line
+    await setText(page, ['"Singular', 'q = 1', '#python', 'import numpy as np', 'M = np.array([[1.0, 2.0], [2.0, 4.0]])', 'x = np.linalg.solve(M, [1.0, 2.0])', '#end python'].join('\n'));
+    const e1 = await frameText(page, 'Python error', 30000);
+    check(/Python error on line 6: LinAlgError/.test(e1) && /singular/i.test(e1), 'a singular matrix is an error on its Python line (6) ' + JSON.stringify(e1.slice(0, 200)));
+    await setText(page, ['"NotPD', '#python', 'import numpy as np', 'np.linalg.cholesky(np.array([[1.0, 2.0], [2.0, 1.0]]))', '#end python'].join('\n'));
+    check(/Python error on line 4: LinAlgError/.test(await frameText(page, 'on line 4: LinAlgError', 30000)), 'a matrix that is not positive definite is a LinAlgError on its line (4)');
+    await setText(page, ['"Unsupported', '#python', 'import numpy as np', 'np.linalg.eig(np.array([[1.0, 2.0], [3.0, 4.0]]))', '#end python'].join('\n'));
+    const e3 = await frameText(page, 'NotImplementedError', 30000);
+    check(/NotImplementedError/.test(e3) && /non-symmetric/.test(e3), 'eig of a non-symmetric matrix says it is not available and why');
+    await setText(page, ['"Unknown', '#python', 'import numpy as np', 'np.linalg.lstsq([[1.0]], [1.0])', '#end python'].join('\n'));
+    const e5 = await frameText(page, 'lstsq', 30000);
+    check(/NotImplementedError/.test(e5) && /numpy\.linalg\.lstsq is not available/.test(e5), 'an unsupported linalg name raises NotImplementedError');
+
+    // 9d. a stale or wrong module cannot answer: a wrong wasm behind the glue is refused with a clear error
+    const ctx2 = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+    const page2 = await ctx2.newPage();
+    await page2.route(/calcpad_linalg_wasm_bg\.wasm/, async route => {
+        const r = await page2.request.get(new URL('py/micropython/micropython.wasm', url).href);
+        await route.fulfill({ status: 200, contentType: 'application/wasm', body: await r.body() });
+    });
+    await page2.goto(url);
+    await page2.waitForFunction(() => window.calcpadActiveEditor != null && window.calcpadFiles != null, null, { timeout: 60000 });
+    await setText(page2, ['"Mismatch', '#python', 'import numpy as np', 'np.linalg.det(np.array([[1.0, 2.0], [3.0, 4.0]]))', '#end python'].join('\n'));
+    await yes(page2).click({ timeout: 20000 });
+    const e4 = await frameText(page2, 'Python error', 30000);
+    check(/did not load/.test(e4), 'a wasm that does not match the glue is refused ("did not load"), never used ' + JSON.stringify(e4.slice(0, 200)));
+    await ctx2.close();
+    await ctx.close();
+}
+
+// ---- 10. caching rules: the wasm the Python worker loads is revalidated -------------------------------------------
+{
+    const { readFileSync } = await import('node:fs');
+    const headers = readFileSync(new URL('../calcpad-web/cloudflare/_headers', import.meta.url), 'utf8').split('\n');
+    const rule = (path) => { const i = headers.findIndex(l => l.trim() === path); return i < 0 ? '' : headers.slice(i + 1, i + 4).join(' '); };
+    check(/no-cache/.test(rule('/calcs/wasm/*.wasm')), '_headers: /calcs/wasm/*.wasm is revalidated (covers the linear algebra module)');
+    check(/no-cache/.test(rule('/calcs/py/micropython/*.wasm')), '_headers: /calcs/py/micropython/*.wasm is revalidated');
+    const worker = readFileSync(new URL('../calcpad-web/src/wasm/python-worker.ts', import.meta.url), 'utf8');
+    check(/calcpad_linalg_wasm_bg\.wasm`, \{ cache: 'no-cache' \}/.test(worker) && /LINALG_ABI/.test(worker), 'the worker fetches the linear algebra wasm with cache: no-cache and checks its abi()');
+    const rust = readFileSync(new URL('../../calcpad-linalg-wasm/src/lib.rs', import.meta.url), 'utf8');
+    const abiRust = /pub const ABI: &str = "([^"]+)"/.exec(rust)?.[1];
+    const abiTs = /const LINALG_ABI = '([^']+)'/.exec(worker)?.[1];
+    check(!!abiRust && abiRust === abiTs, `the Rust module and the worker agree on the interface version (${abiRust})`);
 }
 
 await browser.close();

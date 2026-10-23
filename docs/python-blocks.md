@@ -86,6 +86,87 @@ Python cannot read Calcpad variables yet. Doing it cheaply is possible: run the 
 numeric variables from its answer, and put them into the block's globals. It costs one extra engine pass per block and needs
 the engine to return variable values for a partial worksheet, so it is not built.
 
+## Linear algebra
+
+`numpy.linalg` and `scipy.linalg` are real: the numbers come from the Calcpad engine, the same code that evaluates `lsolve`,
+`inverse`, `det`, `cholesky`, `eigenvals` and `svd` in a Calcpad line, so a Python block and a Calcpad line give one answer
+(`calcpad-linalg-wasm`, a separate wasm module the worker loads on the first block that mentions `linalg`, `scipy`, `dot`,
+`matmul` or `@`; a block that does none of these never downloads it).
+
+```python
+import numpy as np
+K = np.array([[4.0, -2.0], [-2.0, 3.0]])
+u = np.linalg.solve(K, np.array([10.0, 0.0]))     # [3.0, 2.0]
+export(u1=float(u[0]), u2=float(u[1]))
+```
+
+| Call | Notes |
+|---|---|
+| `np.linalg.solve(a, b)` | `b` a vector or a matrix of columns |
+| `np.linalg.inv(a)`, `det(a)` | |
+| `np.linalg.cholesky(a)` | the lower factor `L`, `a = L @ L.T`; reads the lower triangle, as numpy does |
+| `np.linalg.eigh(a, UPLO="L")`, `eigvalsh(a)` | symmetric matrices; eigenvalues ascending, eigenvectors as columns |
+| `np.linalg.eig(a)`, `eigvals(a)` | symmetric matrices only (the engine's eigen solver is symmetric); ascending order, which numpy does not promise |
+| `np.linalg.svd(a, full_matrices=False)` | `u, s, vt`; `full_matrices=True` only for square `a`; `compute_uv=False` gives `s` |
+| `np.linalg.matrix_rank(a)`, `cond(a)`, `pinv(a)`, `norm(x, ord)` | `norm` takes no `axis`; `cond` is the 2-norm one |
+| `scipy.linalg.solve`, `inv`, `det`, `eigh`, `svd` | same engine; `assume_a` is accepted and does not change the answer |
+| `scipy.linalg.cholesky(a, lower=False)` | the upper factor by default, as scipy does |
+| `scipy.linalg.cho_factor`, `cho_solve` | `cho_solve((c, lower), b)` |
+| `scipy.linalg.solve_triangular(a, b, lower=, trans=)` | reads only the stated triangle; `unit_diagonal=True` is not available |
+
+What differs from numpy, and what you see:
+
+- Eigenvector and singular vector signs are the engine's, and numpy's LAPACK may choose the opposite sign. Check results that do
+  not depend on the sign (`a @ v` against `w * v`), not the signs themselves.
+- A singular or badly scaled matrix raises `LinAlgError` (a subclass of `ValueError`, as in numpy) with the engine's message,
+  for example `LinAlgError: Matrix is singular.`, and the worksheet shows it on the Python line that made the call. A matrix that
+  is not positive definite does the same for `cholesky`. NaN or inf in an input is `LinAlgError: Array must not contain infs or NaNs`.
+- Anything else raises `NotImplementedError` naming the function (`numpy.linalg.lstsq is not available in the light Python
+  stand-in`, `numpy.linalg.eig of a non-symmetric matrix (the engine's eigen solver is symmetric only; ...)`). There is no
+  silent substitute. Stacked matrices (3-D input) are not supported.
+- Large products use the engine too: from about 46 by 46 times 46 by 46 (100 000 multiply-adds), `a @ b` and `np.dot` of float
+  matrices are done by the engine, with the same values as the Python loop (checked value for value). Smaller products stay in Python.
+- Values are float64 and unitless. Matrices cross to the engine as packed 64-bit floats in hexadecimal text (exact; decimal text
+  took seconds for a 240 by 240 matrix).
+- The module is loaded before a block runs, from the block's text. A call that Python builds by name (`getattr(np, "lin" + "alg")`)
+  finds no module loaded and raises `LinAlgError: the linear algebra module is not loaded (write numpy.linalg or scipy.linalg in the block itself)`.
+  If the download fails, or the module does not match the page (a stale cached file), the error is
+  `LinAlgError: the linear algebra module did not load: ...`; the wasm is always revalidated (see below) and checks an interface
+  version, so it is refused rather than answering differently.
+
+### Speed
+
+Solving `A x = b` for a dense `n` by `n` matrix, best of three, in Node on a busy 8-core Mac (load average about 10, so absolute
+numbers are rough; the ratios are the point). "Pure Python" is a hand-written Gaussian elimination, which is what a script would
+need without linalg. The engine column is `np.linalg.solve` including packing, the call and unpacking:
+
+| n | pure Python | `np.linalg.solve` (engine) | ulab `inv` and `dot` (measured, not shipped) |
+|---|---|---|---|
+| 60 | 186 ms | 20 ms | 1 ms |
+| 120 | 1 465 ms | 87 ms | 6 ms |
+| 240 | 11 143 ms | 503 ms | 52 ms |
+
+The same matrix product, 60 by 60: 761 ms in the Python loop, about 220 ms through the engine; 120 by 120: 7.0 s in the loop,
+about 1.0 s through the engine, 5 ms in ulab.
+
+### Why not ulab
+
+[ulab](https://github.com/v923z/micropython-ulab) (MIT) is a numpy-like C module for MicroPython. It was built and measured
+(v6.12.1 in MicroPython v1.24.1, float64) and is **not shipped**:
+
+- It is 10 times faster than the engine bridge, but it is a different numpy: at most 2-D arrays, no `@`, no `.sum()` method, no
+  `cumsum`, `prod`, `var`, `average`, `isclose`, `ones_like` or `abs`, and different indexing and printing. Hiding that behind the
+  stand-in without visible seams would mean keeping the stand-in's own array class anyway and converting on every call.
+- The wasm grows: a MicroPython 1.24.1 built with the current Emscripten and ulab (complex, fft, linalg and file input and
+  output switched off) is about 820 KB, against the 389 KB wasm now shipped (the shipped one is an earlier toolchain's build;
+  the same MicroPython and settings, built without ulab, are 588 KB), and the garbage collector needs the asyncify transform, so
+  the interpreter cannot be made smaller by dropping it.
+- It would be a second source of numerics next to the engine.
+
+The engine is the one source of numerics for Calcpad lines, sheets and Python blocks, and the download stays at the shipped
+size plus 138 KB gzipped, only when linear algebra is used. If matrix work at n of a few hundred in Python becomes common, a
+ulab build is the faster route, at the cost above.
+
 ## The editor
 
 `calcpad-highlighter` treats a block as not Calcpad (`src/python_blocks.rs`): its lines are not tokenized, linted or prettified;
@@ -126,6 +207,8 @@ confirmation below: the worker chunk, `py/micropython/micropython.{mjs,wasm}` an
 | `python-worker` chunk (includes the SVG chart code) | 16 030 | 6 263 |
 | `python` chunk (runner, consent dialog, block text code) | 4 204 | 1 810 |
 | **Total on first use** | **about 590 000 (0.56 MB)** | **about 240 000** |
+| `numpy/linalg.py`, `scipy/*.py` (with the files above, when a block imports them) | 10 211 | about 3 500 |
+| `wasm/calcpad_linalg_wasm_bg.wasm` and its glue, only for a block that mentions linalg, scipy, dot, matmul or `@` | 352 257 | 139 880 |
 
 (The seven Python files together gzip to 20 036 bytes. The sizes are of the build on this branch.)
 
@@ -167,7 +250,8 @@ Probed by running small scripts on the shipped stand-ins (24 probes; the numbers
 | `linspace`, `arange`, `zeros`, `ones`, `full`, element assignment, boolean masks | works | |
 | array arithmetic and `**`, `@`, `np.dot`, scalar on either side | works | float on the left needed a fix (below) |
 | `np.diff`, `np.trapz` / `trapezoid`, `np.eye` | works | added in the spike (about 25 lines) |
-| `np.linalg` (`solve`, `inv`, `eig`) | missing | the biggest gap for structural scripts |
+| `np.linalg`: `solve`, `inv`, `det`, `cholesky`, `eigh`, `eigvalsh`, `svd`, `matrix_rank`, `cond`, `pinv`, `norm`; `scipy.linalg`: `solve`, `inv`, `det`, `cholesky`, `cho_factor`, `cho_solve`, `solve_triangular`, `eigh`, `svd` | works | computed by the Calcpad engine, see "Linear algebra" below |
+| `np.linalg.eig` of a non-symmetric matrix, `lstsq`, `qr`, `lu`, `matrix_power`, stacked (3-D) matrices | missing | `NotImplementedError` naming the function |
 | `np.vstack`, `hstack`, `reshape`, `meshgrid`, `sort`, `unique`, `interp`, `polyfit`, `random`, `cross`, `outer` | missing | raise `NotImplementedError` naming the function |
 | math, f-strings, comprehensions, lambdas, dicts, classes, `time`, `random` | works | MicroPython 1.24 |
 | `float(0-d array)` | missing | removed so that `2.5 * array` works |
@@ -178,8 +262,8 @@ Probed by running small scripts on the shipped stand-ins (24 probes; the numbers
 | `input()` | refused | there is no keyboard |
 | `import js`, `jsffi`, network, host files | refused | see the sandbox |
 
-Missing features by importance for calculation worksheets: (1) `numpy.linalg`; (2) `vstack`/`hstack`/`reshape`/`meshgrid`/`sort`;
-(3) `hist`, `annotate`, `twinx`, `set_xticks`, `step`; (4) `interp`/`polyfit`; (5) `contour`/`imshow`/`colorbar`; (6) `errorbar`, `pie`.
+Missing features by importance for calculation worksheets: (1) `vstack`/`hstack`/`reshape`/`meshgrid`/`sort`;
+(2) `hist`, `annotate`, `twinx`, `set_xticks`, `step`; (3) `interp`/`polyfit`; (4) `lstsq`, `qr`, non-symmetric `eig`; (5) `contour`/`imshow`/`colorbar`; (6) `errorbar`, `pie`.
 
 ## What was changed in the copied stand-ins
 
