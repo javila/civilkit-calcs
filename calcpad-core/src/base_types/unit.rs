@@ -88,21 +88,30 @@ impl Unit {
         Unit::from_parts(&vec![0f32; n], &vec![0f64; n], 'C')
     }
 
+    /// A unit of `n` dimensions with zero powers and factors and a new powers identity, for
+    /// the caller to fill in.
     #[inline]
-    fn from_parts(powers: &[f32], factors: &[f64], temp_char: char) -> Unit {
-        let n = powers.len();
-        debug_assert!(n <= MAX_DIMS && factors.len() == n);
-        let mut pw = [0f32; MAX_DIMS];
-        pw[..n].copy_from_slice(powers);
-        let fc: [Cell<f64>; MAX_DIMS] = std::array::from_fn(|i| Cell::new(if i < n { factors[i] } else { 0.0 }));
+    fn blank(n: usize, temp_char: char) -> Unit {
+        debug_assert!(n <= MAX_DIMS);
         Unit {
             text: RefCell::new(None),
             temp_char: Cell::new(temp_char),
             n: n as u8,
             pid: NEXT_POWERS_ID.fetch_add(1, Ordering::Relaxed),
-            pw,
-            fc,
+            pw: [0f32; MAX_DIMS],
+            fc: [const { Cell::new(0.0) }; MAX_DIMS],
         }
+    }
+
+    fn from_parts(powers: &[f32], factors: &[f64], temp_char: char) -> Unit {
+        let n = powers.len();
+        debug_assert!(factors.len() == n);
+        let mut u = Unit::blank(n, temp_char);
+        for i in 0..n {
+            u.pw[i] = powers[i];
+            u.fc[i].set(factors[i]);
+        }
+        u
     }
 
     /// `new Unit(text, mass, length, time, current, temp, substance, luminosity, angle)`
@@ -145,27 +154,35 @@ impl Unit {
 
     /// `new Unit(Unit u)`: shares the powers array, copies the factors.
     pub fn copy(u: &Unit) -> Unit {
-        Unit {
+        let c = Unit {
             text: RefCell::new(u.text.borrow().clone()),
             temp_char: Cell::new(u.temp_char.get()),
             n: u.n,
             pid: u.pid,
             pw: u.pw,
-            fc: std::array::from_fn(|i| Cell::new(u.fc[i].get())),
+            fc: [const { Cell::new(0.0) }; MAX_DIMS],
+        };
+        for i in 0..u.n as usize {
+            c.fc[i].set(u.fc[i].get());
         }
+        c
     }
 
     /// `new Unit(Unit u, string alias)`: shares powers and factors. The port copies the factors:
     /// nothing changes the factors of a table unit after its aliases are made.
     pub fn alias(u: &Unit, alias: &str) -> Unit {
-        Unit {
+        let c = Unit {
             text: RefCell::new(Some(alias.to_string())),
             temp_char: Cell::new(u.temp_char.get()),
             n: u.n,
             pid: u.pid,
             pw: u.pw,
-            fc: std::array::from_fn(|i| Cell::new(u.fc[i].get())),
+            fc: [const { Cell::new(0.0) }; MAX_DIMS],
+        };
+        for i in 0..u.n as usize {
+            c.fc[i].set(u.fc[i].get());
         }
+        c
     }
 
     /// `Unit.GetFormattingUnit(s)`
@@ -487,30 +504,23 @@ impl Unit {
         }
         let f1 = &u1.fc;
         let f2 = &u2.fc;
-        let mut p = [0f32; MAX_DIMS];
-        let mut f = [0f64; MAX_DIMS];
+        let mut u = Unit::blank(n, temp_char);
         for i in 0..n1 {
             if i < n2 {
-                p[i] = if divide { p1[i] - p2[i] } else { p1[i] + p2[i] };
-                f[i] = if p1[i] == 0.0 { f2[i].get() } else { f1[i].get() };
+                u.pw[i] = if divide { p1[i] - p2[i] } else { p1[i] + p2[i] };
+                u.fc[i].set(if p1[i] == 0.0 { f2[i].get() } else { f1[i].get() });
             } else {
-                p[i] = p1[i];
-                f[i] = if p1[i] != 0.0 { f1[i].get() } else { 1.0 };
+                u.pw[i] = p1[i];
+                u.fc[i].set(if p1[i] != 0.0 { f1[i].get() } else { 1.0 });
             }
         }
         if n2 > n1 {
             for i in n1..n2 {
-                f[i] = f2[i].get();
-            }
-            if divide {
-                for i in n1..n2 {
-                    p[i] = -p2[i];
-                }
-            } else {
-                p[n1..n2].copy_from_slice(&p2[n1..n2]);
+                u.fc[i].set(f2[i].get());
+                u.pw[i] = if divide { -p2[i] } else { p2[i] };
             }
         }
-        Some(Rc::new(Unit::from_parts(&p[..n], &f[..n], temp_char)))
+        Some(Rc::new(u))
     }
 
     /// `operator *(Unit, Unit)`: MultiplyOrDivide without the conversion factor.
@@ -555,13 +565,12 @@ impl Unit {
             return None;
         }
         let n = self.len();
-        let mut p = [0f32; MAX_DIMS];
-        let mut f = [0f64; MAX_DIMS];
+        let mut u = Unit::blank(n, self.temp_char.get());
         for i in 0..n {
-            p[i] = self.pw[i] * x;
-            f[i] = self.fc[i].get();
+            u.pw[i] = self.pw[i] * x;
+            u.fc[i].set(self.fc[i].get());
         }
-        Some(Rc::new(Unit::from_parts(&p[..n], &f[..n], self.temp_char.get())))
+        Some(Rc::new(u))
     }
 
     pub fn is_consistent_opt(u1: &OptUnit, u2: &OptUnit) -> bool {
