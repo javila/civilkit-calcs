@@ -7,6 +7,7 @@
 pub mod expr;
 mod format;
 mod names;
+mod pyexport;
 mod tex;
 
 pub use format::format;
@@ -123,7 +124,7 @@ struct Block {
 enum Fence {
     Calcpad,
     /// A ```python fence: its lines are the body of a `#python` block, indentation kept.
-    Python(usize),
+    Python(usize, pyexport::ExportScan),
     Code(usize),
 }
 
@@ -440,7 +441,7 @@ impl<'a> Comp<'a> {
                     continue;
                 }
             }
-            if let Some(f) = &fence {
+            if let Some(f) = &mut fence {
                 let closes = line.trim_start().starts_with("```");
                 match f {
                     Fence::Calcpad => {
@@ -453,7 +454,7 @@ impl<'a> Comp<'a> {
                             self.emit(r, idx);
                         }
                     }
-                    Fence::Python(strip) => {
+                    Fence::Python(strip, scan) => {
                         self.mark(idx, LineKind::Raw);
                         if closes {
                             fence = None;
@@ -461,7 +462,7 @@ impl<'a> Comp<'a> {
                         } else {
                             let (w, _, n) = leading(line);
                             let extra = w.saturating_sub(*strip);
-                            let s = format!("{}{}", " ".repeat(extra), line[n..].trim_end());
+                            let s = format!("{}{}", " ".repeat(extra), scan.line(line[n..].trim_end()));
                             self.emit(s, idx);
                         }
                     }
@@ -584,7 +585,7 @@ impl<'a> Comp<'a> {
                     self.flush_prose();
                     self.mark(idx, LineKind::Raw);
                     self.emit("#python", idx);
-                    fence = Some(Fence::Python(strip));
+                    fence = Some(Fence::Python(strip, pyexport::ExportScan::default()));
                 } else {
                     self.prose.push(Pl {
                         text: body,
@@ -633,7 +634,7 @@ impl<'a> Comp<'a> {
                 kind: PKind::Normal,
             });
         }
-        if let Some(Fence::Python(_)) = fence {
+        if let Some(Fence::Python(..)) = fence {
             let last = lines.len().saturating_sub(1);
             self.diag(last, Severity::Error, "the python fence is never closed with ```");
             self.emit("#end python", last);

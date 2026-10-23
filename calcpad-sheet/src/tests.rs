@@ -611,3 +611,46 @@ fn a_plain_code_fence_is_still_prose() {
     let c = compile("<!--sheet-->\n```rust\nlet a = 1;\n```\n");
     assert!(!c.text.contains("#python"), "{}", c.text);
 }
+
+fn python_body(src: &str) -> String {
+    let c = compile(src);
+    let t = c.text;
+    let a = t.find("#python\n").expect("a python block") + "#python\n".len();
+    let b = t.find("\n#end python").expect("closed");
+    t[a..b].to_string()
+}
+
+#[test]
+fn export_keywords_use_the_sheet_spelling() {
+    let body = python_body("<!--sheet-->\n```python\nexport(sigma_c=2.0, phi=3.0, Mstar=4.0, y_c=5.0, plain=6.0)\n```\nx: 1");
+    assert_eq!(body, "export(σ_c=2.0, φ=3.0, M_star=4.0, y_c=5.0, plain=6.0)");
+}
+
+#[test]
+fn export_names_follow_across_lines_and_export_data() {
+    let body = python_body("<!--sheet-->\n```python\nexport_data(\n    sigma_c=1,\n    phi=2)\nphi = 3\n```\nx: 1");
+    assert_eq!(body, "export_data(\n    σ_c=1,\n    φ=2)\nphi = 3");
+}
+
+#[test]
+fn export_positional_name_string_is_renamed() {
+    let body = python_body("<!--sheet-->\n```python\nexport(\"sigma_c\", 2.0)\n```\nx: 1");
+    assert_eq!(body, "export(\"σ_c\", 2.0)");
+}
+
+#[test]
+fn only_the_export_call_keywords_are_renamed() {
+    let src = "<!--sheet-->\n```python\nphi = 3\nsigma_c = f(phi=1)  # export(phi=1)\nexport(a=g(phi=2), s=\"phi=3\")\nobj.export(phi=1)\nmyexport(phi=1)\n```\nx: 1";
+    let body = python_body(src);
+    assert_eq!(
+        body,
+        "phi = 3\nsigma_c = f(phi=1)  # export(phi=1)\nexport(a=g(phi=2), s=\"phi=3\")\nobj.export(phi=1)\nmyexport(phi=1)"
+    );
+}
+
+#[test]
+fn a_name_exported_from_python_is_defined_for_the_lines_after_it() {
+    let c = compile("<!--sheet-->\n```python\nexport(sigma_c=2.0)\n```\na: sigma_c * 2\n");
+    assert!(c.text.contains("σ_c=2.0"), "{}", c.text);
+    assert!(c.text.contains("σ_c"), "{}", c.text);
+}
