@@ -9,6 +9,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::base_types::value::Value;
 use crate::calculator::NEG_CHAR;
@@ -28,11 +29,22 @@ pub enum Field {
     Other,
 }
 
+/// The most dimensions a unit has (the table's empty key has nine).
+const MAX_DIMS: usize = 9;
+
+/// Source of `Unit::pid`.
+static NEXT_POWERS_ID: AtomicU64 = AtomicU64::new(1);
+
+/// A unit is one block of memory: the powers and the factors are stored inline, so that making
+/// the result of a unit calculation costs a single allocation. `pid` stands for the identity of
+/// the C# `_powers` array: units made by `copy` and `alias` carry their source's `pid`.
 pub struct Unit {
     text: RefCell<Option<String>>,
     temp_char: Cell<char>,
-    powers: Rc<[f32]>,
-    factors: Rc<RefCell<Vec<f64>>>,
+    n: u8,
+    pid: u64,
+    pw: [f32; MAX_DIMS],
+    fc: [Cell<f64>; MAX_DIMS],
 }
 
 const COMPOSITE_UNIT_CHARS: [char; 3] = [NEG_CHAR, '\u{2215}', '^'];
@@ -73,20 +85,23 @@ impl Unit {
 
     /// `new Unit(int n)`
     pub fn new_n(n: usize) -> Unit {
-        Unit {
-            text: RefCell::new(None),
-            temp_char: Cell::new('C'),
-            powers: vec![0f32; n].into(),
-            factors: Rc::new(RefCell::new(vec![0f64; n])),
-        }
+        Unit::from_parts(&vec![0f32; n], &vec![0f64; n], 'C')
     }
 
-    fn from_parts(powers: Vec<f32>, factors: Vec<f64>, temp_char: char) -> Unit {
+    #[inline]
+    fn from_parts(powers: &[f32], factors: &[f64], temp_char: char) -> Unit {
+        let n = powers.len();
+        debug_assert!(n <= MAX_DIMS && factors.len() == n);
+        let mut pw = [0f32; MAX_DIMS];
+        pw[..n].copy_from_slice(powers);
+        let fc: [Cell<f64>; MAX_DIMS] = std::array::from_fn(|i| Cell::new(if i < n { factors[i] } else { 0.0 }));
         Unit {
             text: RefCell::new(None),
             temp_char: Cell::new(temp_char),
-            powers: powers.into(),
-            factors: Rc::new(RefCell::new(factors)),
+            n: n as u8,
+            pid: NEXT_POWERS_ID.fetch_add(1, Ordering::Relaxed),
+            pw,
+            fc,
         }
     }
 
@@ -123,8 +138,7 @@ impl Unit {
         let mut factors = vec![1f64; n];
         factors[0] = 1000.0;
         let all = [mass, length, time, current, temp, substance, luminosity, angle];
-        let powers: Vec<f32> = all[..n].to_vec();
-        let u = Unit::from_parts(powers, factors, 'C');
+        let u = Unit::from_parts(&all[..n], &factors, 'C');
         *u.text.borrow_mut() = Some(text.to_string());
         u
     }
@@ -134,18 +148,23 @@ impl Unit {
         Unit {
             text: RefCell::new(u.text.borrow().clone()),
             temp_char: Cell::new(u.temp_char.get()),
-            powers: u.powers.clone(),
-            factors: Rc::new(RefCell::new(u.factors.borrow().clone())),
+            n: u.n,
+            pid: u.pid,
+            pw: u.pw,
+            fc: std::array::from_fn(|i| Cell::new(u.fc[i].get())),
         }
     }
 
-    /// `new Unit(Unit u, string alias)`: shares powers and factors.
+    /// `new Unit(Unit u, string alias)`: shares powers and factors. The port copies the factors:
+    /// nothing changes the factors of a table unit after its aliases are made.
     pub fn alias(u: &Unit, alias: &str) -> Unit {
         Unit {
             text: RefCell::new(Some(alias.to_string())),
             temp_char: Cell::new(u.temp_char.get()),
-            powers: u.powers.clone(),
-            factors: u.factors.clone(),
+            n: u.n,
+            pid: u.pid,
+            pw: u.pw,
+            fc: std::array::from_fn(|i| Cell::new(u.fc[i].get())),
         }
     }
 
@@ -160,20 +179,22 @@ impl Unit {
 
     #[inline]
     pub fn len(&self) -> usize {
-        self.powers.len()
+        self.n as usize
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.powers.is_empty()
+        self.n == 0
     }
 
+    #[inline]
     pub fn powers(&self) -> &[f32] {
-        &self.powers
+        &self.pw[..self.n as usize]
     }
 
     pub fn factor(&self, i: usize) -> f64 {
-        self.factors.borrow()[i]
+        assert!(i < self.n as usize);
+        self.fc[i].get()
     }
 
     pub fn raw_text(&self) -> Option<String> {
@@ -193,7 +214,7 @@ impl Unit {
     }
 
     pub fn get_field(&self) -> Field {
-        let p = &self.powers;
+        let p = self.powers();
         match self.len() {
             3 => {
                 if p[0] == 1.0 {
@@ -225,21 +246,21 @@ impl Unit {
     }
 
     fn has_temp(&self) -> bool {
-        self.len() >= 5 && self.powers[4] != 0.0
+        self.len() >= 5 && self.pw[4] != 0.0
     }
 
     pub fn is_temp(&self) -> bool {
-        let p = &self.powers;
+        let p = self.powers();
         self.len() == 5 && p[4] == 1.0 && p[0] == 0.0 && p[1] == 0.0 && p[2] == 0.0 && p[3] == 0.0
     }
 
     pub fn is_angle(&self) -> bool {
-        let p = &self.powers;
+        let p = self.powers();
         self.len() == 8 && p[7] == 1.0 && p[..7].iter().all(|&x| x == 0.0)
     }
 
     pub fn is_dimensionless(&self) -> bool {
-        self.powers.is_empty()
+        self.n == 0
     }
 
     /// `Unit.Text`
@@ -299,7 +320,7 @@ impl Unit {
 
     /// `Unit.Equals(Unit)`
     pub fn equals(a: &UnitRef, b: &UnitRef) -> bool {
-        Rc::ptr_eq(a, b) || a.is_consistent(b) && *a.factors.borrow() == *b.factors.borrow()
+        Rc::ptr_eq(a, b) || a.is_consistent(b) && a.factors_slice_eq(b)
     }
 
     pub fn get_text_of(u: &OptUnit) -> String {
@@ -330,13 +351,18 @@ impl Unit {
 
     /// `void Scale(double factor)` (in place)
     pub fn scale_in_place(&self, factor: f64) {
-        let mut f = self.factors.borrow_mut();
-        for (i, &p) in self.powers.iter().enumerate() {
+        for (i, &p) in self.powers().iter().enumerate() {
             if p != 0.0 {
-                f[i] *= factor.powf(1.0 / p as f64);
+                self.fc[i].set(self.fc[i].get() * factor.powf(1.0 / p as f64));
                 return;
             }
         }
+    }
+
+    /// The factors of two units of the same length are equal.
+    #[inline]
+    fn factors_slice_eq(&self, other: &Unit) -> bool {
+        (0..self.n as usize).all(|i| self.fc[i].get() == other.fc[i].get())
     }
 
     /// `Unit Scale(string s, double factor)`
@@ -375,11 +401,10 @@ impl Unit {
         };
         let mut sb = String::new();
         let mut is_first = true;
-        let factors = self.factors.borrow().clone();
-        for (i, &p) in self.powers.iter().enumerate() {
+        for (i, &p) in self.powers().iter().enumerate() {
             if p != 0.0 {
                 let abs_pow = if is_first { p } else { p.abs() };
-                let mut s = get_dim_text(writer.as_ref(), self.unit_name(i), factors[i], abs_pow);
+                let mut s = get_dim_text(writer.as_ref(), self.unit_name(i), self.fc[i].get(), abs_pow);
                 if i == 4 && !sb.is_empty() {
                     s = temperature_to_delta(&s);
                 }
@@ -414,14 +439,14 @@ impl Unit {
     }
 
     fn multiply_or_divide(u1: &UnitRef, u2: &UnitRef, divide: bool) -> OptUnit {
-        if Rc::ptr_eq(u1, u2) || Rc::ptr_eq(&u1.powers, &u2.powers) {
+        if Rc::ptr_eq(u1, u2) || u1.pid == u2.pid {
             return if divide { None } else { u1.pow(2.0) };
         }
         let mut n1 = u1.len();
         let mut n2 = u2.len();
         let mut n = n1.max(n2);
-        let p1 = &u1.powers;
-        let p2 = &u2.powers;
+        let p1 = u1.powers();
+        let p2 = u2.powers();
         if n1 == n2 {
             let mut k = n as isize;
             if divide {
@@ -460,21 +485,23 @@ impl Unit {
         if n2 > n {
             n2 = n;
         }
-        let f1 = u1.factors.borrow();
-        let f2 = u2.factors.borrow();
-        let mut p = vec![0f32; n];
-        let mut f = vec![0f64; n];
+        let f1 = &u1.fc;
+        let f2 = &u2.fc;
+        let mut p = [0f32; MAX_DIMS];
+        let mut f = [0f64; MAX_DIMS];
         for i in 0..n1 {
             if i < n2 {
                 p[i] = if divide { p1[i] - p2[i] } else { p1[i] + p2[i] };
-                f[i] = if p1[i] == 0.0 { f2[i] } else { f1[i] };
+                f[i] = if p1[i] == 0.0 { f2[i].get() } else { f1[i].get() };
             } else {
                 p[i] = p1[i];
-                f[i] = if p1[i] != 0.0 { f1[i] } else { 1.0 };
+                f[i] = if p1[i] != 0.0 { f1[i].get() } else { 1.0 };
             }
         }
         if n2 > n1 {
-            f[n1..n2].copy_from_slice(&f2[n1..n2]);
+            for i in n1..n2 {
+                f[i] = f2[i].get();
+            }
             if divide {
                 for i in n1..n2 {
                     p[i] = -p2[i];
@@ -483,7 +510,7 @@ impl Unit {
                 p[n1..n2].copy_from_slice(&p2[n1..n2]);
             }
         }
-        Some(Rc::new(Unit::from_parts(p, f, temp_char)))
+        Some(Rc::new(Unit::from_parts(&p[..n], &f[..n], temp_char)))
     }
 
     /// `operator *(Unit, Unit)`: MultiplyOrDivide without the conversion factor.
@@ -502,20 +529,20 @@ impl Unit {
         }
         let n = u1.len().min(u2.len());
         let mut factor = 1.0;
-        let p1 = &u1.powers;
-        let p2 = &u2.powers;
-        let f1 = u1.factors.borrow();
-        let f2 = u2.factors.borrow();
+        let p1 = u1.powers();
+        let p2 = u2.powers();
+        let f1 = &u1.fc;
+        let f2 = &u2.fc;
         if divide {
             for i in 0..n {
                 if p1[i] != 0.0 && p2[i] != 0.0 {
-                    factor *= my_pow(f1[i] / f2[i], p2[i]);
+                    factor *= my_pow(f1[i].get() / f2[i].get(), p2[i]);
                 }
             }
         } else {
             for i in 0..n {
                 if p1[i] != 0.0 && p2[i] != 0.0 {
-                    factor *= my_pow(f2[i] / f1[i], p2[i]);
+                    factor *= my_pow(f2[i].get() / f1[i].get(), p2[i]);
                 }
             }
         }
@@ -527,9 +554,14 @@ impl Unit {
         if x == 0.0 {
             return None;
         }
-        let p: Vec<f32> = self.powers.iter().map(|&v| v * x).collect();
-        let f = self.factors.borrow().clone();
-        Some(Rc::new(Unit::from_parts(p, f, self.temp_char.get())))
+        let n = self.len();
+        let mut p = [0f32; MAX_DIMS];
+        let mut f = [0f64; MAX_DIMS];
+        for i in 0..n {
+            p[i] = self.pw[i] * x;
+            f[i] = self.fc[i].get();
+        }
+        Some(Rc::new(Unit::from_parts(&p[..n], &f[..n], self.temp_char.get())))
     }
 
     pub fn is_consistent_opt(u1: &OptUnit, u2: &OptUnit) -> bool {
@@ -541,10 +573,10 @@ impl Unit {
     }
 
     pub fn is_consistent(&self, other: &Unit) -> bool {
-        if Rc::ptr_eq(&self.powers, &other.powers) {
+        if self.pid == other.pid {
             return true;
         }
-        *self.powers == *other.powers
+        self.powers() == other.powers()
     }
 
     pub fn is_multiple(&self, other: &Unit) -> bool {
@@ -554,8 +586,8 @@ impl Unit {
         }
         let mut d1 = 0f32;
         for i in 0..n {
-            let p1 = self.powers[i];
-            let p2 = other.powers[i];
+            let p1 = self.pw[i];
+            let p2 = other.pw[i];
             if p1 != p2 {
                 if p1 == 0.0 || p2 == 0.0 {
                     return false;
@@ -578,22 +610,22 @@ impl Unit {
             return self.get_dimensionless_factor() / u.get_dimensionless_factor();
         }
         let mut factor = 1.0;
-        let uf = u.factors.borrow();
-        let f = self.factors.borrow();
+        let uf = &u.fc;
+        let f = &self.fc;
         for i in 0..self.len() {
-            if self.powers[i] != 0.0 {
-                factor *= my_pow(f[i] / uf[i], self.powers[i]);
+            if self.pw[i] != 0.0 {
+                factor *= my_pow(f[i].get() / uf[i].get(), self.pw[i]);
             }
         }
         factor
     }
 
     pub fn get_force_unit(u: &UnitRef) -> UnitRef {
-        let i = u.powers[1] as i32 + 3;
+        let i = u.pw[1] as i32 + 3;
         if !(0..=5).contains(&i) {
             return u.clone();
         }
-        let si = u.factors.borrow()[0] % 1.0 == 0.0;
+        let si = u.fc[0].get() % 1.0 == 0.0;
         TABLE.with(|t| {
             if si {
                 t.force_units[i as usize].clone()
@@ -654,20 +686,20 @@ impl Unit {
 
     /// `double Normalize()`
     pub fn normalize(&self) -> f64 {
-        let n = self.factors.borrow().len();
+        let n = self.len();
         if n == 0 || self.text.borrow().is_some() {
             return 1.0;
         }
         let mut factor = 1.0;
         for i in 0..n {
-            if self.powers[i] == 0.0 {
+            if self.pw[i] == 0.0 {
                 continue;
             }
-            let d = self.factors.borrow()[i];
+            let d = self.fc[i].get();
             if d != 1.0 {
                 let d = norm_dim(d, self.unit_name(i));
-                self.factors.borrow_mut()[i] /= d;
-                factor *= d.powf(self.powers[i] as f64);
+                self.fc[i].set(self.fc[i].get() / d);
+                factor *= d.powf(self.pw[i] as f64);
             }
         }
         factor
@@ -1416,11 +1448,11 @@ impl UnitTable {
         };
         // The empty key: 9 dimensions with a phantom ninth one.
         {
-            let mut p = vec![0f32; 9];
-            let mut fct = vec![0f64; 9];
+            let mut p = [0f32; 9];
+            let mut fct = [0f64; 9];
             p[8] = 1.0;
             fct[8] = 1.0;
-            add("", r(Unit::from_parts(p, fct, 'C')));
+            add("", r(Unit::from_parts(&p, &fct, 'C')));
         }
         for t in ["%", "\u{2030}", "\u{2031}", "pcm", "ppm", "ppb", "ppt", "ppq"] {
             add(t, dimless(t));
