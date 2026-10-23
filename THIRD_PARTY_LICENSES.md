@@ -179,3 +179,27 @@ None.
 * `web/calcpad-web/public/samples/` the CalcpadCE example worksheets (MIT; see `NOTICE.md` there).
 * `web/calcpad-web/public/py/` MicroPython (MIT, v1.24.1; see `NOTICE.md` there) and the numpy and matplotlib stand-ins for `#python` blocks.
 * `calcpad-core/src/markdig/` a port of part of Markdig (BSD 2-Clause; see `NOTICE`).
+
+## MicroPython (bundled runtime for `#python` blocks)
+
+`web/calcpad-web/public/py/micropython/` holds MicroPython v1.24.1 (build dated 2024-11-30, the version string inside the wasm)
+compiled to WebAssembly, with its JavaScript loader (which carries Emscripten's runtime glue, MIT or University of Illinois/NCSA).
+Upstream: https://github.com/micropython/micropython. Licence: MIT. The text is also in `public/py/micropython/LICENSE`.
+
+```
+The MIT License (MIT)
+
+Copyright (c) 2013-2024 Damien P. George and contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation
+files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy,
+modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```

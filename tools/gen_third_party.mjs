@@ -67,4 +67,9 @@ out.push('* `web/calcpad-web/public/ui-assets/` jspreadsheet CE and jsuites (MIT
 out.push('* `web/calcpad-web/public/samples/` the CalcpadCE example worksheets (MIT; see `NOTICE.md` there).');
 out.push('* `web/calcpad-web/public/py/` MicroPython (MIT, v1.24.1; see `NOTICE.md` there) and the numpy and matplotlib stand-ins for `#python` blocks.');
 out.push('* `calcpad-core/src/markdig/` a port of part of Markdig (BSD 2-Clause; see `NOTICE`).');
+out.push('', '## MicroPython (bundled runtime for `#python` blocks)', '');
+out.push('`web/calcpad-web/public/py/micropython/` holds MicroPython v1.24.1 (build dated 2024-11-30, the version string inside the wasm)');
+out.push('compiled to WebAssembly, with its JavaScript loader (which carries Emscripten\'s runtime glue, MIT or University of Illinois/NCSA).');
+out.push('Upstream: https://github.com/micropython/micropython. Licence: MIT. The text is also in `public/py/micropython/LICENSE`.', '', '```');
+out.push(readFileSync(new URL('../web/calcpad-web/public/py/micropython/LICENSE', import.meta.url), 'utf8').trimEnd(), '```');
 console.log(out.join('\n'));
