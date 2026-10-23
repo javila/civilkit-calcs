@@ -40,7 +40,7 @@ fn is_small(layout: &Layout) -> bool {
 #[inline]
 fn class_of(size: usize) -> usize {
     // Size 0 is treated as one grain; classes are 1..=CLASSES, stored at index class - 1.
-    (size.max(1) + GRAIN - 1) / GRAIN - 1
+    size.max(1).div_ceil(GRAIN) - 1
 }
 
 unsafe impl GlobalAlloc for FastAlloc {
