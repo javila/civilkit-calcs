@@ -178,11 +178,10 @@ const SHEET = [
     const { ctx, page } = await open();
     const manifest = await page.evaluate(async () => (await fetch('samples/manifest.json')).json());
     const py = manifest.samples.filter(s => s.group === 'Python');
-    check(py.length === 3 && manifest.groups.includes('Python'), `three samples in the Python group (${py.length})`);
-    check(py[0].title === 'Beam Moment Diagram with matplotlib', 'the matplotlib moment diagram sample comes first');
+    check(py.length === 4 && manifest.groups.includes('Python'), `four samples in the Python group (${py.length})`);
+    check(py[0].title === 'Beam Explorer: Python Solve, Plotly Charts', 'the beam explorer sample comes first');
     for (const s of py) {
-        const text = await page.evaluate(async (f) => (await fetch(f)).text(), s.file);
-        await setText(page, text);
+        await page.evaluate(async (id) => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(x => x.id === id); await window.calcpadFiles.samples.openSample(m); }, s.id);
         if (await yes(page).count().catch(() => 0) || await yes(page).waitFor({ timeout: 4000 }).then(() => true, () => false)) await yes(page).click();
         const t = await frameText(page, 'Python', 40000) || await frameText(page, '=', 5000);
         const bad = /Python error|Error in "/.test(t);
@@ -207,6 +206,76 @@ const SHEET = [
     await frameText(page, 'a = 1');
     await page.waitForTimeout(3000);
     check(await frameHas(page, 'svg.cprs-py-figure'), 'the inserted block runs and draws a figure');
+    await ctx.close();
+}
+
+// ---- 7. python fences in a sheet -------------------------------------------------------------
+{
+    const { ctx, page } = await open();
+    const SHEET_SRC = [
+        '<!--sheet-->', '# Sheet python', '', 'a: 5', '', '```python', 'import numpy as np', 'x = np.linspace(0, 1, 11)',
+        'print("sum is", round(float(x.sum()), 2))', 'export(k=float(x.sum()))', '```', '', 'r: k * 2', 'z: a + nothing_here',
+    ].join('\n');
+    await setText(page, SHEET_SRC);
+    await yes(page).click({ timeout: 20000 });
+    const t = await frameText(page, 'Sheet python');
+    await frameText(page, 'sum is');
+    const t2 = await frameText(page, 'r =');
+    check(/sum is 5\.5/.test(t2) && /r = .*= 11/.test(t2.replace(/\s+/g, ' ')), 'a python fence in a sheet runs, and a quantity line after it uses the exported value');
+    check(/nothing_here/.test(t2), 'an engine error after the fence is reported');
+    const lines = await page.evaluate(async (content) => {
+        const r = await fetch('/api/calcpad/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+        return JSON.parse(decodeURIComponent(r.headers.get('X-Calcpad-Errors') ?? '[]')).map(e => e.sourceLine);
+    }, SHEET_SRC);
+    check(lines.includes(14), `the error maps to its sheet line (14): ${JSON.stringify(lines)}`);
+    const BAD = ['<!--sheet-->', '# Bad', '```python', 'x = 1', 'y = 1 / 0', '```', 'q: 1'].join('\n');
+    await setText(page, BAD);
+    const eb = await frameText(page, 'Bad');
+    await frameText(page, 'Python error');
+    const eb2 = await frameText(page, 'ZeroDivisionError');
+    check(/Python error on line 5: ZeroDivisionError/.test(eb2), 'a Python error in a sheet fence names the sheet line (5)');
+    // the editor leaves the fence alone: no error markers on its lines
+    const markers = await page.evaluate(() => window.monaco.editor.getModelMarkers({ resource: window.calcpadActiveEditor.getModel().uri }).filter(m => m.severity >= 8 && m.startLineNumber >= 3 && m.startLineNumber <= 6).map(m => m.message));
+    check(markers.length === 0, `no Calcpad error markers inside the python fence ${JSON.stringify(markers)}`);
+    // the ribbon follows the sheet mode
+    await setText(page, '<!--sheet-->\nx: 1\n');
+    await page.locator('[data-ribbon-tab=math]').click();
+    await page.locator('[data-ribbon-btn="p-programming"]').click();
+    await page.locator('.rb-pop [data-ribbon-glyph="#python plot"]').click();
+    const ins = await page.evaluate(() => window.calcpadActiveEditor.getValue());
+    check(/```python\n[\s\S]*plt\.show\(\)\n```/.test(ins) && !/#python/.test(ins), 'in a sheet the ribbon inserts a python fence');
+    await ctx.close();
+}
+
+// ---- 8. the beam explorer: Python results drive a Plotly chart ----------------------------------
+{
+    const { ctx, page } = await open();
+    // Opened the way a user opens it (the Samples browser converts C-style operators, which must not touch the Python).
+    await page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(s => s.title.startsWith('Beam Explorer')); await window.calcpadFiles.samples.openSample(m); });
+    await yes(page).click({ timeout: 20000 });
+    const t = await frameText(page, 'Design check', 60000);
+    check(/Equilibrium: the reactions sum to the load/.test(t) && /UDL on all spans 300\.0 of 300\.0 kN/.test(t), 'the Python solve ran and its equilibrium check holds');
+    check(/η = /.test(t) && /M_Ed|MEd/.test(t) && /within the capacity/.test(t), 'the Calcpad design check uses the exported envelope');
+    const frame = async () => { for (const f of page.frames()) if (f !== page.mainFrame() && await f.locator('#cx-read').count().catch(() => 0)) return f; return null; };
+    let f = null;
+    for (let i = 0; i < 100 && !f; i++) { f = await frame(); if (!f) await page.waitForTimeout(300); }
+    check(!!f, 'the explorer is on the page');
+    const plotly = f ? await f.waitForFunction(() => typeof Plotly !== 'undefined' && document.querySelectorAll('#cx-plot .main-svg').length > 0, null, { timeout: 45000 }).then(() => true, () => false) : false;
+    if (!plotly) console.log('skip the chart checks: Plotly did not load (offline?)');
+    else {
+        const r0 = await f.evaluate(() => document.getElementById('cx-read').innerText);
+        // three-moment equations for the three UDL spans (5, 6, 4 m, 20 kN/m): M_B = -63.61, M_C = -50.91 kN.m
+        check(/hogging max -63\.6 kN\.m at x = 5\.00 m/.test(r0), `the chart's hogging moment over support B matches the three-moment solution (-63.6) ${JSON.stringify(r0.slice(0, 160))}`);
+        const traces = await f.evaluate(() => document.getElementById('cx-plot').data.length);
+        check(traces === 5, `five traces drawn (${traces})`);
+        await f.evaluate(() => { const s = document.getElementById('cx-fac'); s.value = '2'; s.dispatchEvent(new Event('input')); });
+        const r2 = await f.evaluate(() => document.getElementById('cx-read').innerText);
+        check(/hogging max -127\.2 kN\.m/.test(r2), 'the load factor slider doubles the moments (-127.2)');
+        await f.evaluate(() => { const c = document.getElementById('cx-case'); c.value = '3'; c.dispatchEvent(new Event('input')); const s = document.getElementById('cx-pos'); s.value = '2'; s.dispatchEvent(new Event('input')); });
+        const r3 = await f.evaluate(() => document.getElementById('cx-read').innerText);
+        check(/P = 120\.0 kN at x = 2\.5 m/.test(r3), `the point load case and its position slider respond ${JSON.stringify(r3.slice(0, 60))}`);
+        await page.screenshot({ path: join(out, 'explorer.png') });
+    }
     await ctx.close();
 }
 

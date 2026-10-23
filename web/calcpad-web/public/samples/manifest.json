@@ -2079,6 +2079,21 @@
    ]
   },
   {
+   "id": "python-continuous-beam-explorer",
+   "title": "Beam Explorer: Python Solve, Plotly Charts",
+   "group": "Python",
+   "folder": "Python",
+   "file": "samples/Python/Continuous beam explorer.cpd",
+   "upstream": "own/Python/Continuous beam explorer.cpd",
+   "description": "A three-span beam solved in Python (stiffness matrix, numpy, matplotlib) for several load cases and a moving point load; the results drive an interactive Plotly chart with hover values, a load case menu and sliders, and a Calcpad design check.",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "python": true,
+   "assets": []
+  },
+  {
    "id": "python-beam-moment-diagram-with-matplotlib",
    "title": "Beam Moment Diagram with matplotlib",
    "group": "Python",

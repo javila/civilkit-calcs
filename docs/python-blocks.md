@@ -31,6 +31,23 @@ M_Ed = M_max*1kN*m
 - Blocks run **before** the engine and unconditionally: a `#python` inside an `#if` still runs, and a block in an `#include`d file
   is not seen. Python is run only on the worksheet text itself.
 
+### In a sheet
+
+A sheet writes the block as a fenced code block with the language `python`; the sheet compiler turns it into the `#python` block
+above and keeps the sheet's line numbers:
+
+````
+```python
+import numpy as np
+export(total=float(np.linspace(0, 1, 5).sum()))
+```
+total * 2
+````
+
+The fence's lines are not sheet syntax and are not renamed, formatted or highlighted as a sheet (the Python keeps its own
+indentation, relative to the fence's block). A fence left open is an error on the sheet's last line and is closed there. A
+Python error names the sheet line. In a sheet the ribbon's `#python` entries insert a `python` fence.
+
 ### What a block produces
 
 | In the block | In the worksheet |
@@ -40,12 +57,28 @@ M_Ed = M_max*1kN*m
 | `export(name=value, ...)` or `export("name", value)` | a Calcpad definition line per name: `name = 5.5`, `name = [1; 2; 3]` (a list or 1-D array), `name = [1; 2\| 3; 4]` (a list of lists or 2-D array) |
 | an exception | one red error line naming the Python line and the exception type, and an entry in the error list on that line; the rest of the worksheet still calculates |
 
+`export_data(name=value, ...)` is `export` for data: the names are defined but nothing is printed. Use it for large arrays that a
+chart or script reads (the definitions are wrapped in `#hide` ... `#show`, so a `#hide` you opened yourself around the block is ended).
+
 Variables are exported **explicitly**, not automatically: loop variables and arrays used for plotting would otherwise flood the
 worksheet and collide with Calcpad names and units (`m`, `s`, `L`). `export` is a builtin; no import is needed. Values must be
 numbers, bools, lists of numbers or numeric arrays; `nan` and `inf` are refused. Names must be letters (any script), digits and
 underscores, not starting with a digit or underscore. Exported numbers are unitless: write `L = L_m*1m` after the block.
 Several names in one `export` call arrive in an unspecified order (MicroPython does not keep keyword order); use separate calls
 where the order matters.
+
+### Python results driving an interactive chart
+
+The beam explorer sample shows the pattern. `export_data(M_u=..., x_s=...)` defines vectors and matrices; in a Calcpad text line
+inside a `#val` ... `#equ` region, `'var X = 'x_s';` prints the value as a JavaScript array literal (`[1.5, 2, 3.25]`, and
+`[[1, 2], [3, 4]]` for a matrix). A `<script>` there can therefore read the Python results directly, with Plotly or d3 loaded from the
+worksheet library list (the page's policy allows exactly those files, with their integrity hashes, and no network requests from
+scripts). Write the script with double quotes only: a single quote in a Calcpad text line switches between text and expression.
+
+What is not possible: a control in the chart cannot re-run the Python. Python runs once, before the engine, when the worksheet is
+calculated. A chart can switch between results the solve already produced (a menu, a slider over precomputed cases) and can
+recompute anything cheap in JavaScript from the exported numbers. The sample labels which is which: its load factor slider
+multiplies the exported diagrams (exact for a linear analysis), and its point load slider picks one of 15 solves done in Python.
 
 ### One way only
 

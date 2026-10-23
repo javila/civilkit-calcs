@@ -114,6 +114,21 @@
    "scripts": false,
    "read": false,
    "assets": []
+  },
+  {
+   "id": "sheet-beam-explorer-python-plotly",
+   "title": "Beam explorer with Python and Plotly",
+   "group": "Sheet syntax",
+   "folder": "Sheet syntax",
+   "file": "sheet-samples/Beam explorer with Python and Plotly.sheet",
+   "upstream": "",
+   "description": "The sheet form of the beam explorer: a python fence solves a three-span beam for several load cases, quantity lines check the envelope, and a Plotly chart reads the results (hover, load case menu, sliders).",
+   "codes": [],
+   "ui": false,
+   "scripts": false,
+   "read": false,
+   "python": true,
+   "assets": []
   }
  ]
 }

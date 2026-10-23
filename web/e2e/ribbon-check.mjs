@@ -90,7 +90,7 @@ check(RIBBON.length === 10, 'the ribbon has ten tabs');
 }
 await page.evaluate(async () => {
     const m = await (await fetch('samples/manifest.json')).json();
-    const s = m.samples.find(x => /beam/i.test(x.title) && !x.ui) ?? m.samples[0];
+    const s = m.samples.find(x => /beam/i.test(x.title) && !x.ui && !x.python) ?? m.samples[0];
     await window.calcpadFiles.samples.openSample(s);
 });
 const done = await calculated(page);
@@ -281,6 +281,8 @@ if (process.argv.includes('--lint')) {
         seen.add(s.text);
         await page.evaluate(t => window.calcpadActiveEditor.setValue(t), PRELUDE + s.text);
         await page.waitForTimeout(800);
+        // A #python snippet asks before it runs; the linter does not need it to.
+        if (await page.locator('#cprs-python-no').count()) await page.locator('#cprs-python-no').click();
         const m = await page.evaluate(() => window.monaco.editor.getModelMarkers({}).filter(k => k.severity >= 4).map(k => `${k.startLineNumber}: ${k.message}`));
         if (m.length) bad.push(`${s.id}: ${m[0]}`);
     }
@@ -290,7 +292,7 @@ if (process.argv.includes('--lint')) {
 // ---- screenshots ---------------------------------------------------------------------------
 await page.evaluate(async () => {
     const m = await (await fetch('samples/manifest.json')).json();
-    const s = m.samples.find(x => /beam/i.test(x.title) && !x.ui) ?? m.samples[0];
+    const s = m.samples.find(x => /beam/i.test(x.title) && !x.ui && !x.python) ?? m.samples[0];
     await window.calcpadFiles.samples.openSample(s);
 });
 await tab(page, 'math');

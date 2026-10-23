@@ -68,7 +68,8 @@ const markers = () => page.evaluate(() => window.monaco.editor.getModelMarkers({
 await page.click('[data-ribbon-tab=resources]');
 await page.click('[data-ribbon-btn=x-samples]');
 await page.locator('.cprs-s-group', { hasText: /^Sheet syntax/ }).click();
-check((await page.locator('.cprs-s-item').count()) === 8, 'the Sheet syntax group lists 8 samples');
+const SHEET_COUNT = JSON.parse(readFileSync(join(web, 'calcpad-web', 'public', 'sheet-samples', 'manifest.json'), 'utf8')).samples.length;
+check((await page.locator('.cprs-s-item').count()) === SHEET_COUNT, `the Sheet syntax group lists its ${SHEET_COUNT} samples`);
 check(((await page.locator('.cprs-s-group').allInnerTexts())[1] ?? '').startsWith('Sheet syntax'), 'the Sheet syntax group is the first group of the Samples dialog');
 await page.locator('.cprs-s-item', { hasText: 'Beam bending with real units' }).dblclick();
 let [t] = await result('Beam bending check');
