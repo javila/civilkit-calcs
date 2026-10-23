@@ -4,7 +4,7 @@
 // become ≡ ≠ ≥ ≤, %% && || << become ⦼ ∧ ∨ ∠, and <* becomes ←. The server API does not do
 // this, so a sheet written with "%%" failed there (DEVIATIONS D5). Plain TypeScript with no
 // imports, so tools/gen_samples.mjs and e2e/c-style-check.mjs can load it under Node; the
-// parity check holds it to the Rust function over every upstream example.
+// parity check holds it to the Rust function over every upstream example. The lines of a #python block are not touched.
 
 /** One line. */
 export function replaceCStyleLine(s: string): string {
@@ -53,7 +53,14 @@ export function replaceCStyleLine(s: string): string {
 /** A whole worksheet as opened from a file: every line, except the saved input values that
  *  follow a vertical tab (the desktop's form data), which are left as they are. */
 export function replaceCStyleOperators(text: string): string {
+    // The lines of a #python block are Python (`**`, `!=`, `&`, `%` mean what Python says): left alone.
+    let python = false;
     return text.split('\n').map((line) => {
+        if (python) {
+            if (/^\s*#end\s+python\s*$/i.test(line)) python = false;
+            return line;
+        }
+        if (/^\s*#python\s*$/i.test(line)) { python = true; return line; }
         const v = line.indexOf('\u000B');
         if (v < 0) return replaceCStyleLine(line);
         return replaceCStyleLine(line.slice(0, v)) + line.slice(v);

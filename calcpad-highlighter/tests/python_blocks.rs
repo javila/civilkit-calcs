@@ -111,3 +111,17 @@ fn hovering_python_text_resolves_nothing() {
     );
     assert!(v.is_null());
 }
+
+#[test]
+fn names_given_to_export_data_are_defined_too() {
+    let v = call(
+        api::lint,
+        json!({ "content": "#python\nexport_data(big=[1, 2, 3])\n#end python\nb = sum(big)" }),
+    );
+    let d = v["diagnostics"].as_array().unwrap();
+    assert!(
+        d.iter()
+            .all(|x| !x["message"].as_str().unwrap().contains("Undefined variable")),
+        "{d:?}"
+    );
+}

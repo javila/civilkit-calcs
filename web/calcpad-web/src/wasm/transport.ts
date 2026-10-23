@@ -23,7 +23,7 @@ import { applyScriptPolicy } from './script-policy';
 import { compileSheet, isSheetRequest, remapErrors, remapHtml, sheetLine, withSheetCss } from './sheet';
 import type { SheetCompiled } from './sheet';
 import { hasTex, renderTex } from './sheet-tex';
-import { findPythonBlocks, hasPythonBlock, pythonErrors, remapErrors as remapPythonErrors, remapPage, substitute, type BlockResult, type EngineError } from './python-blocks';
+import { findPythonBlocks, hasPythonBlock, pythonErrors, remapErrors as remapPythonErrors, remapPage, resolvePythonLines, substitute, type BlockResult, type EngineError } from './python-blocks';
 import { PythonRunner } from './python-runner';
 import { mayRunPython } from './python-consent';
 
@@ -476,6 +476,7 @@ export function installWasmTransport(): WasmTransport {
                 if (!unwrap) html = withSheetCss(remapHtml(html, sh.sheet));
                 if (hasTex(html)) html = await renderTex(html);
             }
+            if (py) html = resolvePythonLines(html, n => (sh ? sheetLine(sh.sheet, n) : n));
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             html = addPreviewDark(html);
@@ -497,8 +498,9 @@ export function installWasmTransport(): WasmTransport {
             // the Word writer (calcpad-docx). Images from the library go in as data: URLs.
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
-            const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
-            await preparePython(request);
+            const shE = await sheetBody(body, true);
+            const request = JSON.parse(shE?.body ?? body) as Record<string, unknown>;
+            const pyE = await preparePython(request);
             request.captureOpenXml = true;
             request.enableUi = false;
             request.includeLineAnchors = false;
@@ -508,6 +510,7 @@ export function installWasmTransport(): WasmTransport {
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
+            if (pyE) html = resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             if (out.files?.length && transport.onFilesWritten) {
                 transport.onFilesWritten(out.files.map(f => ({ path: f.path, data: fromBase64(f.data) })));
@@ -524,8 +527,9 @@ export function installWasmTransport(): WasmTransport {
             // vectors and matrices and the input fields.
             if (body == null || body === '') return new Response('Invalid JSON', { status: 400 });
             await head;
-            const request = JSON.parse((await sheetBody(body, true))?.body ?? body) as Record<string, unknown>;
-            await preparePython(request);
+            const shE = await sheetBody(body, true);
+            const request = JSON.parse(shE?.body ?? body) as Record<string, unknown>;
+            const pyE = await preparePython(request);
             request.exportXlsx = true;
             request.enableUi = false;
             request.includeLineAnchors = false;
@@ -537,6 +541,7 @@ export function installWasmTransport(): WasmTransport {
                 return new Response('The worksheet could not be calculated (check it for macro errors).', { status: 422 });
             }
             let html = out.html ?? '';
+            if (pyE) html = resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             const bytes = await engine.xlsx(html, JSON.stringify(out.xlsxSheets), JSON.stringify(out.xlsxCharts ?? []), signal);
             return new Response(new Uint8Array(bytes), {

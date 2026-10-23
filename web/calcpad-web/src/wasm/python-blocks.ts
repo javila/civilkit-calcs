@@ -51,7 +51,7 @@ export interface BlockError {
 export interface BlockResult {
     /** print() text and figures, in the order the script made them. */
     parts: ({ text: string } | { svg: string })[];
-    exports: { name: string; value: ExportValue }[];
+    exports: { name: string; value: ExportValue; hidden?: boolean }[];
     error: BlockError | null;
     /** The output or the figure count hit its cap. */
     truncated: boolean;
@@ -78,6 +78,13 @@ export function definitionLine(name: string, value: ExportValue): string {
     return `${name} = [${(value as number[]).map(formatNumber).join('; ')}]`;
 }
 
+const PY_LINE = (n: number) => `@@PY:${n}@@`;
+
+/** Replaces the line placeholders of Python error lines; `map` turns a line of the engine's text into the user's line. */
+export function resolvePythonLines(html: string, map: (line: number) => number): string {
+    return html.replace(/@@PY:(\d+)@@/g, (_m, n: string) => String(map(Number(n))));
+}
+
 const PRE_STYLE = 'font-family:monospace;white-space:pre-wrap;margin:4pt 0;padding:4pt 8pt;border-left:3pt solid #8a8a8a;background:rgba(128,128,128,.12)';
 
 /**
@@ -95,11 +102,18 @@ export function replacementLines(res: BlockResult, blockLine: number): string[] 
     if (res.truncated) html.push('<p><i>Python output was cut at its size limit.</i></p>');
     const lines: string[] = [];
     if (res.error) {
-        const where = res.error.line != null ? ` on line ${res.error.line + 1}` : ` in the block at line ${blockLine + 1}`;
-        html.push(`<p><span class="err">Python error${escapeHtml(where)}: ${escapeHtml(res.error.type ? `${res.error.type}: ` : '')}${escapeHtml(res.error.message)}</span></p>`);
+        // The line is written as a placeholder: it is a line of the text given to the engine, and resolvePythonLines turns it into
+        // the user's own line (the sheet line, in a sheet) once the page is back.
+        const where = res.error.line != null ? ` on line ${PY_LINE(res.error.line + 1)}` : ` in the block at line ${PY_LINE(blockLine + 1)}`;
+        html.push(`<p><span class="err">Python error${where}: ${escapeHtml(res.error.type ? `${res.error.type}: ` : '')}${escapeHtml(res.error.message)}</span></p>`);
     }
     if (html.length) lines.push(`'${html.join('')}`);
-    if (!res.error) for (const e of res.exports) lines.push(definitionLine(e.name, e.value));
+    if (!res.error) {
+        // export_data: defined but not shown (large arrays, data for a chart).
+        const hidden = res.exports.filter((e) => e.hidden);
+        if (hidden.length) lines.push('#hide', ...hidden.map((e) => definitionLine(e.name, e.value)), '#show');
+        for (const e of res.exports) if (!e.hidden) lines.push(definitionLine(e.name, e.value));
+    }
     return lines;
 }
 

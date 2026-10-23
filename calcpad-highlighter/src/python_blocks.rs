@@ -3,7 +3,7 @@
 //! The web app runs the block's Python before the engine and replaces the block by its results, so for the editor the
 //! block is not Calcpad: its lines must not be tokenized, linted or prettified as Calcpad. [`mask`] gives the text the
 //! Calcpad passes work on: same number of lines, every line of a block blank, except that each name the block exports
-//! (`export(M_max=...)`, `export("M_max", ...)`) becomes a `name = 0` line where it is exported, so the lines after the
+//! (`export(M_max=...)`, `export("M_max", ...)`, and the same with `export_data`) becomes a `name = 0` line where it is exported, so the lines after the
 //! block can use the name. The grammar is kept in step with web/calcpad-web/src/wasm/python-blocks.ts.
 
 /// One block: the line of `#python` and the line of `#end python` (`None` when the block is left open).
@@ -111,7 +111,7 @@ pub fn exports(body: &[&str], first_line: usize) -> Vec<(String, usize)> {
         }
         let ident: String = chars[start..i].iter().map(|x| x.0).collect();
         let before = if start > 0 { ch(start - 1) } else { ' ' };
-        if ident != "export" || before == '.' {
+        if (ident != "export" && ident != "export_data") || before == '.' {
             continue;
         }
         let mut k = i;
@@ -259,6 +259,7 @@ mod tests {
             names("export(\n    a=1,\n    b=2,\n)"),
             vec![("a".into(), 1), ("b".into(), 2)]
         );
+        assert_eq!(names("export_data(big=[1, 2])"), vec![("big".into(), 0)]);
         assert!(names("export(a==1)").is_empty());
         assert!(names("export(_hidden=1)").is_empty());
     }

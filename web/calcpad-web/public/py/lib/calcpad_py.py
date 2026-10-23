@@ -50,11 +50,7 @@ def _plain(v, what):
     return _num(v, what)
 
 
-def export(*args, **kw):
-    """Send values to the worksheet as Calcpad definitions: export(M_max=12.5, x=[1, 2, 3]) or export("M_max", 12.5).
-
-    A value is a number, a list of numbers (a Calcpad vector) or a list of equal-length lists / a 2-D array (a matrix).
-    """
+def _send(args, kw, hidden):
     items = []
     if args:
         if len(args) != 2 or not isinstance(args[0], str):
@@ -65,7 +61,23 @@ def export(*args, **kw):
     if not items:
         raise TypeError("export() needs at least one name=value")
     for name, value in items:
-        _state["export"](json.dumps({"name": name, "value": _plain(value, name)}))
+        rec = {"name": name, "value": _plain(value, name)}
+        if hidden:
+            rec["hidden"] = True
+        _state["export"](json.dumps(rec))
+
+
+def export(*args, **kw):
+    """Send values to the worksheet as Calcpad definitions: export(M_max=12.5, x=[1, 2, 3]) or export("M_max", 12.5).
+
+    A value is a number, a list of numbers (a Calcpad vector) or a list of equal-length lists / a 2-D array (a matrix).
+    """
+    _send(args, kw, False)
+
+
+def export_data(*args, **kw):
+    """Like export, but the definitions are not shown in the report (large arrays, data for a script or chart)."""
+    _send(args, kw, True)
 
 
 def install(raw):
@@ -89,6 +101,7 @@ def install(raw):
 
     builtins.__import__ = guarded
     builtins.export = export
+    builtins.export_data = export_data
 
     def no_input(prompt=""):
         raise EOFError("input() has no keyboard in a worksheet: write the value into the script")
