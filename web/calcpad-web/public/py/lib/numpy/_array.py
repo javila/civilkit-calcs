@@ -1298,6 +1298,19 @@ def cumsum(a, axis=None):
     raise _ni("cumsum(axis=...) of a multi-dimensional array")
 
 
+_ENGINE_DOT_MIN = 100000   # multiply-adds from which a float product goes to the engine (about 46 by 46 times 46 by 46)
+
+
+def _engine_matmul(a, b):
+    """The product from the Calcpad engine when it is loaded here (a block that mentions linalg or a product loads it),
+    else None and the caller multiplies in Python. Same values to rounding: both add the products in index order."""
+    try:
+        from numpy import linalg as la
+        return la._call("matmul", a=la._pack(a), b=la._pack(b))[0]
+    except Exception:
+        return None
+
+
 def dot(a, b):
     a = asarray(a)
     b = asarray(b)
@@ -1310,6 +1323,10 @@ def dot(a, b):
     kb = b._sh[0]
     if ka != kb:
         raise ValueError("shapes %s and %s not aligned: %d (dim %d) != %d (dim 0)" % (_shs(a._sh), _shs(b._sh), ka, len(a._sh) - 1, kb))
+    if k == "f" and len(a._sh) == 2 and a._sh[0] * ka * (b._sh[1] if len(b._sh) == 2 else 1) >= _ENGINE_DOT_MIN:
+        r = _engine_matmul(a, b)
+        if r is not None:
+            return r
     rows = [list(r) for r in (a if len(a._sh) == 2 else [a])]
     cols = [list(c) for c in (b.T if len(b._sh) == 2 else [b])]
     out = [_sum([x * y for x, y in zip(r, c)]) for r in rows for c in cols]

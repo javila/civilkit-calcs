@@ -1,7 +1,7 @@
 """The host side of a Calcpad worksheet's Python block: `export`, the sandbox guard and the runner.
 
-The worker calls `install(raw)` once per interpreter, with the host object that offers `figure(json_text)` and
-`export(json_text)`, then `run(source, name)` for each block. The host object is kept in a closure and the module that
+The worker calls `install(raw)` once per interpreter, with the host object that offers `figure(json_text)`,
+`export(json_text)` and `linalg(json_text)`, then `run(source, name)` for each block. The host object is kept in a closure and the module that
 carried it is removed, so a script cannot reach it by name.
 """
 import builtins
@@ -84,12 +84,14 @@ def install(raw):
     """Wire the host object in, install the import guard, and put `export` among the builtins."""
     fig = raw.figure
     exp = raw.export
+    lin = raw.linalg
     _state["export"] = lambda t: exp(t)
     _state["figure"] = lambda t: fig(t)
     sys.modules.pop("_cp_raw", None)
 
     class Host:
         figure = staticmethod(lambda t: fig(str(t)))
+        linalg = staticmethod(lambda t: lin(str(t)))
 
     sys.modules["_cp_host"] = Host()
     orig = builtins.__import__

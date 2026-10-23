@@ -9,6 +9,23 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
+## [Unreleased]
+
+### Added
+- `numpy.linalg` and `scipy.linalg` in Python blocks, computed by the Calcpad engine (the code behind `lsolve`, `inverse`, `det`,
+  `cholesky`, `eigenvals`, `svd` in Calcpad lines), so Python and Calcpad lines give one answer: `solve`, `inv`, `det`,
+  `cholesky`, `eigh`, `eigvalsh`, `svd`, `matrix_rank`, `cond`, `pinv`, `norm`; `scipy.linalg.solve`, `cholesky`, `cho_factor`,
+  `cho_solve`, `solve_triangular`. A singular matrix is a `LinAlgError` on its Python line; unsupported calls (`lstsq`, `qr`,
+  `eig` of a non-symmetric matrix) say so in a `NotImplementedError`. A new `calcpad-linalg-wasm` module (345 KB, 138 KB
+  gzipped) is downloaded only by a block that mentions linalg, scipy, dot, matmul or `@`. Large float matrix products
+  (about 46 by 46 and up) go to the engine as well, with identical values and about 7 times faster.
+  Solving a 120 by 120 system takes 87 ms instead of 1.5 s in a hand-written Python loop. docs/python-blocks.md.
+- `tools/build_wasm.sh linalg` builds the new module.
+
+### Changed
+- docs/python-blocks.md records why ulab (a numpy-like MicroPython module) was measured and not shipped: it is 10 times faster
+  than the engine for dense solves, but a second, different numpy (2-D only, no `@` or `.sum()`) and 430 KB more wasm.
+
 ## [26.10.4] - 2026-10-23
 
 ### Added

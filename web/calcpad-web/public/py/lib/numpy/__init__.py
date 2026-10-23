@@ -172,7 +172,7 @@ arctanh deg2rad rad2deg degrees radians exp2 expm1 log1p cbrt reciprocal rint fi
 logical_and logical_or logical_not logical_xor bitwise_and bitwise_or bitwise_xor invert left_shift right_shift greater
 greater_equal less less_equal equal not_equal isscalar isreal iscomplex nan_to_num nansum nanmean nanmax nanmin nanstd
 nanvar nanmedian nanargmax nanargmin nanprod nancumsum percentile quantile nanpercentile cumprod diff ediff1d gradient trapz
-trapezoid cross inner outer tensordot einsum kron vdot linalg fft random polynomial polyfit polyval poly1d roots interp
+trapezoid cross inner outer tensordot einsum kron vdot fft random polynomial polyfit polyval poly1d roots interp
 convolve correlate cov corrcoef histogram histogram2d histogramdd bincount digitize unique intersect1d union1d setdiff1d in1d
 isin sort argsort lexsort searchsorted partition argpartition nonzero flatnonzero argwhere extract compress take choose select
 piecewise place put putmask delete insert append resize pad tile repeat roll rot90 flip fliplr flipud swapaxes moveaxis
@@ -188,6 +188,9 @@ cumulative_sum cumulative_prod vecdot matvec vecmat ndenumerate ndindex nditer f
 
 
 def __getattr__(name):
+    if name == "linalg":
+        import numpy.linalg as _linalg
+        return _linalg
     if name in _NOT_IMPLEMENTED:
         raise _route.missing("numpy", name)
     raise _route.missing("numpy", name)

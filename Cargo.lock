@@ -107,6 +107,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "calcpad-linalg-wasm"
+version = "26.10.4"
+dependencies = [
+ "civilkit-calcs-engine",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "calcpad-sheet-wasm"
 version = "26.10.4"
 dependencies = [
