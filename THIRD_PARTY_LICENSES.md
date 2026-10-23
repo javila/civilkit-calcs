@@ -177,4 +177,5 @@ None.
 * `web/calcpad-web/public/report-fonts/` Jost, DejaVu Sans and DejaVu Serif, and the CalcpadCE vector font (each with its `-LICENSE` file).
 * `web/calcpad-web/public/ui-assets/` jspreadsheet CE and jsuites (MIT; see `README.md` there).
 * `web/calcpad-web/public/samples/` the CalcpadCE example worksheets (MIT; see `NOTICE.md` there).
+* `web/calcpad-web/public/py/` MicroPython (MIT, v1.24.1; see `NOTICE.md` there) and the numpy and matplotlib stand-ins for `#python` blocks.
 * `calcpad-core/src/markdig/` a port of part of Markdig (BSD 2-Clause; see `NOTICE`).

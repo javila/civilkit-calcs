@@ -21,6 +21,7 @@ pub mod linter;
 pub mod parsing;
 pub mod path_roots;
 pub mod prettifier;
+pub mod python_blocks;
 pub mod snippets;
 pub mod text;
 pub mod tokenizer;

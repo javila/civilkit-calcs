@@ -14,6 +14,7 @@ use crate::linter::models::{CalcpadType, LinterSeverity, ParseMode};
 use crate::linter::{CalcpadLinter, LintIgnoreRegionParser};
 use crate::path_roots::IncludeProvider;
 use crate::prettifier::{CalcpadPrettifier, PrettifierOptions};
+use crate::python_blocks::{self, Masked};
 use crate::text::{is_white_space, StrMap};
 use crate::tokenizer::CalcpadTokenizer;
 use crate::utf16::{from_utf16, lines_of, span_to_utf16};
@@ -102,6 +103,18 @@ fn parse_request(json: &str) -> Result<Request, String> {
     })
 }
 
+/// The text the Calcpad passes work on: the content with its `#python` blocks masked out (src/python_blocks.rs).
+fn calcpad_text<'a>(content: &'a str, masked: &'a Option<Masked>) -> &'a str {
+    masked.as_ref().map_or(content, |m| m.text.as_str())
+}
+
+fn is_python_line(masked: &Option<Masked>, line: i32) -> bool {
+    match (masked, usize::try_from(line)) {
+        (Some(m), Ok(i)) => m.python.get(i).copied().unwrap_or(false),
+        _ => false,
+    }
+}
+
 fn severity_name(s: LinterSeverity) -> &'static str {
     match s {
         LinterSeverity::Error => "error",
@@ -120,20 +133,23 @@ pub fn highlight(files: &MemoryFiles, request_json: &str) -> String {
         Ok(r) => r,
         Err(e) => return e,
     };
+    let masked = python_blocks::mask(&req.content);
+    let content = calcpad_text(&req.content, &masked);
     let mut tokenizer = CalcpadTokenizer::new();
     if req.source_file_path.as_deref().is_some_and(|p| !p.is_empty()) {
-        let staged = resolve(files, &req.content, req.source_file_path.as_deref());
+        let staged = resolve(files, content, req.source_file_path.as_deref());
         tokenizer.set_macro_comment_parameters(
             Some(&staged.stage2.macro_comment_parameters),
             Some(&staged.stage2.macro_parameter_order),
             Some(&staged.stage2.macro_bodies),
         );
     }
-    let result = tokenizer.tokenize(&req.content);
-    let lines = lines_of(&req.content);
-    let tokens: Vec<Value> = result
+    let result = tokenizer.tokenize(content);
+    let lines = lines_of(content);
+    let mut tokens: Vec<Value> = result
         .tokens
         .iter()
+        .filter(|t| !is_python_line(&masked, t.line))
         .map(|t| {
             let (col, len) = span_to_utf16(&lines, t.line, t.column, t.length);
             json!({
@@ -146,6 +162,27 @@ pub fn highlight(files: &MemoryFiles, request_json: &str) -> String {
             })
         })
         .collect();
+    // A block's own lines are not Calcpad: only its delimiters are marked, as the keywords they are.
+    if let Some(m) = &masked {
+        let original = lines_of(&req.content);
+        for (i, d) in m.delimiter.iter().enumerate() {
+            let Some(line) = original.get(i).filter(|_| *d) else {
+                continue;
+            };
+            let lead = line.iter().take_while(|c| c.is_whitespace()).count() as i32;
+            let len = line.iter().collect::<String>().trim().chars().count() as i32;
+            let (col, len16) = span_to_utf16(&original, i as i32, lead, len);
+            tokens.push(json!({
+                "line": i,
+                "column": col,
+                "length": len16,
+                "type": "Keyword",
+                "typeId": crate::tokenizer::models::TokenType::Keyword as i32,
+                "text": if req.include_text { Value::String(line.iter().collect::<String>().trim().to_string()) } else { Value::Null },
+            }));
+        }
+        tokens.sort_by_key(|t| (t["line"].as_i64(), t["column"].as_i64()));
+    }
     json!({ "tokens": tokens }).to_string()
 }
 
@@ -155,13 +192,16 @@ pub fn lint(files: &MemoryFiles, request_json: &str) -> String {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let staged = resolve(files, &req.content, req.source_file_path.as_deref());
-    let regions = LintIgnoreRegionParser::extract_regions(&req.content);
+    let masked = python_blocks::mask(&req.content);
+    let content = calcpad_text(&req.content, &masked);
+    let staged = resolve(files, content, req.source_file_path.as_deref());
+    let regions = LintIgnoreRegionParser::extract_regions(content);
     let result = CalcpadLinter::new().lint(&staged, &regions);
-    let lines = lines_of(&req.content);
-    let diagnostics: Vec<Value> = result
+    let lines = lines_of(content);
+    let mut diagnostics: Vec<Value> = result
         .diagnostics
         .iter()
+        .filter(|d| !is_python_line(&masked, d.line))
         .map(|d| {
             let (col, len) = span_to_utf16(&lines, d.line, d.column, d.end_column - d.column);
             json!({
@@ -176,8 +216,25 @@ pub fn lint(files: &MemoryFiles, request_json: &str) -> String {
             })
         })
         .collect();
+    let mut open_blocks = 0;
+    if let Some(m) = &masked {
+        for b in m.blocks.iter().filter(|b| b.end.is_none()) {
+            open_blocks += 1;
+            let len = lines.get(b.start).map_or(0, |l| l.len()) as i32;
+            diagnostics.push(json!({
+                "line": b.start,
+                "column": 0,
+                "endColumn": len,
+                "code": "CPD-3801",
+                "message": "The #python block has no '#end python' line",
+                "severity": "error",
+                "severityId": LinterSeverity::Error as i32,
+                "source": "Calcpad Linter",
+            }));
+        }
+    }
     json!({
-        "errorCount": result.error_count(),
+        "errorCount": result.error_count() + open_blocks,
         "warningCount": result.warning_count(),
         "diagnostics": diagnostics,
     })
@@ -220,7 +277,9 @@ pub fn definitions(files: &MemoryFiles, request_json: &str) -> String {
         Ok(r) => r,
         Err(e) => return e,
     };
-    let staged = resolve(files, &req.content, req.source_file_path.as_deref());
+    let masked = python_blocks::mask(&req.content);
+    let content = calcpad_text(&req.content, &masked);
+    let staged = resolve(files, content, req.source_file_path.as_deref());
     let tracker = &staged.stage3.type_tracker;
 
     let macros: Vec<Value> = staged
@@ -282,9 +341,14 @@ pub fn definitions(files: &MemoryFiles, request_json: &str) -> String {
                 Some(i) => (i.type_.name().to_string(), type_id(i.type_)),
                 None => ("Unknown".to_string(), 0),
             };
+            let from_python = masked.as_ref().is_some_and(|m| {
+                m.exports
+                    .iter()
+                    .any(|(n, l)| *n == v.name && *l as i32 == v.line_number)
+            });
             json!({
                 "name": v.name,
-                "expression": v.definition,
+                "expression": if from_python { "exported from Python" } else { v.definition.as_str() },
                 "type": t,
                 "typeId": t_id,
                 "lineNumber": v.line_number,
@@ -311,7 +375,7 @@ pub fn definitions(files: &MemoryFiles, request_json: &str) -> String {
         })
         .collect();
 
-    let line_count = req.content.matches('\n').count() as i32 + 1;
+    let line_count = content.matches('\n').count() as i32 + 1;
     let parse_modes: Vec<Value> = SourceParseModes::build(&staged, line_count)
         .iter()
         .map(|r| {
@@ -355,12 +419,17 @@ pub fn symbol_at_position(files: &MemoryFiles, request_json: &str) -> String {
     };
     let line = req.v.get("line").and_then(Value::as_i64).unwrap_or(0) as i32;
     let column16 = req.v.get("column").and_then(Value::as_i64).unwrap_or(0) as i32;
-    let lines = lines_of(&req.content);
+    let masked = python_blocks::mask(&req.content);
+    if is_python_line(&masked, line) {
+        return "null".to_string();
+    }
+    let content = calcpad_text(&req.content, &masked);
+    let lines = lines_of(content);
     let column = match usize::try_from(line).ok().and_then(|i| lines.get(i)) {
         Some(l) => from_utf16(l, column16),
         None => column16,
     };
-    let staged = resolve(files, &req.content, req.source_file_path.as_deref());
+    let staged = resolve(files, content, req.source_file_path.as_deref());
     match SymbolResolver::resolve_symbol_at(Some(&staged.stage3), line, column) {
         None => "null".to_string(),
         Some(hit) => json!({
@@ -390,6 +459,20 @@ pub fn prettify(request_json: &str) -> String {
         indent_unit: Some(indent.to_string()),
         trim_trailing_whitespace: v.get("trimTrailingWhitespace").and_then(Value::as_bool).unwrap_or(true),
     };
+    // A `#python` block is left exactly as written: the Calcpad prettifier works on the masked text and the block's
+    // lines are put back (the masked text has the same lines, so they line up).
+    if let Some(m) = python_blocks::mask(content) {
+        let pretty = CalcpadPrettifier::prettify(&m.text, Some(&options));
+        let pretty_lines: Vec<&str> = pretty.split('\n').collect();
+        let original: Vec<&str> = content.split('\n').collect();
+        if pretty_lines.len() == original.len() {
+            let merged: Vec<&str> = (0..original.len())
+                .map(|i| if m.python[i] { original[i] } else { pretty_lines[i] })
+                .collect();
+            return json!({ "content": merged.join("\n") }).to_string();
+        }
+        return json!({ "content": content }).to_string();
+    }
     json!({ "content": CalcpadPrettifier::prettify(content, Some(&options)) }).to_string()
 }
 

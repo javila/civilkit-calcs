@@ -65,5 +65,6 @@ out.push('* `web/calcpad-web/public/fonts/` JuliaMono (see `JuliaMono-LICENSE`).
 out.push('* `web/calcpad-web/public/report-fonts/` Jost, DejaVu Sans and DejaVu Serif, and the CalcpadCE vector font (each with its `-LICENSE` file).');
 out.push('* `web/calcpad-web/public/ui-assets/` jspreadsheet CE and jsuites (MIT; see `README.md` there).');
 out.push('* `web/calcpad-web/public/samples/` the CalcpadCE example worksheets (MIT; see `NOTICE.md` there).');
+out.push('* `web/calcpad-web/public/py/` MicroPython (MIT, v1.24.1; see `NOTICE.md` there) and the numpy and matplotlib stand-ins for `#python` blocks.');
 out.push('* `calcpad-core/src/markdig/` a port of part of Markdig (BSD 2-Clause; see `NOTICE`).');
 console.log(out.join('\n'));
