@@ -184,18 +184,15 @@ node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, picture
 node ../tools/set_version.mjs --check
 ```
 
-## Checked at 26.10.4
+## Checked at 26.10.5
 
-`cargo fmt --check` is clean; `cargo clippy --all-targets -- -D warnings` is clean for the two crates this release
-changed (`civilkit-calcs-highlighter`, `civilkit-calcs-sheet`), whose tests pass (all 44 of the sheet crate; the
-highlighter's whole suite, including 14 python-block tests); the engine, docx, highlighter, importer and sheet wasm modules were rebuilt.
-`web/e2e/python-check.mjs` (new: lazy loading, the once-per-tab question and Not now, print text, SVG figure, exports used
-by later lines, error line mapping in Calcpad and in sheets, timeout, sandbox, Report, Word and Excel, the ribbon in
-both modes, the four Python samples, and the beam explorer's chart against a three-moment solution) passes. So do
-`web/e2e/ribbon-check.mjs --lint`, `web/e2e/verify-ribbon-sheet.mjs` (407 inserts), `web/e2e/sheet-check.mjs`,
-`web/e2e/import-check.mjs`, `web/e2e/c-style-check.mjs` and `web/e2e/browser-check.mjs` (123 checks). The explorer's chart
-loads Plotly from its CDN, so its checks need a network connection and are skipped without one. The full `cargo test` of
-the workspace was not re-run for this release.
+`cargo test` passes for `civilkit-calcs-sheet` (51 tests) and `calcpad-linalg-wasm` (13), and all wasm modules were rebuilt.
+`web/e2e/python-check.mjs` (108 checks: the earlier Python checks plus the plane truss against hand values from the method of
+joints and virtual work, a bare `#python` block in a sheet, exported names in the sheet's spelling, linear algebra on the engine,
+and the Samples browser groups) and `web/e2e/browser-check.mjs` (123 checks, all 106 bundled samples open without errors) pass.
+The beam explorer's chart loads Plotly from its CDN, so its checks need a network connection and are skipped without one.
+Not re-run for this release: `cargo fmt --check` and `clippy`, the full workspace `cargo test`, and the ribbon, sheet, import
+and C-style check scripts. The Word and Excel exports have been opened in LibreOffice and openpyxl, not in Microsoft Office.
 
 ## Contributing
 

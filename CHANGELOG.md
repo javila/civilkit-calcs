@@ -9,7 +9,7 @@ The app changes are listed under their YY.M.N version below. The three Rust libr
 under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<version>`
 (for example `civilkit-calcs-engine-v0.1.0`).
 
-## [Unreleased]
+## [26.10.5] - 2026-10-24
 
 ### Added
 - A sheet accepts Calcpad's own `#python` ... `#end python` pair as a Python block, the same block as a `python` fence (a pasted block no longer turns into sheet lines).
