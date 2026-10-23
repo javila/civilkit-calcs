@@ -454,38 +454,87 @@ impl MathParser {
             Expr::Var(v) => v.value().ok_or_else(|| exceptions::InvalidOperand("")),
             Expr::Neg(a) => self.eval_expr(a)?.neg(),
             Expr::Bin(op, a, b) => {
-                let va = self.eval_expr(a)?;
-                let vb = self.eval_expr(b)?;
+                let (oa, ob);
+                let va: &Value = match &**a {
+                    Expr::Const(c) => c,
+                    _ => {
+                        oa = self.eval_expr(a)?;
+                        &oa
+                    }
+                };
+                let vb: &Value = match &**b {
+                    Expr::Const(c) => c,
+                    _ => {
+                        ob = self.eval_expr(b)?;
+                        &ob
+                    }
+                };
+                // Two real numbers: the same call `Value::binary` would reach.
+                if let (Value::Real(x), Value::Real(y)) = (va, vb) {
+                    match op {
+                        BinOp::Add => return Ok(Value::Real(RealValue::add(x, y)?)),
+                        BinOp::Sub => return Ok(Value::Real(RealValue::sub(x, y)?)),
+                        BinOp::Mul => return Ok(Value::Real(RealValue::mul_op(x, y))),
+                        BinOp::Div => return Ok(Value::Real(RealValue::div_op(x, y))),
+                        _ => {}
+                    }
+                }
                 match op {
-                    BinOp::Add => Value::add(&va, &vb),
-                    BinOp::Sub => Value::sub(&va, &vb),
-                    BinOp::Mul => Value::mul(&va, &vb),
-                    BinOp::Div => Value::div(&va, &vb),
-                    BinOp::Rem => Value::rem(&va, &vb),
-                    BinOp::Lt => Value::lt(&va, &vb),
-                    BinOp::Gt => Value::gt(&va, &vb),
-                    BinOp::Le => Value::le(&va, &vb),
-                    BinOp::Ge => Value::ge(&va, &vb),
-                    BinOp::Eq => Value::equal(&va, &vb),
-                    BinOp::Ne => Value::not_equal(&va, &vb),
-                    BinOp::And => Value::and(&va, &vb),
-                    BinOp::Or => Value::or(&va, &vb),
-                    BinOp::Xor => Value::xor(&va, &vb),
+                    BinOp::Add => Value::add(va, vb),
+                    BinOp::Sub => Value::sub(va, vb),
+                    BinOp::Mul => Value::mul(va, vb),
+                    BinOp::Div => Value::div(va, vb),
+                    BinOp::Rem => Value::rem(va, vb),
+                    BinOp::Lt => Value::lt(va, vb),
+                    BinOp::Gt => Value::gt(va, vb),
+                    BinOp::Le => Value::le(va, vb),
+                    BinOp::Ge => Value::ge(va, vb),
+                    BinOp::Eq => Value::equal(va, vb),
+                    BinOp::Ne => Value::not_equal(va, vb),
+                    BinOp::And => Value::and(va, vb),
+                    BinOp::Or => Value::or(va, vb),
+                    BinOp::Xor => Value::xor(va, vb),
                 }
             }
             Expr::CalcOp(index, a, b) => {
-                let va = self.eval_expr(a)?;
-                let vb = self.eval_expr(b)?;
-                Value::evaluate_operator(self.calc(), *index, &va, &vb)
+                let (oa, ob);
+                let va: &Value = match &**a {
+                    Expr::Const(c) => c,
+                    _ => {
+                        oa = self.eval_expr(a)?;
+                        &oa
+                    }
+                };
+                let vb: &Value = match &**b {
+                    Expr::Const(c) => c,
+                    _ => {
+                        ob = self.eval_expr(b)?;
+                        &ob
+                    }
+                };
+                Value::evaluate_operator(self.calc(), *index, va, vb)
             }
             Expr::Func(index, a) => {
                 let va = self.eval_expr(a)?;
                 Value::evaluate_function(self.calc(), *index, &va)
             }
             Expr::Func2(index, a, b) => {
-                let va = self.eval_expr(a)?;
-                let vb = self.eval_expr(b)?;
-                Value::evaluate_function2(self.calc(), *index, &va, &vb)
+                let (oa, ob);
+                let va: &Value = match &**a {
+                    Expr::Const(c) => c,
+                    _ => {
+                        oa = self.eval_expr(a)?;
+                        &oa
+                    }
+                };
+                let vb: &Value = match &**b {
+                    Expr::Const(c) => c,
+                    _ => {
+                        ob = self.eval_expr(b)?;
+                        &ob
+                    }
+                };
+                Value::evaluate_function2(self.calc(), *index, va, vb)
             }
             Expr::Cond(test, if_false_when_negative, if_true) => {
                 let c = self.eval_expr(test)?;
