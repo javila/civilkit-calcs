@@ -316,7 +316,8 @@ for (const [top, folder] of folders) {
 // e2e/python-check.mjs runs every one of them in the browser.
 const OWN = join(repo, 'tools', 'own_samples');
 const OWN_TITLES = {
-    'Continuous beam explorer': ['Beam Explorer: Python Solve, Plotly Charts', 'A three-span beam solved in Python (stiffness matrix, numpy, matplotlib) for several load cases and a moving point load; the results drive an interactive Plotly chart with hover values, a load case menu and sliders, and a Calcpad design check.'],
+    'Beam explorer with Plotly': ['Beam Explorer: Plotly from Python', 'A three-span beam solved in Python (stiffness matrix, numpy) for several load cases and a moving point load; the same block draws the results with the Plotly API (go.Figure, make_subplots) and drives them with Plotly\'s own menu and sliders, with no HTML or JavaScript, and a Calcpad design check follows.'],
+    'Continuous beam explorer': ['Beam Explorer: Python Results in Raw JS Plotly', 'The same three-span beam, with the chart written as raw HTML and JavaScript that reads the exported results (a load case menu, sliders that recompute in the browser, hover values). Kept as the example of the raw script route; the Plotly API sample needs none of it.'],
     'Beam moment diagram with matplotlib': ['Beam Moment Diagram with matplotlib', 'A #python block draws the moment diagram of a simply supported beam with numpy and matplotlib and exports the maximum moment; the Calcpad lines after it check that moment against a capacity.'],
     'Plane truss by the stiffness method': ['Plane Truss by the Stiffness Method', 'A statically determinate plane truss is assembled and solved in a #python block (global stiffness matrix in loops, np.linalg.solve), the member forces and reactions are recovered and drawn with matplotlib, and the Calcpad lines after the block check the governing members.'],
     'Function plot with matplotlib': ['Function Plot with matplotlib', 'A #python block plots a damped oscillation and a bar chart side by side with matplotlib and exports the peak value.'],
@@ -333,7 +334,7 @@ if (existsSync(OWN)) {
             samples.push({
                 id: `${folder}-${name}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
                 title, group: folder, folder, file: posix.join('samples', folder, `${name}.cpd`), upstream: `own/${folder}/${name}.cpd`,
-                description: desc, codes: [], ui: false, scripts: false, read: false, python: /^#python\s*$/mi.test(text), assets: [],
+                description: desc, codes: [], ui: false, scripts: /<script\b/i.test(text), read: false, python: /^#python\s*$/mi.test(text), assets: [],
             });
         }
     }

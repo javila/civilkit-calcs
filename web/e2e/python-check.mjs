@@ -2,6 +2,9 @@
 // lazy loading, the once-per-tab question, print text, an SVG figure, an exported variable used by later Calcpad lines,
 // error line mapping, the timeout, the sandbox, and the exports (Report, Word, Excel).
 // numpy.linalg / scipy.linalg on the engine's wasm module, with its error lines and its cache rules.
+// The Plotly API (import plotly.graph_objects as go): the figure JSON, the chart in Chromium, its native menu and sliders, the
+// named errors, the offline note, and the Word and Excel placeholder. The chart checks load Plotly.js from its CDN and are
+// skipped, with a line saying so, when there is no network.
 //   PLAYWRIGHT_BROWSERS_PATH=... node e2e/python-check.mjs [--url U] [--out DIR]
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
@@ -179,14 +182,15 @@ const SHEET = [
     const { ctx, page } = await open();
     const manifest = await page.evaluate(async () => (await fetch('samples/manifest.json')).json());
     const py = manifest.samples.filter(s => s.group === 'Python');
-    check(py.length === 4 && manifest.groups.includes('Python'), `four samples in the Python group (${py.length})`);
-    check(py[0].title === 'Beam Explorer: Python Solve, Plotly Charts', 'the beam explorer sample comes first');
+    check(py.length === 5 && manifest.groups.includes('Python'), `five samples in the Python group (${py.length})`);
+    check(py[0].title === 'Beam Explorer: Plotly from Python', 'the Plotly API beam explorer sample comes first');
+    check(py[1].title === 'Beam Explorer: Python Results in Raw JS Plotly' && py[1].scripts === true && py[0].scripts === false, 'the raw JS explorer is the second sample and is marked as carrying scripts; the Plotly API one is not');
     for (const s of py) {
         await page.evaluate(async (id) => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(x => x.id === id); await window.calcpadFiles.samples.openSample(m); }, s.id);
         if (await yes(page).count().catch(() => 0) || await yes(page).waitFor({ timeout: 4000 }).then(() => true, () => false)) await yes(page).click();
         const t = await frameText(page, 'Python', 40000) || await frameText(page, '=', 5000);
         const bad = /Python error|Error in "/.test(t);
-        check(t.length > 0 && !bad && await frameHas(page, 'svg.cprs-py-figure'), `sample "${s.title}" runs with a figure and no errors`);
+        check(t.length > 0 && !bad && await frameHas(page, 'svg.cprs-py-figure, .cprs-plotly-wrap'), `sample "${s.title}" runs with a figure and no errors`);
         await page.waitForTimeout(2500);
         const markers = await page.evaluate(() => window.monaco.editor.getModelMarkers({ resource: window.calcpadActiveEditor.getModel().uri }).filter(m => m.severity >= 8).map(m => `${m.startLineNumber}: ${m.message}`));
         check(markers.length === 0, `sample "${s.title}" has no error markers in the editor${markers.length ? ' ' + JSON.stringify(markers.slice(0, 3)) : ''}`);
@@ -248,11 +252,11 @@ const SHEET = [
     await ctx.close();
 }
 
-// ---- 8. the beam explorer: Python results drive a Plotly chart ----------------------------------
+// ---- 8. the raw JS beam explorer: Python results drive a Plotly chart written as HTML and JavaScript ----------------------------------
 {
     const { ctx, page } = await open();
     // Opened the way a user opens it (the Samples browser converts C-style operators, which must not touch the Python).
-    await page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(s => s.title.startsWith('Beam Explorer')); await window.calcpadFiles.samples.openSample(m); });
+    await page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(s => s.title === 'Beam Explorer: Python Results in Raw JS Plotly'); await window.calcpadFiles.samples.openSample(m); });
     await yes(page).click({ timeout: 20000 });
     const t = await frameText(page, 'Design check', 60000);
     check(/Equilibrium: the reactions sum to the load/.test(t) && /UDL on all spans 300\.0 of 300\.0 kN/.test(t), 'the Python solve ran and its equilibrium check holds');
@@ -509,8 +513,253 @@ const SHEET = [
     check(titles.length === 1 && titles[0] === 'Built-up Section Properties', `the Sections group holds the built-up section sample ${JSON.stringify(titles)}`);
     await page.locator('.cprs-s-group', { hasText: /^Python / }).click();
     const pt = await page.locator('.cprs-samples .cprs-s-item .cprs-s-title').allInnerTexts();
-    check(pt.includes('Plane Truss by the Stiffness Method') && pt.length === 4, `the Python group lists the truss sample (${pt.length} samples)`);
+    check(pt.includes('Plane Truss by the Stiffness Method') && pt.includes('Beam Explorer: Plotly from Python') && pt.length === 5, `the Python group lists the truss and the Plotly explorer samples (${pt.length} samples)`);
     await ctx.close();
+}
+
+// ---- 15. the Plotly API: figure JSON, lazy load, named errors, offline note, Word and Excel ------------------------------
+const CDN = 'https://cdn.plot.ly/plotly-2.26.0.min.js';
+const online = await fetch(CDN, { method: 'HEAD' }).then((r) => r.ok, () => false);
+if (!online) console.log(`skip the Plotly chart checks (sections 15b and 16): ${CDN} is not reachable (offline?); the figure JSON, error, offline-note and export checks still run`);
+const FIG = ['"Plotly check', '#python', 'import plotly.graph_objects as go', 'from plotly.subplots import make_subplots', 'import numpy as np',
+    'x = np.linspace(0, 4, 5)',
+    'fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=["Top", "Bottom"])',
+    'fig.add_trace(go.Scatter(x=x, y=x * 2, name="up", line_color="#d62728"), row=1, col=1)',
+    'fig.add_trace(go.Bar(x=[1, 2, 3], y=[3, float("nan"), 1], name="bars"), row=2, col=1)',
+    'fig.add_vline(x=2, line_dash="dot")',
+    'fig.update_layout(title="Check chart", height=420, xaxis2_title="x (m)", updatemenus=[dict(type="dropdown", buttons=[dict(label="all", method="update", args=[{"visible": [True, True]}]), dict(label="up only", method="update", args=[{"visible": [True, False]}])])], sliders=[dict(active=0, steps=[dict(label=str(k), method="restyle", args=[{"y": [[k * v for v in [0, 1, 2, 3, 4]]]}, [0]]) for k in (1, 2, 3)])])',
+    'fig.show()', 'print("after the chart")', '#end python', 'z = 1+1'].join('\n');
+const plotlyFrame = async (page, ms = 30000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+        for (const f of page.frames()) if (f !== page.mainFrame() && await f.locator('.cprs-plotly').count().catch(() => 0)) return f;
+        await page.waitForTimeout(300);
+    }
+    return null;
+};
+/** Waits (polling, the frame's CSP does not allow waitForFunction) until the chart is drawn or the note says why not. */
+const chartState = async (page, f, ms = 60000) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+        const st = await f.evaluate(() => ({ svg: !!document.querySelector('.cprs-plotly .main-svg'), note: document.querySelector('.cprs-plotly-note')?.textContent ?? '', shown: document.querySelector('.cprs-plotly-note')?.style.display !== 'none' })).catch(() => null);
+        if (st && (st.svg || (st.shown && /connection|could not/.test(st.note)))) return st;
+        await page.waitForTimeout(300);
+    }
+    return null;
+};
+{
+    // 15a. lazy: a block without plotly never loads the shim; a block that imports it does; the figure JSON reaches the page
+    const { ctx, page, requests, errors } = await open();
+    await setText(page, ['"No plotly', '#python', 'print("plain")', '#end python'].join('\n'));
+    await yes(page).click({ timeout: 20000 });
+    await frameText(page, 'plain');
+    check(!requests.some((u) => /py\/lib\/plotly\//.test(u)), 'a Python block that does not mention plotly never fetches the plotly shim');
+    await page.route(CDN, (r) => r.abort());     // 15a looks at the markup only
+    await setText(page, FIG);
+    const t = await frameText(page, 'after the chart');
+    check(/after the chart/.test(t) && /z = .*2/.test(t.replace(/\s+/g, ' ')), 'a block with fig.show() runs, prints after it, and the Calcpad line after the block calculates');
+    check(requests.some((u) => /py\/lib\/plotly\/graph_objects\.py/.test(u)) && requests.some((u) => /py\/lib\/plotly\/subplots\.py/.test(u)), 'the plotly shim is fetched when a block mentions plotly');
+    const res = await page.evaluate(async (content) => {
+        const r = await fetch('/api/calcpad/convert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, forPrint: true, includeLineAnchors: false }) });
+        return await r.text();
+    }, FIG);
+    const m = /<div class="cprs-plotly" data-fig="([A-Za-z0-9+\/=]+)"><\/div>/.exec(res);
+    check(!!m, 'the report HTML carries the figure as a cprs-plotly container');
+    const fig = m ? JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')) : {};
+    const d = fig.data ?? [], L = fig.layout ?? {};
+    check(d.length === 2 && d[0].type === 'scatter' && d[1].type === 'bar', `two traces: scatter and bar (${d.map((x) => x.type)})`);
+    check(JSON.stringify(d[0]?.y) === '[0,2,4,6,8]' && d[0]?.line?.color === '#d62728' && d[0]?.name === 'up', 'the scatter keeps its numbers and its line_color is expanded to line.color');
+    check(d[1]?.y?.[1] === null && d[1]?.y?.[0] === 3, 'NaN becomes null, other numbers are kept');
+    check(d[0]?.xaxis === 'x' && d[0]?.yaxis === 'y' && d[1]?.xaxis === 'x2' && d[1]?.yaxis === 'y2', 'row and col put the traces on the subplot axes');
+    check(L.title === 'Check chart' && L.height === 420 && L.xaxis2?.title === 'x (m)', 'update_layout keywords are written as given (title, height, xaxis2_title)');
+    check(L.xaxis?.matches === 'x2' && L.xaxis?.showticklabels === false && L.xaxis2?.domain?.[0] === 0 && L.xaxis2?.domain?.[1] === 1, 'shared_xaxes: the top axis follows the bottom one and hides its labels');
+    check(Array.isArray(L.shapes) && L.shapes.length === 2 && L.shapes[0].yref === 'y domain' && L.shapes[1].yref === 'y2 domain' && L.shapes[0].line?.dash === 'dot', 'add_vline draws one line per subplot, with line_dash expanded');
+    check(L.annotations?.length === 2 && L.annotations.map((a) => a.text).sort().join() === 'Bottom,Top', 'subplot_titles become annotations');
+    check(L.updatemenus?.[0]?.buttons?.length === 2 && L.updatemenus[0].buttons[1].args[0].visible[1] === false && L.sliders?.[0]?.steps?.length === 3 && L.sliders[0].steps[2].args[0].y[0][4] === 12, 'updatemenus and sliders pass through unchanged');
+    check(/Interactive chart: Check chart\./.test(res), 'the page holds a note naming the chart, for print and export');
+    check(errors.length === 0, `no page errors${errors.length ? ': ' + errors[0] : ''}`);
+
+    // 15c. Word and Excel: a placeholder paragraph naming the chart, not the figure
+    const files = await page.evaluate(async (content) => {
+        const o = {};
+        for (const ep of ['docx', 'xlsx']) {
+            const r = await fetch(`/api/calcpad/${ep}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, forPrint: true, includeLineAnchors: false }) });
+            o[ep] = { status: r.status, bytes: [...new Uint8Array(await r.arrayBuffer())] };
+        }
+        return o;
+    }, FIG);
+    const { writeFileSync } = await import('node:fs');
+    const { execFileSync } = await import('node:child_process');
+    const unzipAll = (name, bytes) => { const f = join(out, name); writeFileSync(f, Buffer.from(bytes)); try { return execFileSync('unzip', ['-p', f], { encoding: 'utf8', maxBuffer: 64 << 20 }); } catch { return ''; } };
+    const docx = unzipAll('plotly-check.docx', files.docx.bytes), xlsx = unzipAll('plotly-check.xlsx', files.xlsx.bytes);
+    check(files.docx.status === 200 && /Interactive chart: Check chart/.test(docx) && /not carried by print or export/.test(docx), 'Word: a paragraph names the chart ("Interactive chart: Check chart") where it stood');
+    check(!/data-fig|cprs-plotly/.test(docx), 'Word: the figure data is not in the document');
+    check(files.xlsx.status === 200 && /Interactive chart: Check chart/.test(xlsx) && !/data-fig|cprs-plotly/.test(xlsx), 'Excel: the report sheet holds the placeholder paragraph naming the chart, not the figure');
+    await ctx.close();
+}
+
+{
+    // the named errors: anything the shim does not provide fails by name, and so does a spelling Plotly.js would ignore
+    const { ctx, page } = await open();
+    const ERR = ['"Plotly errors', '#python', 'import plotly.graph_objects as go', 'import plotly.graph_objs as gobjs',
+        'def tell(f):', '    try:', '        f()', '        print("no error")', '    except Exception as e:', '        print("E> " + type(e).__name__ + ": " + str(e)[:150])',
+        'fig = go.Figure()',
+        'tell(lambda: go.Sunburst)',
+        'tell(lambda: go.Scatter(x=[1], line={"line_color": 1}))',
+        'tell(lambda: fig.write_html("a.html"))',
+        'tell(lambda: fig.update_layout(template="plotly_white"))',
+        'tell(lambda: fig.show(renderer="browser"))',
+        'tell(lambda: gobjs.Foo)',
+        'tell(lambda: go.Scatter(x=[object()]))',
+        'tell(lambda: setattr(fig, "data", 1))',
+        'tell(lambda: __import__("plotly.express"))',
+        'print("magic", go.Scatter(line_color="red", marker_size=4).to_dict() == {"type": "scatter", "line": {"color": "red"}, "marker": {"size": 4}}, gobjs.Scatter is go.Scatter)',
+        'go.Surface3d', '#end python'].join('\n');
+    await setText(page, ERR);
+    await yes(page).click({ timeout: 20000 });
+    const t = (await frameText(page, 'Python error', 40000)).replace(/[ \t]+/g, ' ');
+    check(/E> NotImplementedError: plotly\.graph_objects\.Sunburst is not available/.test(t), 'an unsupported trace type fails by name (go.Sunburst) ' + JSON.stringify(t.slice(0, 200)));
+    check(/E> ValueError: go\.Scatter line: the key 'line_color' is written with underscores inside a dict/.test(t), "a magic-underscore key inside a dict fails naming the key ('line_color')");
+    check(/E> NotImplementedError: go\.Figure\.write_html is not available/.test(t), 'an unsupported Figure method fails by name (write_html)');
+    check(/E> ValueError: Figure\.update_layout: template='plotly_white': named templates are not available/.test(t), 'a named template fails by name instead of being ignored');
+    check(/E> NotImplementedError: Figure\.show\(renderer=\.\.\.\) is not available/.test(t), 'an unsupported fig.show option fails by name (renderer)');
+    check(/E> NotImplementedError: plotly\.graph_objs\.Foo is not available/.test(t), 'plotly.graph_objs fails by name for an unknown class');
+    check(/E> TypeError: go\.Scatter x: a object cannot be sent to Plotly/.test(t), 'a value that is not JSON-able fails naming the property');
+    check(/E> ImportError: no module named 'plotly\.express'/.test(t), 'plotly.express is an ImportError naming the module');
+    check(/E> AttributeError: go\.Figure: cannot set 'data'/.test(t), 'assigning to a figure attribute fails instead of being ignored');
+    check(/magic True True/.test(t), 'line_color and marker_size keywords are expanded to nested dicts; graph_objs is graph_objects');
+    check(/Python error on line 22: NotImplementedError: plotly\.graph_objects\.Surface3d is not available/.test(t), 'an uncaught unsupported name is a Python error on its own line (22)');
+    await ctx.close();
+}
+
+// ---- 15b. the chart in Chromium; the offline note ------------------------------------------------------------------------
+{
+    const { ctx, page } = await open();
+    await page.route(CDN, (r) => r.abort());
+    await setText(page, FIG);
+    await yes(page).click({ timeout: 20000 });
+    const f = await plotlyFrame(page);
+    check(!!f, 'the chart container is on the page (offline run)');
+    const st = f ? await chartState(page, f, 30000) : null;
+    check(!!st && !st.svg && st.shown && /Interactive chart: Check chart\. Interactive charts need a connection to load Plotly/.test(st.note), 'with the CDN blocked the page says interactive charts need a connection, naming the chart (no silent blank) ' + JSON.stringify(st));
+    await page.screenshot({ path: join(out, 'plotly-offline.png') });
+    await ctx.close();
+}
+if (online) {
+    const LIBS = JSON.parse((await import('node:fs')).readFileSync(new URL('../calcpad-web/src/wasm/library-defaults.json', import.meta.url), 'utf8'));
+    const plotlyLib = LIBS.find((l) => l.id === 'plotly');
+    const { ctx, page, requests, errors } = await open();
+    await setText(page, FIG);
+    await yes(page).click({ timeout: 20000 });
+    const f = await plotlyFrame(page);
+    const st = f ? await chartState(page, f) : null;
+    check(!!st && st.svg, 'the chart is drawn by Plotly.js in the report page ' + JSON.stringify(st));
+    if (st?.svg) {
+        const info = await f.evaluate((cdn) => {
+            const gd = document.querySelector('.cprs-plotly');
+            const sc = [...document.scripts].find((s) => s.src === cdn);
+            return { traces: gd.data.length, types: gd.data.map((t) => t.type), subplots: Object.keys(gd._fullLayout._plots ?? {}).length, svgs: document.querySelectorAll('.cprs-plotly .main-svg').length,
+                integrity: sc?.integrity, cors: sc?.crossOrigin, note: document.querySelector('.cprs-plotly-note').style.display, font: gd._fullLayout.font.color, bg: getComputedStyle(document.querySelector('.cprs-plotly svg.main-svg')).backgroundColor,
+                menu: document.querySelectorAll('.updatemenu-header').length, sliders: document.querySelectorAll('.slider-rail-rect').length, url: window.Plotly?.version };
+        }, CDN);
+        check(info.traces === 2 && info.types.join() === 'scatter,bar' && info.subplots === 2, `Chromium draws two traces on two subplots (${JSON.stringify([info.traces, info.types, info.subplots])})`);
+        check(info.integrity === plotlyLib.files[0].integrity && info.cors === 'anonymous', 'the Plotly script tag carries the library list integrity hash and crossorigin=anonymous');
+        check(requests.filter((u) => /plot\.ly/.test(u)).every((u) => u === CDN) && requests.some((u) => u === CDN), 'the only Plotly request is the pinned CDN file');
+        check(info.note === 'none' && info.menu === 1 && info.sliders === 1, `the note is hidden once the chart is live, and the native menu and slider are drawn (${info.menu}, ${info.sliders})`);
+        check(info.font === '#222' && info.bg === 'rgba(0, 0, 0, 0)', `light theme: dark text, transparent paper (${info.font}, ${info.bg})`);
+        await page.screenshot({ path: join(out, 'plotly-light.png') });
+    }
+    check(errors.length === 0, `no page errors while drawing${errors.length ? ': ' + errors[0] : ''}`);
+    await ctx.close();
+    // dark theme: light text, and no white card behind the chart (the app's dark rule paints every svg white; the chart opts out)
+    const dk = await open('dark');
+    await setText(dk.page, FIG);
+    await yes(dk.page).click({ timeout: 20000 });
+    const fd = await plotlyFrame(dk.page);
+    const sd = fd ? await chartState(dk.page, fd) : null;
+    if (sd?.svg) {
+        const info = await fd.evaluate(() => {
+            const sv = document.querySelector('.cprs-plotly svg.main-svg'), cs = getComputedStyle(sv);
+            return { font: document.querySelector('.cprs-plotly')._fullLayout.font.color, bg: cs.backgroundColor, pad: cs.paddingLeft, radius: cs.borderTopLeftRadius, body: getComputedStyle(document.body).backgroundColor };
+        });
+        check(info.font === '#e6e6e6' && info.bg === 'rgba(0, 0, 0, 0)' && info.pad === '0px' && info.radius === '0px', `dark theme: light text and no white card behind the chart (${JSON.stringify(info)})`);
+        await dk.page.screenshot({ path: join(out, 'plotly-dark.png') });
+    } else check(false, 'the chart is drawn in the dark theme ' + JSON.stringify(sd));
+    await dk.ctx.close();
+}
+
+// ---- 16. the beam explorer from Python: native menu and sliders change the plotted data ------------------------------------
+if (online) {
+    const { ctx, page, errors } = await open();
+    await page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(s => s.title === 'Beam Explorer: Plotly from Python'); await window.calcpadFiles.samples.openSample(m); });
+    await yes(page).click({ timeout: 20000 });
+    const t = await frameText(page, 'Design check', 60000);
+    check(/Equilibrium: the reactions sum to the load/.test(t) && /UDL on all spans 300\.0 of 300\.0 kN/.test(t), 'the Python solve ran and its equilibrium check holds');
+    check(/η = /.test(t) && /M_Ed|MEd/.test(t) && /within the capacity/.test(t), 'the Calcpad design check uses the exported envelope');
+    check(/UDL on all spans\s+sagging\s+34\.65\s+hogging\s+-63\.61/.test(t), 'the printed table gives the hogging moment -63.61 kN.m for the UDL on all spans');
+    check(/The chart holds \d+ kB of precomputed results/.test(t), 'the sample prints the size of its chart data: ' + (/The chart holds \d+ kB[^\n]*/.exec(t)?.[0] ?? ''));
+    const f = await plotlyFrame(page, 60000);
+    const st = f ? await chartState(page, f) : null;
+    check(!!st && st.svg, 'the beam explorer chart is drawn');
+    const src = await page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(x => x.title === 'Beam Explorer: Plotly from Python'); return (await fetch(m.file)).text(); });
+    check(!/<script|<style|<div|<select|<input|<label/i.test(src) && !src.includes(String.fromCharCode(0x2014)), 'the sample source has no script, no HTML controls and no em-dash')
+    const read = () => f.evaluate(() => {
+        const gd = document.querySelector('.cprs-plotly');
+        return { n: gd.data.length, vis: gd.data.map((t) => t.visible !== false && t.visible !== 'legendonly'), y: gd.data.map((t) => t.y), x: gd.data[2].x, names: gd.data.map((t) => t.name),
+            active: gd.layout.sliders.map((s) => s.active), menu: gd.layout.updatemenus[0].active, shape4: gd.layout.shapes[4].x0, shape4b: gd.layout.shapes[4].x1 };
+    });
+    const mn = (a) => Math.min(...a), mx = (a) => Math.max(...a);
+    const D0 = await read();
+    check(D0.n === 14, `fourteen traces: the band, three uniform cases (M, V, deflection) and the point load (${D0.n})`);
+    // three-moment equations, spans 5, 6, 4 m, w = 20 kN/m, simple supports at A and D:
+    //   2 M_B (L1 + L2) + M_C L2 = -w (L1^3 + L2^3) / 4;   M_B L2 + 2 M_C (L2 + L3) = -w (L2^3 + L3^3) / 4
+    const [L1, L2, L3, w] = [5, 6, 4, 20];
+    const a11 = 2 * (L1 + L2), a12 = L2, a21 = L2, a22 = 2 * (L2 + L3), b1 = -w * (L1 ** 3 + L2 ** 3) / 4, b2 = -w * (L2 ** 3 + L3 ** 3) / 4;
+    const det = a11 * a22 - a12 * a21, MB = (b1 * a22 - a12 * b2) / det, MC = (a11 * b2 - a21 * b1) / det;
+    const at = (D, tr, xv) => D.y[tr][D.x.findIndex((v) => Math.abs(v - xv) < 1e-6)];
+    check(Math.abs(MB + 63.61) < 0.01 && Math.abs(MC + 50.91) < 0.01, `the three-moment solution is M_B = ${MB.toFixed(2)} and M_C = ${MC.toFixed(2)} kN.m`);
+    check(Math.abs(at(D0, 2, 5) - MB) < 0.01 && Math.abs(at(D0, 2, 11) - MC) < 0.01 && Math.abs(mn(D0.y[2]) - MB) < 0.01, `the plotted UDL-on-all-spans moment is ${at(D0, 2, 5)} over B and ${at(D0, 2, 11)} over C (hogging, as the three-moment solution)`);
+    check(D0.vis[0] && D0.vis[1] && D0.vis[2] && !D0.vis[5] && !D0.vis[8] && D0.vis[11], 'initially the UDL-on-all-spans case, the band and the point load are shown');
+    // the real controls
+    const base8 = mn(D0.y[8]), baseHi = mx(D0.y[0]);
+    await f.locator('.updatemenu-header').first().click();
+    await f.locator('.updatemenu-item-text', { hasText: 'UDL on span 2 only' }).first().click();
+    await page.waitForTimeout(500);
+    const D1 = await read();
+    check(D1.vis[8] && D1.vis[9] && D1.vis[10] && !D1.vis[2] && !D1.vis[5] && D1.vis[11] && D1.menu === 2, `the menu entry "UDL on span 2 only" shows that case and hides the other (visible: ${JSON.stringify(D1.vis)}, active ${D1.menu})`);
+    const rail = (i) => f.locator('.slider-rail-rect').nth(i);
+    const clickRail = async (i, frac) => { await rail(i).scrollIntoViewIfNeeded(); await page.waitForTimeout(200); const bb = await rail(i).boundingBox(); await page.mouse.click(bb.x + Math.min(bb.width - 1, Math.max(1, bb.width * frac)), bb.y + bb.height / 2); await page.waitForTimeout(600); };
+    await clickRail(1, 1);
+    const D2 = await read();
+    const fac = 0.5 + 0.05 * D2.active[1];
+    check(D2.active[1] === 30 && Math.abs(fac - 2) < 1e-9, `the load factor slider, clicked at its end, is at step ${D2.active[1]} (factor ${fac.toFixed(2)})`);
+    check(Math.abs(mn(D2.y[8]) - 2 * base8) < 0.03 && Math.abs(mx(D2.y[0]) - 2 * baseHi) < 0.03 && Math.abs(mn(D2.y[2]) - 2 * mn(D0.y[2])) < 0.03,
+        `factor 2 doubles the plotted moments: span-2 case ${mn(D2.y[8])} against 2 x ${base8}, band ${mx(D2.y[0])} against 2 x ${baseHi}`);
+    check(JSON.stringify(D2.y[11]) === JSON.stringify(D1.y[11]) && JSON.stringify(D2.x) === JSON.stringify(D0.x), 'the load factor slider leaves the point load and the x values alone');
+    await clickRail(0, 0.5);
+    const D3 = await read();
+    const p = 0.5 + D3.active[0];
+    check(D3.active[0] !== D0.active[0] && D3.shape4 === p && D3.shape4b === p && D3.names[11] === `P = 60 kN at x = ${p.toFixed(1)} m`, `the point load slider moved the load to x = ${p} m (marker line ${D3.shape4}, trace name "${D3.names[11]}")`);
+    check(JSON.stringify(D3.y[11]) !== JSON.stringify(D2.y[11]) && JSON.stringify(D3.y[8]) === JSON.stringify(D2.y[8]) && JSON.stringify(D3.vis) === JSON.stringify(D2.vis), 'the point load slider changes only the point load traces');
+    // independent check of the moved point load: the reactions of a three-span beam sum to P, so the shear just after the last support is the sum of the end shears
+    const Mp = D3.y[11];
+    check(Math.abs(Mp[0]) < 0.01 && Math.abs(Mp[Mp.length - 1]) < 0.01, `the point load moment is zero at both free ends (${Mp[0]}, ${Mp[Mp.length - 1]})`);
+    await page.setViewportSize({ width: 1400, height: 1800 });
+    await page.waitForTimeout(800);
+    await f.locator('.cprs-plotly-wrap').first().screenshot({ path: join(out, 'beam-explorer-plotly.png') });
+    check(errors.length === 0, `no page errors${errors.length ? ': ' + errors[0] : ''}`);
+    await ctx.close();
+    // the same sample in the dark theme
+    const dk = await open('dark');
+    await dk.page.evaluate(async () => { const m = (await (await fetch('samples/manifest.json')).json()).samples.find(s => s.title === 'Beam Explorer: Plotly from Python'); await window.calcpadFiles.samples.openSample(m); });
+    await yes(dk.page).click({ timeout: 20000 });
+    const fd = await plotlyFrame(dk.page, 60000);
+    const sd = fd ? await chartState(dk.page, fd) : null;
+    check(!!sd?.svg, 'the beam explorer is drawn in the dark theme');
+    await dk.page.setViewportSize({ width: 1400, height: 1800 });
+    await dk.page.waitForTimeout(800);
+    if (fd) await fd.locator('.cprs-plotly-wrap').first().screenshot({ path: join(out, 'beam-explorer-plotly-dark.png') });
+    await dk.ctx.close();
 }
 
 await browser.close();

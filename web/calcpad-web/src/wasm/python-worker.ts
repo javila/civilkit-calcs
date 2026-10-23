@@ -23,6 +23,7 @@ type RunMsg = { type: 'run'; token: string; id: number; source: string; first: n
 const OUTPUT_MAX = 100_000;      // characters of print output kept per worksheet run
 const FIGURES_MAX = 20;          // figures per worksheet run
 const SVG_MAX = 3_000_000;       // characters of SVG per worksheet run
+const PLOTLY_MAX = 4_000_000;    // characters of Plotly figure JSON per worksheet run
 const EXPORTS_MAX = 500;         // exported names per worksheet run
 const HEAP = 32 * 1024 * 1024;   // the interpreter's heap
 
@@ -36,6 +37,9 @@ interface Loaded {
     wasm: Uint8Array;
     wasmUrl: string;
     files: [string, string][];
+    /** Library files fetched only for a block that imports them (py/lib/plotly/), as paths under py/lib. */
+    lazy: string[];
+    lazyText: Promise<[string, string][]> | null;
 }
 
 let loaded: Promise<Loaded> | null = null;
@@ -72,7 +76,7 @@ async function ensureLinalg(source: string): Promise<void> {
     await linalgLoading;
 }
 
-let session: { mp: any; state: SessionState } | null = null;
+let session: { mp: any; state: SessionState; plotlyWritten: boolean; made: Set<string> } | null = null;
 
 interface SessionState {
     parts: BlockResult['parts'];
@@ -80,6 +84,7 @@ interface SessionState {
     truncated: boolean;
     chars: number;
     svgChars: number;
+    plotlyChars: number;
     figures: number;
     hostError: string | null;
 }
@@ -96,7 +101,8 @@ function load(base: string): Promise<Loaded> {
                 realFetch(wasmUrl).then((r) => { if (!r.ok) throw new Error(`micropython.wasm: ${r.status}`); return r.arrayBuffer(); }),
                 realFetch(`${base}py/files.json`).then((r) => { if (!r.ok) throw new Error(`files.json: ${r.status}`); return r.json() as Promise<string[]>; }),
             ]);
-            const files = await Promise.all(list.map(async (f): Promise<[string, string]> => {
+            const lazy = list.filter((f) => f.startsWith('plotly/'));
+            const files = await Promise.all(list.filter((f) => !f.startsWith('plotly/')).map(async (f): Promise<[string, string]> => {
                 const r = await realFetch(`${base}py/lib/${f}`);
                 if (!r.ok) throw new Error(`${f}: ${r.status}`);
                 return [f, await r.text()];
@@ -113,7 +119,7 @@ function load(base: string): Promise<Loaded> {
                     return Promise.reject(new TypeError('network access is not available to a worksheet script'));
                 },
             });
-            return { realFetch, base, loadMicroPython: mod.loadMicroPython, wasm, wasmUrl, files };
+            return { realFetch, base, loadMicroPython: mod.loadMicroPython, wasm, wasmUrl, files, lazy, lazyText: null };
         })();
         loaded.catch(() => { loaded = null; });
     }
@@ -134,10 +140,35 @@ function lockDown(): void {
     } catch { /* not replaceable */ }
 }
 
+/** Fetches the plotly shim (once per page) and writes it into the interpreter, for a block that mentions plotly. */
+async function ensurePlotly(source: string): Promise<void> {
+    if (!session || session.plotlyWritten || !/plotly/.test(source)) return;
+    const l = await load(lastBase);
+    l.lazyText ??= Promise.all(l.lazy.map(async (f): Promise<[string, string]> => {
+        const r = await l.realFetch(`${l.base}py/lib/${f}`);
+        if (!r.ok) throw new Error(`${f}: ${r.status}`);
+        return [f, await r.text()];
+    }));
+    const files = await l.lazyText;
+    const { mp, made } = session;
+    for (const [path, src] of files) {
+        const full = `/lib/${path}`;
+        let p = '';
+        for (const part of full.slice(0, full.lastIndexOf('/')).split('/').filter(Boolean)) {
+            p += `/${part}`;
+            if (made.has(p)) continue;
+            made.add(p);
+            try { mp.FS.mkdir(p); } catch { /* exists */ }
+        }
+        mp.FS.writeFile(full, src);
+    }
+    session.plotlyWritten = true;
+}
+
 async function start(msg: StartMsg): Promise<void> {
     lastBase = msg.base;
     const l = await load(msg.base);
-    const state: SessionState = { parts: [], exports: [], truncated: false, chars: 0, svgChars: 0, figures: 0, hostError: null };
+    const state: SessionState = { parts: [], exports: [], truncated: false, chars: 0, svgChars: 0, plotlyChars: 0, figures: 0, hostError: null };
     let pend: number[] = [];
     const dec = new TextDecoder();
     const text = (s: string) => {
@@ -166,6 +197,23 @@ async function start(msg: StartMsg): Promise<void> {
             } catch (e) {
                 state.hostError ??= `figure could not be drawn: ${e instanceof Error ? e.message : String(e)}`;
             }
+        },
+        plotly(specText: string) {
+            flush();
+            const spec = String(specText);
+            if (state.figures >= FIGURES_MAX || state.plotlyChars + spec.length > PLOTLY_MAX) { state.truncated = true; return; }
+            let title = '';
+            try {
+                const t = (JSON.parse(spec) as { layout?: { title?: unknown } }).layout?.title;
+                const text = typeof t === 'string' ? t : (t as { text?: unknown } | undefined)?.text;
+                title = typeof text === 'string' ? text : '';
+            } catch {
+                state.hostError ??= 'plotly figure could not be read';
+                return;
+            }
+            state.plotlyChars += spec.length;
+            state.figures++;
+            state.parts.push({ plotly: spec, title });
         },
         linalg(t: string): string {
             if (linalgCall) {
@@ -197,7 +245,7 @@ async function start(msg: StartMsg): Promise<void> {
     }
     mp.runPython('import _cp_raw\nimport calcpad_py\ncalcpad_py.install(_cp_raw)\n_cp_run = calcpad_py.run\ndel _cp_raw\ndel calcpad_py\n');
     (state as SessionState & { flush?: () => void }).flush = flush;
-    session = { mp, state };
+    session = { mp, state, plotlyWritten: false, made };
     lockDown();
 }
 
@@ -229,6 +277,7 @@ self.onmessage = async (e: MessageEvent<StartMsg | RunMsg>) => {
             send({ type: 'ready', token: m.token });
         } else if (m.type === 'run') {
             await ensureLinalg(m.source);
+            await ensurePlotly(m.source);
             send({ type: 'result', token: m.token, id: m.id, result: run(m) });
         }
     } catch (err) {
