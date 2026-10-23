@@ -11,6 +11,9 @@
 //! while rendering is written to that file (used to classify worksheets).
 mod calcpad_reader;
 
+#[global_allocator]
+static ALLOC: calcpad_core::fast_alloc::FastAlloc = calcpad_core::fast_alloc::FastAlloc;
+
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 

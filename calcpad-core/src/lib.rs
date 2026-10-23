@@ -33,6 +33,7 @@ pub mod clock;
 pub mod data_files;
 pub mod exceptions;
 pub mod extension_methods;
+pub mod fast_alloc;
 pub mod markdig;
 pub mod math_parser_exception;
 pub mod matrix;
