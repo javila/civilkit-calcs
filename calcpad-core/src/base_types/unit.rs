@@ -103,6 +103,33 @@ impl Unit {
         }
     }
 
+    /// `blank` made directly in its `Rc` block. A unit is 160 bytes; building it in a local and
+    /// moving it into the block costs a copy, which in the browser build is a slow bulk-memory
+    /// call, and unit results are made by the million.
+    #[inline]
+    fn blank_rc(n: usize, temp_char: char) -> Rc<Unit> {
+        debug_assert!(n <= MAX_DIMS);
+        let mut rc = Rc::<Unit>::new_uninit();
+        let p = Rc::get_mut(&mut rc).expect("a new Rc is unique").as_mut_ptr();
+        // SAFETY: every field of the unit is written before `assume_init`; `Cell<f64>` has
+        // the layout of `f64`.
+        unsafe {
+            std::ptr::addr_of_mut!((*p).text).write(RefCell::new(None));
+            std::ptr::addr_of_mut!((*p).temp_char).write(Cell::new(temp_char));
+            std::ptr::addr_of_mut!((*p).n).write(n as u8);
+            std::ptr::addr_of_mut!((*p).pid).write(NEXT_POWERS_ID.fetch_add(1, Ordering::Relaxed));
+            let pw = std::ptr::addr_of_mut!((*p).pw) as *mut f32;
+            let fc = std::ptr::addr_of_mut!((*p).fc) as *mut f64;
+            // Volatile stores: plain ones are merged into a bulk fill, a slow call in the
+            // browser build for 36 and 72 bytes.
+            for i in 0..MAX_DIMS {
+                pw.add(i).write_volatile(0.0);
+                fc.add(i).write_volatile(0.0);
+            }
+            rc.assume_init()
+        }
+    }
+
     fn from_parts(powers: &[f32], factors: &[f64], temp_char: char) -> Unit {
         let n = powers.len();
         debug_assert!(factors.len() == n);
@@ -504,7 +531,8 @@ impl Unit {
         }
         let f1 = &u1.fc;
         let f2 = &u2.fc;
-        let mut u = Unit::blank(n, temp_char);
+        let mut rc = Unit::blank_rc(n, temp_char);
+        let u = Rc::get_mut(&mut rc).expect("a new Rc is unique");
         for i in 0..n1 {
             if i < n2 {
                 u.pw[i] = if divide { p1[i] - p2[i] } else { p1[i] + p2[i] };
@@ -520,7 +548,7 @@ impl Unit {
                 u.pw[i] = if divide { -p2[i] } else { p2[i] };
             }
         }
-        Some(Rc::new(u))
+        Some(rc)
     }
 
     /// `operator *(Unit, Unit)`: MultiplyOrDivide without the conversion factor.
@@ -565,12 +593,13 @@ impl Unit {
             return None;
         }
         let n = self.len();
-        let mut u = Unit::blank(n, self.temp_char.get());
+        let mut rc = Unit::blank_rc(n, self.temp_char.get());
+        let u = Rc::get_mut(&mut rc).expect("a new Rc is unique");
         for i in 0..n {
             u.pw[i] = self.pw[i] * x;
             u.fc[i].set(self.fc[i].get());
         }
-        Some(Rc::new(u))
+        Some(rc)
     }
 
     pub fn is_consistent_opt(u1: &OptUnit, u2: &OptUnit) -> bool {
