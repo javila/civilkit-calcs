@@ -50,7 +50,7 @@ export interface BlockError {
 
 export interface BlockResult {
     /** print() text and figures, in the order the script made them. */
-    parts: ({ text: string } | { svg: string })[];
+    parts: ({ text: string } | { svg: string } | { plotly: string; title: string })[];
     exports: { name: string; value: ExportValue; hidden?: boolean }[];
     error: BlockError | null;
     /** The output or the figure count hit its cap. */
@@ -78,6 +78,27 @@ export function definitionLine(name: string, value: ExportValue): string {
     return `${name} = [${(value as number[]).map(formatNumber).join('; ')}]`;
 }
 
+/** Base64 of the text's UTF-8 bytes: nothing in it can be read as Calcpad or HTML syntax. */
+function base64Utf8(text: string): string {
+    const bytes = new TextEncoder().encode(text);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+}
+
+const NOTE_STYLE = 'margin:4pt 0;padding:4pt 8pt;border-left:3pt solid #8a8a8a;background:rgba(128,128,128,.12);font-family:sans-serif;font-size:10pt';
+
+/**
+ * A Plotly figure from `fig.show()`: the container the page draws into (python-plotly.ts), and under it the note that stays
+ * where the chart cannot be drawn (print, Word, Excel, no network). The figure JSON travels as base64 in an attribute.
+ */
+export function plotlyMarkup(figureJson: string, title: string): string {
+    const name = title.replace(/<[^>]*>/g, '').trim();
+    const note = `Interactive chart${name ? `: ${escapeHtml(name)}` : ''}. It is drawn in the browser and is not carried by print or export.`;
+    return `<div class="cprs-plotly-wrap" style="margin:4pt 0"><div class="cprs-plotly" data-fig="${base64Utf8(figureJson)}"></div>`
+        + `<p class="cprs-plotly-note" style="${NOTE_STYLE}" data-title="${escapeHtml(name)}">${note}</p></div>`;
+}
+
 const PY_LINE = (n: number) => `@@PY:${n}@@`;
 
 /** Replaces the line placeholders of Python error lines; `map` turns a line of the engine's text into the user's line. */
@@ -97,7 +118,8 @@ export function replacementLines(res: BlockResult, blockLine: number): string[] 
     for (const p of res.parts) {
         if ('text' in p) {
             if (p.text.length) html.push(`<pre class="cprs-py-out" style="${PRE_STYLE}">${escapeHtml(p.text).replace(/\n/g, '&#10;')}</pre>`);
-        } else html.push(`<div class="cprs-py-fig" style="margin:4pt 0">${p.svg}</div>`);
+        } else if ('plotly' in p) html.push(plotlyMarkup(p.plotly, p.title));
+        else html.push(`<div class="cprs-py-fig" style="margin:4pt 0">${p.svg}</div>`);
     }
     if (res.truncated) html.push('<p><i>Python output was cut at its size limit.</i></p>');
     const lines: string[] = [];

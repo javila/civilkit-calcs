@@ -26,6 +26,7 @@ import { hasTex, renderTex } from './sheet-tex';
 import { findPythonBlocks, hasPythonBlock, pythonErrors, remapErrors as remapPythonErrors, remapPage, resolvePythonLines, substitute, type BlockResult, type EngineError } from './python-blocks';
 import { PythonRunner } from './python-runner';
 import { mayRunPython } from './python-consent';
+import { plotlyForExport, plotlyPage } from './python-plotly';
 
 const API_PREFIX = '/api/calcpad/';
 /** calcpad-wasm's UI_ASSETS_MARKER: where the datagrid libraries go. */
@@ -479,6 +480,8 @@ export function installWasmTransport(): WasmTransport {
             if (py) html = resolvePythonLines(html, n => (sh ? sheetLine(sh.sheet, n) : n));
             if (html.includes(UI_ASSETS_MARKER)) html = html.replace(UI_ASSETS_MARKER, await uiAssetsMarkup(base));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
+            // Plotly figures from a Python block: the page draws them (python-plotly.ts); Plotly.js comes through the script policy below.
+            if (py && !unwrap) html = plotlyPage(html);
             html = addPreviewDark(html);
             // Worksheet scripts: only listed library files, checked by hash; no network access.
             html = applyScriptPolicy(html, libraries(), window.location.origin);
@@ -510,7 +513,7 @@ export function installWasmTransport(): WasmTransport {
             };
             if (out.status) return new Response(out.error ?? '', { status: out.status });
             let html = out.html ?? '';
-            if (pyE) html = resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n));
+            if (pyE) html = plotlyForExport(resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n)));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             if (out.files?.length && transport.onFilesWritten) {
                 transport.onFilesWritten(out.files.map(f => ({ path: f.path, data: fromBase64(f.data) })));
@@ -541,7 +544,7 @@ export function installWasmTransport(): WasmTransport {
                 return new Response('The worksheet could not be calculated (check it for macro errors).', { status: 422 });
             }
             let html = out.html ?? '';
-            if (pyE) html = resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n));
+            if (pyE) html = plotlyForExport(resolvePythonLines(html, n => (shE ? sheetLine(shE.sheet, n) : n)));
             if (transport.resolveFile) html = libraryImages(html, transport.resolveFile);
             const bytes = await engine.xlsx(html, JSON.stringify(out.xlsxSheets), JSON.stringify(out.xlsxCharts ?? []), signal);
             return new Response(new Uint8Array(bytes), {

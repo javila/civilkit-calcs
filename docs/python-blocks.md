@@ -1,7 +1,7 @@
 # Python blocks (spike)
 
 A worksheet can hold `#python` blocks. The page runs them on MicroPython (a 0.4 MB wasm) in a worker and mixes their results into
-the worksheet: printed text, matplotlib figures as inline SVG, and numbers handed back as Calcpad variables. There is no 27 MB
+the worksheet: printed text, matplotlib figures as inline SVG, interactive Plotly charts, and numbers handed back as Calcpad variables. There is no 27 MB
 full-Python download: MicroPython and small numpy and matplotlib stand-ins load only when a worksheet contains `#python`.
 
 This is a spike on the `python-block` branch. It works end to end; the sections below say what it does not do.
@@ -54,6 +54,7 @@ Python error names the sheet line. In a sheet the ribbon's `#python` entries ins
 |---|---|
 | `print(...)` | a monospace paragraph, HTML-escaped |
 | `plt.show()` or `plt.savefig(...)` | an inline `<svg>` figure (SVG, never a raster image), drawn at the point where the figure was shown |
+| `fig.show()` on a `plotly.graph_objects` figure | an interactive chart drawn by Plotly.js at that point (see "Interactive charts with the Plotly API") |
 | `export(name=value, ...)` or `export("name", value)` | a Calcpad definition line per name: `name = 5.5`, `name = [1; 2; 3]` (a list or 1-D array), `name = [1; 2\| 3; 4]` (a list of lists or 2-D array) |
 | an exception | one red error line naming the Python line and the exception type, and an entry in the error list on that line; the rest of the worksheet still calculates |
 
@@ -67,18 +68,102 @@ underscores, not starting with a digit or underscore. Exported numbers are unitl
 Several names in one `export` call arrive in an unspecified order (MicroPython does not keep keyword order); use separate calls
 where the order matters.
 
-### Python results driving an interactive chart
+### Interactive charts with the Plotly API
 
-The beam explorer sample shows the pattern. `export_data(M_u=..., x_s=...)` defines vectors and matrices; in a Calcpad text line
-inside a `#val` ... `#equ` region, `'var X = 'x_s';` prints the value as a JavaScript array literal (`[1.5, 2, 3.25]`, and
-`[[1, 2], [3, 4]]` for a matrix). A `<script>` there can therefore read the Python results directly, with Plotly or d3 loaded from the
-worksheet library list (the page's policy allows exactly those files, with their integrity hashes, and no network requests from
-scripts). Write the script with double quotes only: a single quote in a Calcpad text line switches between text and expression.
+```python
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-What is not possible: a control in the chart cannot re-run the Python. Python runs once, before the engine, when the worksheet is
-calculated. A chart can switch between results the solve already produced (a menu, a slider over precomputed cases) and can
-recompute anything cheap in JavaScript from the exported numbers. The sample labels which is which: its load factor slider
-multiplies the exported diagrams (exact for a linear analysis), and its point load slider picks one of 15 solves done in Python.
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, subplot_titles=["Moment", "Shear"])
+fig.add_trace(go.Scatter(x=x, y=M, name="M", line_color="#1f77b4"), row=1, col=1)
+fig.add_trace(go.Scatter(x=x, y=V, name="V"), row=2, col=1)
+fig.add_vline(x=5, line_dash="dot")
+fig.update_layout(title="Beam", height=520, xaxis2_title="x (m)")
+fig.show()
+```
+
+A worksheet needs no HTML and no JavaScript for an interactive chart. `plotly.graph_objects` (also spelled `plotly.graph_objs`) and
+`plotly.subplots` are small pure-Python modules under `public/py/lib/plotly/` (about 24 KB, 6 KB gzipped). They are fetched only for a
+block whose source mentions `plotly`; a block that does not never downloads them.
+
+**It is a pass-through, not a second copy of plotly.** Every keyword argument is accepted and written into the figure JSON as given;
+Plotly.js in the page validates it. Numbers, strings, bools, `None`, lists, tuples, dicts and numeric arrays are sent (arrays become
+lists, NaN and infinity become `null`, numbers are written with 9 significant digits). `dict(...)` and `{}` are both fine.
+
+| Supported | Notes |
+|---|---|
+| `go.Figure(data=, layout=, frames=)` | `data` takes traces or dicts |
+| `go.Scatter`, `Scattergl`, `Bar`, `Histogram`, `Box`, `Violin`, `Pie`, `Heatmap`, `Contour`, `Surface`, `Scatter3d`, `Mesh3d`, `Scatterpolar`, `Waterfall`, `Indicator`, `Table`, `Candlestick` | the class only sets `type`; all other keywords are the trace's own |
+| `go.Layout`, `go.Frame` | dict wrappers |
+| `fig.add_trace(trace, row=, col=)`, `add_traces`, `add_scatter(...)`, `add_bar(...)` and the like | `row` and `col` need a figure from `make_subplots` and set the trace's `xaxis` and `yaxis` |
+| `fig.update_layout(...)`, `update_xaxes(...)`, `update_yaxes(...)`, `update_traces(...)` | recursive merge, as in plotly; `row`/`col` pick subplot axes; `update_traces(selector=dict(name="M"))` matches by equality |
+| `fig.add_shape(...)`, `add_annotation(...)`, `add_vline(x)`, `add_hline(y)`, `add_vrect(x0, x1)`, `add_hrect(y0, y1)` | with `row`/`col` (default all subplots) the lines use that subplot's axes |
+| `fig.show(config=dict(...))` | sends the figure to the report |
+| `fig.to_dict()`, `fig.to_json()` | |
+| `plotly.subplots.make_subplots(rows, cols, shared_xaxes, shared_yaxes, subplot_titles, row_heights, column_widths, vertical_spacing, horizontal_spacing)` | shared axes are `True`, `"columns"`, `"rows"` or `"all"` |
+| `updatemenus` (dropdowns, buttons) and `sliders` with precomputed steps | any `method` (`restyle`, `update`, `relayout`, `animate`); `frames` for `animate` |
+
+Underscore names ("magic underscores") are expanded when they are keyword arguments of a call: `line_color="red"` is `line=dict(color="red")`,
+`xaxis_title="x"` is `xaxis=dict(title="x")`, `marker_line_width=1` is `marker=dict(line=dict(width=1))`, and `paper_bgcolor`, `plot_bgcolor`
+and `error_x/y/z` stay as they are. Inside a dict they are not expanded, so a key such as `"line_color"` there raises `ValueError` naming it
+(Plotly.js would drop it without a word). A property name that Plotly does not have is not checked here: Plotly.js ignores it, as it does
+in a plain browser.
+
+**What fails, by name.** Anything the shim does not provide raises `NotImplementedError` (or the error shown) naming it:
+
+| You write | You get |
+|---|---|
+| `go.Sunburst` (any trace type not in the table), `from plotly.graph_objects import Foo` | `NotImplementedError: plotly.graph_objects.Sunburst is not available in the light plotly shim (traces: ...)` |
+| `fig.write_html(...)`, `fig.write_image(...)`, `fig.data`, `fig.layout`, any other attribute | `NotImplementedError: go.Figure.write_html is not available ...` |
+| `fig.show(renderer=...)` or any option other than `config` | `NotImplementedError: Figure.show(renderer=...) is not available ...` |
+| `make_subplots(specs=..., secondary_y=..., ...)` | `NotImplementedError: plotly.subplots.make_subplots(specs=...) is not available ... (supported: ...)` |
+| `add_vline(x, annotation_text=...)` | `NotImplementedError ... add the label with add_annotation` |
+| `update_layout(template="plotly_white")` | `ValueError: ... named templates are not available; the report page applies a light or dark theme itself` |
+| `go.Scatter(x=[object()])` | `TypeError: go.Scatter x: a object cannot be sent to Plotly ...` |
+| `fig.foo = 1`, `trace.y = ...` | `AttributeError ... cannot set 'foo'` (a plotly object is not a property tree here) |
+| `import plotly.express`, `plotly.io` | `ImportError: no module named 'plotly.express'` |
+
+**Where it is drawn.** `fig.show()` sends the figure JSON through the same path as a matplotlib figure and the page draws it with Plotly.js at
+that point of the report. Plotly.js is **not bundled**: it is the "Plotly" entry of the worksheet library list (Settings > Libraries), loaded
+from its CDN (`cdn.plot.ly`, version 2.26.0) only when a figure is on the page, with the same pinned URL, `integrity` hash and
+`crossorigin="anonymous"` as a worksheet's own `<script src>`; the page's Content-Security-Policy is unchanged (it allows exactly that file,
+and chart scripts make no network requests). The first figure of a page downloads about 3.6 MB.
+
+- **Offline.** Without a network connection (or when Plotly was removed from the library list) the chart's place shows a note instead of a
+  blank: "Interactive chart: TITLE. Interactive charts need a connection to load Plotly...". The Python solve and everything else still run.
+- **Light and dark.** The page applies a Plotly template: transparent paper and plot area, text, grid, zero line, menus, sliders and modebar
+  in colours for the page's light or dark theme. A property the figure sets itself (`paper_bgcolor`, `font`, an axis `gridcolor`, ...) wins.
+  The chart does not get the white card the dark theme paints behind other drawings.
+- **Print, PDF, Word and Excel.** None of them can run Plotly.js, so the figure is not carried. The worksheet shows a paragraph where the
+  chart stood: "Interactive chart: TITLE. It is drawn in the browser and is not carried by print or export." (the title is the figure's
+  `layout.title`). If a printout needs the picture, draw a static copy with matplotlib as well, as the other Python samples do. The Code
+  ("Unwrapped") view lists the text the engine reads.
+- **Size.** The figure travels inside the worksheet text (base64), capped at 4 MB of figure JSON per run and 20 figures and drawings together.
+  Precomputed slider steps are the big part: the beam sample's 31 load factor steps make its figure 190 kB. A control that rescales a diagram
+  needs one set of y values per step.
+
+**Controls are Plotly's own, and they are independent.** A dropdown or slider step is a fixed `restyle`, `update` or `relayout` (or an
+`animate` of a frame) that Plotly applies when it is used; it cannot read the state of another control or run Python, so a figure with a
+menu, a slider for a load factor and another for a position has to give each control its own traces and leave the combinations
+unexpressed, or precompute them (one step per combination). The beam sample does the first: the menu chooses which uniform load case is
+shown, the factor slider restyles the y data of those traces, and the position slider moves a separate point-load trace. For controls that
+must combine freely or compute a readout on every change, write the chart as raw HTML and JavaScript (next section).
+
+### Python results driving a chart written in JavaScript (raw)
+
+The raw route is still available, and the sample "Beam Explorer: Python Results in Raw JS Plotly" shows it. `export_data(M_u=..., x_s=...)`
+defines vectors and matrices; in a Calcpad text line inside a `#val` ... `#equ` region, `'var X = 'x_s';` prints the value as a JavaScript
+array literal (`[1.5, 2, 3.25]`, and `[[1, 2], [3, 4]]` for a matrix). A `<script>` there can therefore read the Python results directly,
+with Plotly or d3 loaded from the worksheet library list (the page's policy allows exactly those files, with their integrity hashes, and
+no network requests from scripts). Write the script with double quotes only: a single quote in a Calcpad text line switches between text
+and expression.
+
+What is not possible either way: a control in the chart cannot re-run the Python. Python runs once, before the engine, when the worksheet is
+calculated. A chart can switch between results the solve already produced (a menu, a slider over precomputed cases); with a script it can
+also recompute anything cheap from the exported numbers. The raw sample labels which is which: its load factor slider multiplies the
+exported diagrams (exact for a linear analysis) for whichever case is chosen, and its point load slider picks one of 15 solves done in Python.
+Use the raw route only for what the native controls cannot do (controls that combine, a computed readout); it needs the `<script>` library
+entry and shows nothing in Word or Excel.
 
 ### One way only
 
@@ -196,7 +281,8 @@ editor -> /api/calcpad/convert (also docx, xlsx)
 ### Lazy loading
 
 Nothing of Python is fetched for a worksheet without `#python` (`e2e/python-check.mjs` checks the network log). With one, after the
-confirmation below: the worker chunk, `py/micropython/micropython.{mjs,wasm}` and the seven files under `py/lib`.
+confirmation below: the worker chunk, `py/micropython/micropython.{mjs,wasm}` and the seven files under `py/lib` (the plotly files are in
+`py/files.json` too, and are fetched only when a block mentions plotly).
 
 | File | Raw | Gzip |
 |---|---|---|
@@ -204,6 +290,7 @@ confirmation below: the worker chunk, `py/micropython/micropython.{mjs,wasm}` an
 | `micropython.mjs` | 104 975 | 30 027 |
 | `lib/numpy/_array.py` + `__init__.py` | 56 513 | 15 537 |
 | `lib/matplotlib/*`, `calcpad_py.py`, `_route.py` | 18 993 | 5 960 |
+| `lib/plotly/*.py`, only for a block that mentions plotly | 23 665 | 6 263 |
 | `python-worker` chunk (includes the SVG chart code) | 16 030 | 6 263 |
 | `python` chunk (runner, consent dialog, block text code) | 4 204 | 1 810 |
 | **Total on first use** | **about 590 000 (0.56 MB)** | **about 240 000** |
@@ -235,7 +322,8 @@ What it does not do, honestly:
 - It is not a security boundary against a determined attacker. The guard is a Python-level check on `import`; a way around it that
   we have not found would give a script the worker's global object. The worker is same-origin with the app, and the app page sets no
   Content-Security-Policy, so a worker CSP is not there to back this up.
-- The existing CSP of the rendered worksheet is unchanged: inline SVG needs nothing from it. Worker and wasm are served from the app's
+- The existing CSP of the rendered worksheet is unchanged: inline SVG needs nothing from it. A Plotly chart adds one `<script src>` for the
+  pinned Plotly.js file, which the policy already allows for the library list, and a small inline script that draws the figure. Worker and wasm are served from the app's
   own origin, no CDN. A `Content-Security-Policy: default-src 'none'` response header on `py/*` and the worker chunk would add a
   platform-level network block; that is a deployment setting and is not done.
 - A script can use the CPU for its time budget and the memory for its heap.
@@ -259,6 +347,7 @@ Probed by running small scripts on the shipped stand-ins (24 probes; the numbers
 | `scatter`, `text`, `axis("equal")`, log axes, `subplots`, `ax.plot`, `set_title`, `tight_layout`, `suptitle` | works | |
 | `bar`, `fill_between`, `axhline`, `axvline` | works | added in the spike |
 | `hist`, `pie`, `errorbar`, `step`, `annotate`, `imshow`, `contour`, `colorbar`, `set_xticks`, `semilogy`, `twinx`, 3-D, polar | missing | |
+| `plotly.graph_objects`, `plotly.graph_objs`, `plotly.subplots.make_subplots` | works (thin) | pass-through to Plotly.js, see "Interactive charts with the Plotly API"; `plotly.express`, `plotly.io`, other trace types, `write_html`: missing, named errors |
 | `input()` | refused | there is no keyboard |
 | `import js`, `jsffi`, network, host files | refused | see the sandbox |
 
