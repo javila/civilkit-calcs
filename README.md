@@ -184,12 +184,18 @@ node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, picture
 node ../tools/set_version.mjs --check
 ```
 
-## Checked at 26.10.2
+## Checked at 26.10.3
 
-`cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean; `cargo test` ran 5329 tests
-with none failing (3 ignored); `web/e2e/browser-check.mjs` passed all 123 checks against the build served at `/`;
-`web/e2e/import-check.mjs` (a synthetic worksheet through the File menu, the ribbon button and a drop, pictures,
-toggles, error paths, Save and the exports) and `web/e2e/ribbon-check.mjs --lint` pass.
+`cargo fmt --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean; `cargo test` ran 5369 tests
+with none failing (3 ignored); every wasm module was rebuilt (the sheet compiler is 95 KB, 44 KB gzipped; the engine
+module is unchanged in size); `web/e2e/sheet-check.mjs` (sheet samples, LaTeX, error mapping, mixing with raw
+Calcpad, the compiled view, Convert to Calcpad, Word and Excel, `.sheet` open, edit, save and reopen, prettify,
+go to definition, hover, references, the ribbon, Text Formatting and Insert tab forms, New, the changelog link),
+`web/e2e/verify-ribbon-sheet.mjs` (407 ribbon inserts in sheet form through the compiler and the engine),
+`web/e2e/import-check.mjs` and `web/e2e/ribbon-check.mjs --lint` pass. `web/e2e/browser-check.mjs` passed 119 checks
+on the build served at `/`; its mapped-controls step (`select-map-check.mjs`, real clicks in a preview that is
+replaced by every render) failed intermittently on a machine under heavy load, and it does the same on the 26.10.2
+build, so it is not counted as passed here.
 
 ## Contributing
 

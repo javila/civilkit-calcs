@@ -310,7 +310,7 @@ await drop([{ name: 'lib-check.cpd', text: 'k = 5\n' }, { name: 'data-check.csv'
 await page.waitForFunction(() => (window).calcpadFiles.library.list().length >= 2, null, { timeout: 10000 });
 // The dropped worksheet opened in a tab of its own; the check runs in a new one.
 await page.locator('[data-ribbon-btn=file]').click();
-await page.locator('.cprs-menu button', { hasText: /^New$/ }).click();
+await page.locator('.cprs-menu button', { hasText: /^New Calcpad worksheet/ }).click();
 await setEditor("'Library check\n#include lib-check.cpd\nk2 = k*2\n#read M from data-check.csv\nt = sum(M)\n#write M to out-check.csv");
 const libText = await frameText('Library check');
 check(/k2\s*=[\s\S]*=\s*10/.test(libText), `#include resolves against the library (k2 = 10) (${JSON.stringify(libText.slice(0, 160))})`);
