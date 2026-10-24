@@ -189,6 +189,15 @@ node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd and .mcd
 node ../tools/set_version.mjs --check
 ```
 
+## Checked at 26.10.7
+
+On the release build: `web/e2e/import-check.mjs` (worksheet import through the menu, the ribbon and a drop, the error paths, and
+the typeset equations), `web/e2e/browser-check.mjs` (123 checks, all bundled samples open without errors) and
+`web/e2e/pwa-check.mjs` (installs, caches 419 files, boots and calculates offline) pass. `cargo test --workspace` passed
+(5550 tests) before the last two small commits. Not re-run for this release: `python-check`, `sheet-check`, `tsc` (one
+earlier error in `engine-worker.ts`), `clippy`, and `cargo fmt --check` (fails on `calcpad-sheet`, which was not formatted).
+The Word and Excel exports of imported equations were checked as well-formed XML but not opened in Office.
+
 ## Checked at 26.10.6
 
 `web/e2e/python-check.mjs` (169 checks: the earlier Python checks, the plane truss against hand values, linear algebra on the
