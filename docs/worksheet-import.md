@@ -330,7 +330,7 @@ What the reader does with the package:
   Its siblings are read relative to it: `result.xml` (saved results, joined to a math region by `resultRef`),
   `settings/calculation.xml` (the array origin; 0 when absent) and the header and footer parts.
 * **Text.** A text region names a XAML flow document through a relationship. That part is a nested zip holding
-  `Xaml/Document.xaml`. Paragraphs, runs, bold, italic, underline, sub and superscript, line breaks, hyperlinks
+  `Xaml/Document.xaml`. Older files carry the flow document inline, as a child of the text element; both forms are read. Paragraphs, runs, bold, italic, underline, sub and superscript, line breaks, hyperlinks
   (the text stays, the address does not), bulleted lists and decimal lists (numbered "1. ", "2. ") convert.
   Colours, fonts and sizes are dropped, as for `.xmcd`. Math nested in a text region becomes its own region at the
   text's position, as before.
@@ -360,9 +360,17 @@ Skipped, with a code and a visible placeholder line each (nothing is dropped sil
 | Any other region kind | `other-region` |
 | Calls into an external library | `addin-function` (as in `.xmcd`) |
 
+Two wrong-number traps are closed for both formats: after an element assignment (`v[i] := x`) or a definition
+whose target is a matrix of names, the names involved are marked as defined by an unconverted region, so a later
+use is a `depends-on-gap` instead of the old value (or, for a name such as `L` that is also a unit, the unit).
+
 Not read: the unit system setting, strings-use-origin and the other calculation settings; the regions inside a
 component (they belong to the skipped component); a definition whose target is a matrix of names
 (`bad-structure`).
+
+`cargo run --release -p civilkit-calcs-import-xmcd --example engine_check -- file.mcdx out` imports a file, runs
+the result through the engine and writes the text, the engine's HTML and a list of saved results, so converted
+lines can be compared with the numbers the original stored.
 
 Checked against seven worksheets of a thermodynamic property handbook, which are mostly text and calls into an
 external library, so they exercise the reader and the skip reports far more than the maths. Their counts are kept
