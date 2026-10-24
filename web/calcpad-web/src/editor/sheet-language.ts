@@ -33,6 +33,7 @@ const monarch: monaco.languages.IMonarchLanguage = {
         root: [
             [/<!--sheet-->/, 'comment'],
             [/^\s*>>.*$/, 'type'],
+            [/^\s*```\s*python\s*$/, { token: 'type', next: '@pyFence', nextEmbedded: 'python' }],
             [/^\s*```\s*calcpad\s*$/, { token: 'type', next: '@calcpadFence' }],
             [/^\s*```.*$/, { token: 'string', next: '@codeFence' }],
             [/^\s*#{1,6}\s.*$/, 'keyword.heading'],
@@ -51,6 +52,7 @@ const monarch: monaco.languages.IMonarchLanguage = {
             [/\d+(\.\d+)?([eE][+-]?\d+)?/, 'number'],
         ],
         calcpadFence: [[/^\s*```\s*$/, { token: 'type', next: '@pop' }], [/.*/, 'type']],
+        pyFence: [[/^\s*```\s*$/, { token: 'type', next: '@pop', nextEmbedded: '@pop' }], [/.+/, '']],
         codeFence: [[/^\s*```\s*$/, { token: 'string', next: '@pop' }], [/.*/, 'string']],
         displayMath: [[/^\s*\$\$\s*$/, { token: 'string.math', next: '@pop' }], [/.*/, 'string.math']],
     },

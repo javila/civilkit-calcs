@@ -6,11 +6,12 @@ import * as monaco from 'monaco-editor';
  * server is not connected. This tokenizer only hands #html/#markdown content to Monaco's
  * built-in grammars, following the same push/pop stack as ExpressionParser.
  */
-const endDirective = /^\s*#end\s+(html|cpd|markdown)\b.*$/;
+const endDirective = /^\s*#end\s+(html|cpd|markdown|python)\b.*$/;
 const openers: monaco.languages.IMonarchLanguageRule[] = [
     [/^\s*#html\b.*$/, { token: '', next: '@htmlOuter' }],
     [/^\s*#markdown\b.*$/, { token: '', next: '@mdOuter' }],
     [/^\s*#cpd\b.*$/, { token: '', next: '@cpdBlock' }],
+    [/^\s*#python\s*$/i, { token: '', next: '@pyOuter' }],
 ];
 
 function embeddedStates(language: string): [monaco.languages.IMonarchLanguageRule[], monaco.languages.IMonarchLanguageRule[]] {
@@ -20,7 +21,7 @@ function embeddedStates(language: string): [monaco.languages.IMonarchLanguageRul
         [/^/, { token: '@rematch', next: `@${language}Body`, nextEmbedded: language }],
     ];
     const body: monaco.languages.IMonarchLanguageRule[] = [
-        [/^\s*#(end\s+)?(html|cpd|markdown)\b/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
+        [/^\s*#(end\s+)?(html|cpd|markdown|python)\b/, { token: '@rematch', next: '@pop', nextEmbedded: '@pop' }],
         [/.+/, ''],
     ];
     return [outer, body];
@@ -28,6 +29,7 @@ function embeddedStates(language: string): [monaco.languages.IMonarchLanguageRul
 
 const [htmlOuter, htmlBody] = embeddedStates('html');
 const [mdOuter, markdownBody] = embeddedStates('markdown');
+const [pyOuter, pythonBody] = embeddedStates('python');
 
 export const calcpadMonarchLanguage: monaco.languages.IMonarchLanguage = {
     ignoreCase: true,
@@ -39,6 +41,8 @@ export const calcpadMonarchLanguage: monaco.languages.IMonarchLanguage = {
         htmlBody,
         mdOuter,
         markdownBody,
+        pyOuter,
+        pythonBody,
     },
 };
 
