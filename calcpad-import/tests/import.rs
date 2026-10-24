@@ -1,9 +1,9 @@
 //! Tests on hand-written synthetic worksheets. None of the XML here comes from a real file.
 //! Namespaces use a reserved host: the reader matches them by their last path segment.
 
-use calcpad_import_xmcd::ir::{MathRegion, Region, RegionKind, Stmt};
-use calcpad_import_xmcd::translate::reading_order;
-use calcpad_import_xmcd::{import_xmcd, import_xmcd_with, Code, ImportResult, Limits, Severity, GAP_MARKER};
+use calcpad_import::ir::{MathRegion, Region, RegionKind, Stmt};
+use calcpad_import::translate::reading_order;
+use calcpad_import::{import_xmcd, import_xmcd_with, Code, ImportResult, Limits, Severity, GAP_MARKER};
 
 // ---- builders ---------------------------------------------------------------------------------
 
@@ -598,7 +598,7 @@ fn unmapped_units_are_listed() {
 #[test]
 fn every_mapped_unit_exists_in_the_engine() {
     use calcpad_core::base_types::unit::Unit;
-    use calcpad_import_xmcd::tables::{RENAMED_UNITS, SAME_UNITS};
+    use calcpad_import::tables::{RENAMED_UNITS, SAME_UNITS};
     for u in SAME_UNITS.iter().copied().chain(RENAMED_UNITS.iter().map(|(_, c)| *c)) {
         // `%` is parsed as a unit sign by the engine rather than stored in the table.
         if u == "%" {
@@ -610,7 +610,7 @@ fn every_mapped_unit_exists_in_the_engine() {
 
 #[test]
 fn every_mapped_function_runs_in_the_engine() {
-    use calcpad_import_xmcd::tables::{FnRule, FUNCTIONS};
+    use calcpad_import::tables::{FnRule, FUNCTIONS};
     for (src, rule, lo, _) in FUNCTIONS {
         let target = match rule {
             FnRule::Direct(t) | FnRule::Trig(t) => *t,
@@ -853,7 +853,7 @@ fn mk(id: &str, left: f64, top: f64, baseline: Option<f64>) -> Region {
         height: 0.0,
         rendering: None,
         kind: RegionKind::Math(MathRegion {
-            stmt: Stmt::Bare(calcpad_import_xmcd::ir::Expr::Num("1".into())),
+            stmt: Stmt::Bare(calcpad_import::ir::Expr::Num("1".into())),
             disabled: false,
             saved_result: None,
         }),

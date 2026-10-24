@@ -2,7 +2,7 @@
 //! converts it, runs the produced Calcpad text through the engine and compares the printed
 //! numbers with values worked out by hand.
 
-use calcpad_import_xmcd::{import_xmcd, Code, ImportResult};
+use calcpad_import::{import_xmcd, Code, ImportResult};
 
 // ---- builders (the same shapes as the plain-XML worksheet) ---------------------------------------
 

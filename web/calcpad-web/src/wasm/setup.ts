@@ -9,7 +9,7 @@ import LibrariesInsert from './LibrariesInsert.vue';
 import { ref } from 'vue';
 import { looksLikeLine, sheetInsert } from './sheet-insert';
 import { installEmptyEditorLink, SamplesBrowser } from './samples';
-import { XmcdImport } from './xmcd-import';
+import { WorksheetImport } from './worksheet-import';
 
 interface Host {
     /** The active editor group's tabs (main.ts keeps them on window.calcpadTabs). */
@@ -24,7 +24,7 @@ interface Host {
 export function installWebFiles(transport: WasmTransport, host: Host): WebFiles {
     const library = new FileLibrary(transport);
     const samples = new SamplesBrowser({ library, tabs: host.tabs, log: host.appendOutput });
-    const importer = new XmcdImport({
+    const importer = new WorksheetImport({
         library,
         tabs: host.tabs as never,
         log: host.appendOutput,

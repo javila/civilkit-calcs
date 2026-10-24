@@ -46,7 +46,7 @@ export interface WebFilesOptions {
     exportXlsx?: () => void;
     /** Saves the report as a Word document. */
     exportDocx?: () => void;
-    /** Imports foreign worksheets (.xmcd, .mcdx); see xmcd-import.ts. */
+    /** Imports foreign worksheets (.xmcd, .mcdx); see worksheet-import.ts. */
     importer?: { pick(): Promise<void>; importFile(file: File): Promise<void> };
 }
 

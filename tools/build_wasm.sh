@@ -3,7 +3,7 @@
 #   calcpad-wasm              the calculation engine
 #   calcpad-docx-wasm         the Word export (loaded on demand)
 #   calcpad-highlighter-wasm  the editor's highlighting, linting and snippets (loaded on first use)
-#   calcpad-import-xmcd-wasm  the worksheet importer (loaded when a worksheet is imported)
+#   calcpad-import-wasm  the worksheet importer (loaded when a worksheet is imported)
 #   calcpad-sheet-wasm        the sheet syntax compiler (loaded when a sheet is opened)
 #   calcpad-linalg-wasm       dense linear algebra for numpy.linalg / scipy.linalg in Python blocks (loaded on first use)
 # Requires the wasm32-unknown-unknown target, the wasm-bindgen CLI (same version as the
@@ -16,12 +16,12 @@ OUT=web/calcpad-web/public/wasm
 # Panic messages embed source paths; keep the builder's home folder out of the shipped modules.
 export RUSTFLAGS="${RUSTFLAGS:-} --remap-path-prefix=$HOME=/build"
 
-for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_xmcd_wasm calcpad_sheet_wasm calcpad_linalg_wasm; do
+for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_wasm calcpad_sheet_wasm calcpad_linalg_wasm; do
   case $m in
     calcpad_wasm) crate=calcpad-wasm; profile=wasm ;;
     calcpad_docx_wasm) crate=calcpad-docx-wasm; profile=wasm-size ;;
     calcpad_highlighter_wasm) crate=calcpad-highlighter-wasm; profile=wasm-size ;;
-    calcpad_import_xmcd_wasm) crate=calcpad-import-xmcd-wasm; profile=wasm-size ;;
+    calcpad_import_wasm) crate=calcpad-import-wasm; profile=wasm-size ;;
     calcpad_sheet_wasm) crate=calcpad-sheet-wasm; profile=wasm-size ;;
     calcpad_linalg_wasm) crate=calcpad-linalg-wasm; profile=wasm-size ;;
   esac
@@ -30,7 +30,7 @@ for m in calcpad_wasm calcpad_docx_wasm calcpad_highlighter_wasm calcpad_import_
     engine) [ $m = calcpad_wasm ] || continue ;;
     docx) [ $m = calcpad_docx_wasm ] || continue ;;
     highlighter) [ $m = calcpad_highlighter_wasm ] || continue ;;
-    import) [ $m = calcpad_import_xmcd_wasm ] || continue ;;
+    import) [ $m = calcpad_import_wasm ] || continue ;;
     sheet) [ $m = calcpad_sheet_wasm ] || continue ;;
     linalg) [ $m = calcpad_linalg_wasm ] || continue ;;
   esac

@@ -1,6 +1,6 @@
 # Importing foreign worksheets (spike)
 
-Crate: `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`, not published). It reads the
+Crate: `calcpad-import` (package `civilkit-calcs-import`, not published). It reads the
 `.xmcd` and `.mcdx` worksheet files of a commercial calculation tool, the spreadsheet-like worksheet format with
 text, equations and plots placed freely on a page, and writes **Calcpad worksheet text** for the existing
 engine. It evaluates nothing itself: one engine, one language. Every number in the output is a literal
@@ -14,7 +14,7 @@ come first. The two file formats share one translator; see [The .mcdx front door
 `File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd` or
 `.mcdx` file, or dropping one anywhere on the page (a dashed hint shows while a file is dragged over it).
 
-1. The file is read in the page and converted by the importer module (`calcpad_import_xmcd_wasm`, in its own web
+1. The file is read in the page and converted by the importer module (`calcpad_import_wasm`, in its own web
    worker, loaded on first use; the engine module is not involved). **Nothing is uploaded**: the file never leaves
    the browser.
 2. The picture files go into the library under `/imported/<file name>/` (letters, digits, `_`, `-`; importing the
@@ -47,11 +47,11 @@ Size of the module: 1,183,647 bytes raw, 487,022 bytes gzipped (`tools/build_was
 ## Use
 
 ```text
-cargo run -p civilkit-calcs-import-xmcd --example import -- <file.xmcd>   # text on stdout, report on stderr
+cargo run -p civilkit-calcs-import --example import -- <file.xmcd>   # text on stdout, report on stderr
 ```
 
 ```rust
-let r = calcpad_import_xmcd::import_xmcd(&xml);      // r.calcpad: String, r.report: ImportReport
+let r = calcpad_import::import_xmcd(&xml);      // r.calcpad: String, r.report: ImportReport
 println!("{} of {} regions need attention",
          r.report.regions_needing_attention(), r.report.regions_total());
 ```
@@ -268,7 +268,7 @@ strong check and is the obvious next step for validating numbers.
 
 ```text
 cargo build --release -p calcpad-cli                       # the engine command line
-cargo run --release -p civilkit-calcs-import-xmcd --example batch -- \
+cargo run --release -p civilkit-calcs-import --example batch -- \
     <dir with .xmcd files> <output dir outside the repo> target/release/Cli
 ```
 
@@ -324,7 +324,7 @@ the same DTD, depth and node limits as an `.xmcd`.
 
 ## The .mcdx front door
 
-`.mcdx` is the newer container of the same worksheet language. `import_xmcd_bytes` looks at the first bytes: a zip
+`.mcdx` is the newer container of the same worksheet language. `import_bytes` looks at the first bytes: a zip
 signature goes to `mcdx::read` (also callable as `import_mcdx`), anything else is read as the plain XML. Both
 produce the same `ir::Sheet`, so the translator, the report and the placeholder rule are shared. The mcdx
 reader is `src/mcdx.rs`; the zip walker `src/zip.rs`; the math reader of `xmcd.rs` is reused (namespaces are matched
@@ -374,7 +374,7 @@ Not read: the unit system setting, strings-use-origin and the other calculation 
 component (they belong to the skipped component); a definition whose target is a matrix of names
 (`bad-structure`).
 
-`cargo run --release -p civilkit-calcs-import-xmcd --example engine_check -- file.mcdx out` imports a file, runs
+`cargo run --release -p civilkit-calcs-import --example engine_check -- file.mcdx out` imports a file, runs
 the result through the engine and writes the text, the engine's HTML and a list of saved results, so converted
 lines can be compared with the numbers the original stored.
 

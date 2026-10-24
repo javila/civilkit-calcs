@@ -2,8 +2,8 @@
 //! worksheet is used and none of the content is taken from one. Math cases are written once and
 //! wrapped both as a plain-XML worksheet and as a package, and the two paths must agree.
 
-use calcpad_import_xmcd::{
-    import_mcdx, import_xmcd, import_xmcd_bytes, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
+use calcpad_import::{
+    import_bytes, import_mcdx, import_xmcd, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
 };
 
 // ---- a minimal zip writer ------------------------------------------------------------------------
@@ -188,7 +188,7 @@ impl Pkg {
         zip(&parts)
     }
     fn import(&self) -> ImportResult {
-        import_xmcd_bytes(&self.bytes(), &ImportOptions::default())
+        import_bytes(&self.bytes(), &ImportOptions::default())
     }
 }
 
@@ -607,10 +607,10 @@ fn saved_results_come_from_the_result_part() {
     );
     let mut p = Pkg::new(&region);
     p.results = r#"<resultData result-id="3"><ml:result><ml:real>647.5</ml:real></ml:result></resultData>"#.into();
-    let off = import_xmcd_bytes(&p.bytes(), &ImportOptions::default());
+    let off = import_bytes(&p.bytes(), &ImportOptions::default());
     assert_eq!(off.report.pictures.saved_result_available, 1);
     assert!(!off.calcpad.contains("647.5"));
-    let on = import_xmcd_bytes(
+    let on = import_bytes(
         &p.bytes(),
         &ImportOptions {
             saved_results: true,
@@ -631,12 +631,12 @@ fn zip_signature_routes_to_the_package_reader() {
     ))
     .bytes();
     assert!(bytes.starts_with(b"PK\x03\x04"));
-    let a = import_xmcd_bytes(&bytes, &ImportOptions::default());
+    let a = import_bytes(&bytes, &ImportOptions::default());
     let b = import_mcdx(&bytes, &ImportOptions::default());
     assert_eq!(a, b);
     assert_eq!(lines(&a), vec!["x = 2"]);
     // And a plain-XML worksheet still goes the old way.
-    let old = import_xmcd_bytes(
+    let old = import_bytes(
         xmcd_of(&[r#"<ml:define><ml:id>x</ml:id><ml:real>2</ml:real></ml:define>"#]).as_bytes(),
         &ImportOptions::default(),
     );
@@ -655,7 +655,7 @@ fn stored_entries_and_a_conventional_name_without_relationships() {
         )),
     );
     ws.deflate = false;
-    let res = import_xmcd_bytes(&zip(&[ws]), &ImportOptions::default());
+    let res = import_bytes(&zip(&[ws]), &ImportOptions::default());
     assert_eq!(lines(&res), vec!["x = 2"]);
     // No settings part: the origin defaults to 0 like the older format's default.
     assert_eq!(res.report.origin, 0);
@@ -673,32 +673,32 @@ fn fatal_code(res: &ImportResult) -> Code {
 fn damaged_and_foreign_zips_are_fatal_with_a_code() {
     // Signature only.
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(b"PK\x03\x04zzzz", &ImportOptions::default())),
+        fatal_code(&import_bytes(b"PK\x03\x04zzzz", &ImportOptions::default())),
         Code::UnsupportedContainer
     );
     // Truncated package.
     let good = Pkg::new("").bytes();
     let cut = &good[..good.len() / 2];
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(cut, &ImportOptions::default())),
+        fatal_code(&import_bytes(cut, &ImportOptions::default())),
         Code::UnsupportedContainer
     );
     // A valid zip without a worksheet.
     let other = zip(&[part("readme.txt", "hello")]);
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&other, &ImportOptions::default())),
+        fatal_code(&import_bytes(&other, &ImportOptions::default())),
         Code::NotAWorksheet
     );
     // A worksheet part that is not XML.
     let junk = zip(&[part("ws/worksheet.xml", "not xml <")]);
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&junk, &ImportOptions::default())),
+        fatal_code(&import_bytes(&junk, &ImportOptions::default())),
         Code::XmlError
     );
     // A part that is XML but not a worksheet.
     let wrong = zip(&[part("ws/worksheet.xml", "<other/>")]);
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&wrong, &ImportOptions::default())),
+        fatal_code(&import_bytes(&wrong, &ImportOptions::default())),
         Code::NotAWorksheet
     );
     // A DTD is refused.
@@ -707,7 +707,7 @@ fn damaged_and_foreign_zips_are_fatal_with_a_code() {
         r#"<?xml version="1.0"?><!DOCTYPE d [<!ENTITY a "aaaa">]><worksheet xmlns="http://example.invalid/worksheet50"><regions/></worksheet>"#,
     )]);
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&dtd, &ImportOptions::default())),
+        fatal_code(&import_bytes(&dtd, &ImportOptions::default())),
         Code::XmlError
     );
 }
@@ -717,7 +717,7 @@ fn encrypted_entries_are_refused() {
     let mut ws = part("ws/worksheet.xml", worksheet_xml(""));
     ws.flags = 1;
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&zip(&[ws]), &ImportOptions::default())),
+        fatal_code(&import_bytes(&zip(&[ws]), &ImportOptions::default())),
         Code::UnsupportedContainer
     );
 }
@@ -728,7 +728,7 @@ fn an_entry_that_lies_about_its_size_cannot_inflate_past_it() {
     let mut ws = part("ws/worksheet.xml", vec![b'a'; 100_000]);
     ws.declared = Some(10);
     assert_eq!(
-        fatal_code(&import_xmcd_bytes(&zip(&[ws]), &ImportOptions::default())),
+        fatal_code(&import_bytes(&zip(&[ws]), &ImportOptions::default())),
         Code::UnsupportedContainer
     );
 }
@@ -749,7 +749,7 @@ fn size_limits_apply_to_the_package_and_its_parts() {
         },
         ..ImportOptions::default()
     };
-    assert_eq!(fatal_code(&import_xmcd_bytes(&bytes, &tiny)), Code::InputTooLarge);
+    assert_eq!(fatal_code(&import_bytes(&bytes, &tiny)), Code::InputTooLarge);
     // One part over its cap.
     let big = zip(&[part("ws/worksheet.xml", worksheet_xml(&"<!-- pad -->".repeat(5_000)))]);
     let opts = ImportOptions {
@@ -760,7 +760,7 @@ fn size_limits_apply_to_the_package_and_its_parts() {
         ..ImportOptions::default()
     };
     assert!(big.len() < 50_000);
-    assert_eq!(fatal_code(&import_xmcd_bytes(&big, &opts)), Code::InputTooLarge);
+    assert_eq!(fatal_code(&import_bytes(&big, &opts)), Code::InputTooLarge);
     // Total decoded bytes over the budget.
     let opts = ImportOptions {
         limits: Limits {
@@ -769,7 +769,7 @@ fn size_limits_apply_to_the_package_and_its_parts() {
         },
         ..ImportOptions::default()
     };
-    assert_eq!(fatal_code(&import_xmcd_bytes(&bytes, &opts)), Code::InputTooLarge);
+    assert_eq!(fatal_code(&import_bytes(&bytes, &opts)), Code::InputTooLarge);
 }
 
 #[test]

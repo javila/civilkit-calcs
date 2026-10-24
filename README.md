@@ -111,7 +111,7 @@ the browser's print dialog, so it carries the browser's own header and footer.
   WebAssembly binding. The snippet data is `calcpad-highlighter/src/snippets/snippets.json`.
 * `calcpad-wasm`: the engine's WebAssembly binding (wasm-bindgen).
 * `calcpad-docx` and `calcpad-docx-wasm`: the Word and Excel writers and their binding.
-* `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`): a spike that translates the simple subset of
+* `calcpad-import` (package `civilkit-calcs-import`): a spike that translates the simple subset of
   a foreign worksheet format (`.xmcd`, `.mcdx`) into Calcpad text, with a report of what did not convert.
   See [Importing foreign worksheets](#importing-foreign-worksheets-spike).
 * `calcpad-sheet` and `calcpad-sheet-wasm`: the sheet syntax compiler and its binding.
@@ -123,7 +123,7 @@ the browser's print dialog, so it carries the browser's own header and footer.
 
 ## Importing foreign worksheets (spike)
 
-`calcpad-import-xmcd` reads the `.xmcd` and `.mcdx` files of the spreadsheet-like worksheet format of a commercial
+`calcpad-import` reads the `.xmcd` and `.mcdx` files of the spreadsheet-like worksheet format of a commercial
 calculation tool and writes Calcpad worksheet text for this engine, so existing sheets can be brought
 over. It evaluates nothing itself. Text, definitions, evaluations, functions, vectors and matrices,
 indexing (with the array origin shifted to Calcpad's 1), units, the common built-in functions and picture regions
@@ -135,7 +135,7 @@ The `.mcdx` container (a zip) is read by its own front end onto the same transla
 runner over a folder: [docs/worksheet-import.md](docs/worksheet-import.md).
 
 ```text
-cargo run -p civilkit-calcs-import-xmcd --example import -- sheet.xmcd
+cargo run -p civilkit-calcs-import --example import -- sheet.xmcd
 ```
 
 ## Build and run

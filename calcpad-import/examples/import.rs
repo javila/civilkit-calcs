@@ -1,7 +1,7 @@
 //! Prints the Calcpad text and the report for one `.xmcd` or `.mcdx` file.
 //!
 //! ```text
-//! cargo run -p civilkit-calcs-import-xmcd --example import -- <file>
+//! cargo run -p civilkit-calcs-import --example import -- <file>
 //! ```
 use std::process::ExitCode;
 
@@ -17,7 +17,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let r = calcpad_import_xmcd::import_xmcd_bytes(&bytes, &calcpad_import_xmcd::ImportOptions::default());
+    let r = calcpad_import::import_bytes(&bytes, &calcpad_import::ImportOptions::default());
     print!("{}", r.calcpad);
     for a in &r.assets {
         eprintln!("asset {} ({}, {} bytes)", a.path, a.mime, a.bytes.len());

@@ -17,6 +17,9 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 - Installable and offline: a web app manifest, icons and a service worker that caches the whole build (about 19 MB, 417 files). "Add to home screen" or "Install" works on phones and desktops, and the app opens and calculates without a network. Plotly charts need the CDN script to have been loaded once while online. `web/e2e/pwa-check.mjs` checks it.
 - `#python` blocks and sheet python fences are coloured with the Python grammar.
 
+### Changed
+- The worksheet importer crate and its WebAssembly module are renamed to be format-neutral, since they read both `.xmcd` and `.mcdx`: `calcpad-import` (package `civilkit-calcs-import`, not published) and `calcpad-import-wasm` (`calcpad_import_wasm.js` / `_bg.wasm`). Earlier entries below use the old names.
+
 ## [26.10.6] - 2026-10-24
 
 ### Added

@@ -2,7 +2,7 @@
 //! text and the engine's HTML next to each other, for checking converted lines against saved results.
 //!
 //! ```text
-//! cargo run --release -p civilkit-calcs-import-xmcd --example engine_check -- <file> <out-prefix> [probe-file]
+//! cargo run --release -p civilkit-calcs-import --example engine_check -- <file> <out-prefix> [probe-file]
 //! ```
 //! A probe file holds extra Calcpad lines appended to the converted text before the engine runs.
 //!
@@ -26,19 +26,19 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let opts = calcpad_import_xmcd::ImportOptions::default();
+    let opts = calcpad_import::ImportOptions::default();
     let mut pairs = String::new();
     let r = if bytes.starts_with(b"PK") {
-        match calcpad_import_xmcd::mcdx::read(&bytes, opts.limits) {
+        match calcpad_import::mcdx::read(&bytes, opts.limits) {
             Ok(mut sheet) => {
-                calcpad_import_xmcd::translate::reading_order(&mut sheet.regions);
+                calcpad_import::translate::reading_order(&mut sheet.regions);
                 sheet.regions = with_probes(sheet.regions, &mut pairs);
-                calcpad_import_xmcd::import_sheet_opts(sheet, &opts)
+                calcpad_import::import_sheet_opts(sheet, &opts)
             }
-            Err(_) => calcpad_import_xmcd::import_xmcd_bytes(&bytes, &opts),
+            Err(_) => calcpad_import::import_bytes(&bytes, &opts),
         }
     } else {
-        calcpad_import_xmcd::import_xmcd_bytes(&bytes, &opts)
+        calcpad_import::import_bytes(&bytes, &opts)
     };
     let mut code = format!("#round 12\n{}", r.calcpad);
     let _ = std::fs::write(format!("{}.pairs", args[2]), &pairs);
@@ -52,7 +52,7 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-use calcpad_import_xmcd::ir::{BinOp, Expr, Name, Paragraph, Piece, Region, RegionKind, Run, Stmt, Target};
+use calcpad_import::ir::{BinOp, Expr, Name, Paragraph, Piece, Region, RegionKind, Run, Stmt, Target};
 
 /// The unit of a saved result (file spelling: `kilogram/(meter^3)`) as an expression over Calcpad names.
 fn unit_expr(u: &str) -> Option<Expr> {
@@ -164,7 +164,7 @@ fn with_probes(regions: Vec<Region>, pairs: &mut String) -> Vec<Region> {
                     sr.unit.clone().unwrap_or_default()
                 ));
                 let probe = Region {
-                    kind: RegionKind::Math(calcpad_import_xmcd::ir::MathRegion {
+                    kind: RegionKind::Math(calcpad_import::ir::MathRegion {
                         stmt: Stmt::Eval {
                             expr: Expr::Name(n.clone()),
                             unit,

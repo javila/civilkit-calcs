@@ -13,7 +13,7 @@
 //!     <region region-id="2" left="0" top="20"><math><ml:eval><ml:apply><ml:mult/><ml:id>x</ml:id><ml:real>3</ml:real></ml:apply></ml:eval></math></region>
 //!   </regions>
 //! </worksheet>"#;
-//! let r = calcpad_import_xmcd::import_xmcd(xml);
+//! let r = calcpad_import::import_xmcd(xml);
 //! assert!(r.calcpad.contains("x = 2"));
 //! assert!(r.calcpad.contains("x*3"));
 //! assert_eq!(r.report.regions_needing_attention(), 0);
@@ -22,7 +22,7 @@
 //! # Front doors
 //!
 //! [`import_xmcd`] reads the plain-XML `.xmcd` file. [`import_mcdx`] reads the zipped `.mcdx`
-//! package (see [`mcdx`]); [`import_xmcd_bytes`] looks at the first bytes and picks the right one.
+//! package (see [`mcdx`]); [`import_bytes`] looks at the first bytes and picks the right one.
 //! The translator works on the format-neutral [`ir::Sheet`], so another container of the same
 //! worksheet language only needs a reader that produces a `Sheet` and then calls [`import_sheet`].
 
@@ -160,7 +160,7 @@ pub fn import_mcdx(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
 /// Imports the raw bytes of a file. A zip signature routes to the `.mcdx` reader ([`import_mcdx`]);
 /// anything else is read as the plain-XML `.xmcd` file, and input that is not UTF-8 is an
 /// `xml-error`; a UTF-8 byte order mark is skipped.
-pub fn import_xmcd_bytes(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
+pub fn import_bytes(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
     if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
         return import_mcdx(bytes, opts);
     }

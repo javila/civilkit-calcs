@@ -70,7 +70,7 @@ export function slug(fileName: string): string {
 interface Pending { resolve: (r: ImportResult) => void; reject: (e: Error & { trap?: boolean }) => void }
 
 /** The importer worker, started on first use and replaced if the module traps. */
-export class XmcdImporter {
+export class WorksheetImporter {
     private worker: Worker | null = null;
     private seq = 0;
     private pending = new Map<number, Pending>();
@@ -161,13 +161,13 @@ export function summarise(rep: ImportReportJson): { live: number; total: number;
     };
 }
 
-export class XmcdImport {
-    private readonly importer: XmcdImporter;
+export class WorksheetImport {
+    private readonly importer: WorksheetImporter;
     private session: Session | null = null;
     private busy = false;
 
     constructor(private readonly host: ImportHost) {
-        this.importer = new XmcdImporter(new URL(import.meta.env.BASE_URL || './', document.baseURI).href);
+        this.importer = new WorksheetImporter(new URL(import.meta.env.BASE_URL || './', document.baseURI).href);
     }
 
     /** True for the file names this importer handles (or refuses with a message). */
