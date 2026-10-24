@@ -34,28 +34,99 @@ struct R {
     prec: u8,
 }
 
-/// A program of local definitions (each name assigned once) and a final value, as the single
-/// expression it stands for. `None` if it is anything else, or if substituting would let a
-/// local's value be captured by an integration variable.
-fn inline_program(stmts: &[PStmt]) -> Option<Expr> {
-    let (last, body) = stmts.split_last()?;
-    let tail = match last {
-        PStmt::Expr(e) | PStmt::Return(e) => e,
-        _ => return None,
-    };
-    let mut env: HashMap<String, Expr> = HashMap::new();
-    for st in body {
-        let PStmt::Local(PTarget::Var(n), e) = st else {
-            return None;
-        };
-        let key = tables::normalise_name(&n.flat());
-        if env.contains_key(&key) {
-            return None;
-        }
-        let v = subst(e, &env)?;
-        env.insert(key, v);
+/// A program run symbolically: locals are substituted into what uses them, an `if` becomes the
+/// engine's `if(c; a; b)` over the rest of the program, a `return` ends its path, and a `for`
+/// over a short literal range is unrolled. The program is then one expression, with no
+/// statements and no names of its own. `Err` says why a program is not that: a loop whose
+/// iterations are not known, an element write, `break`/`continue`, or too many paths.
+fn symexec_program(stmts: &[PStmt], unroll: bool) -> Result<Expr, String> {
+    let mut budget = if unroll { 600usize } else { 600_000 };
+    symexec(stmts, &HashMap::new(), &mut budget, unroll)
+}
+
+const LOOP_NEEDS: &str = "a loop whose number of iterations is not a short literal range cannot be an expression: the engine's expression blocks cannot update a variable from inside $While or $Repeat (a loop statement usable inside a block is needed)";
+
+fn symexec(stmts: &[PStmt], env: &HashMap<String, Expr>, budget: &mut usize, unroll: bool) -> Result<Expr, String> {
+    if *budget == 0 {
+        return Err("too many branches and loop iterations to write as one expression".into());
     }
-    subst(tail, &env)
+    *budget -= 1;
+    let mut env = env.clone();
+    for (k, st) in stmts.iter().enumerate() {
+        let rest = &stmts[k + 1..];
+        match st {
+            PStmt::Local(PTarget::Var(n), e) => {
+                let v = subst(e, &env).ok_or("a local's value would be captured by an integration variable")?;
+                env.insert(tables::normalise_name(&n.flat()), v);
+            }
+            PStmt::Local(PTarget::Element { .. }, _) => {
+                return Err(
+                    "an element assignment needs an array built by statements, which an expression cannot hold".into(),
+                )
+            }
+            PStmt::Expr(e) | PStmt::Return(e) => {
+                if matches!(st, PStmt::Expr(_)) && !rest.is_empty() {
+                    return Err("an expression statement before the end of the program".into());
+                }
+                return subst(e, &env)
+                    .ok_or_else(|| "a local's value would be captured by an integration variable".to_string());
+            }
+            PStmt::If { branches, otherwise } => {
+                let mut arms = Vec::new();
+                for (c, body) in branches {
+                    let cond = subst(c, &env).ok_or("a condition would capture a local")?;
+                    let mut path: Vec<PStmt> = body.clone();
+                    path.extend(rest.iter().cloned());
+                    arms.push((cond, symexec(&path, &env, budget, unroll)?));
+                }
+                let mut path: Vec<PStmt> = otherwise.clone().unwrap_or_default();
+                path.extend(rest.iter().cloned());
+                let mut value = symexec(&path, &env, budget, unroll)?;
+                for (cond, v) in arms.into_iter().rev() {
+                    value = Expr::Call(Name::new("if"), vec![cond, v, value]);
+                }
+                return Ok(value);
+            }
+            PStmt::For { var, range, body } => {
+                let Expr::Range {
+                    first,
+                    second: None,
+                    last,
+                } = range
+                else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                let (Expr::Num(a), Expr::Num(z)) = (&**first, &**last) else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                let (Some(a), Some(z)) = (is_int_literal(a), is_int_literal(z)) else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                if !unroll || (z - a).abs() > 63 {
+                    return Err(LOOP_NEEDS.into());
+                }
+                if body.iter().any(has_break) {
+                    return Err("break or continue in a loop cannot be unrolled".into());
+                }
+                let values: Vec<i64> = if a <= z {
+                    (a..=z).collect()
+                } else {
+                    (z..=a).rev().collect()
+                };
+                let mut path: Vec<PStmt> = Vec::new();
+                for v in values {
+                    path.push(PStmt::Local(PTarget::Var(var.clone()), Expr::Num(v.to_string())));
+                    path.extend(body.iter().cloned());
+                }
+                path.extend(rest.iter().cloned());
+                return symexec(&path, &env, budget, unroll);
+            }
+            PStmt::While { .. } => return Err(LOOP_NEEDS.into()),
+            PStmt::Break | PStmt::Continue => return Err("break or continue outside a loop".into()),
+            PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
+        }
+    }
+    Err("the program does not end with a value".into())
 }
 
 fn subst(e: &Expr, env: &HashMap<String, Expr>) -> Option<Expr> {
@@ -294,6 +365,48 @@ fn escape_text(s: &str) -> String {
     o
 }
 
+/// A range variable `i := a .. z` (no step): its bounds as Calcpad text, and as integers when both
+/// are literals and `a <= z`.
+#[derive(Debug, Clone)]
+struct RangeInfo {
+    a: String,
+    z: String,
+    lit: Option<(i64, i64)>,
+}
+
+/// An enclosing `for` loop while a program is lowered: its variable, the expression for the
+/// largest index it reaches (when that can be written ahead of the loop), and the output line the
+/// loop starts at.
+struct LoopCtx {
+    var: String,
+    size: Option<String>,
+    start: usize,
+}
+
+fn may_return(st: &PStmt) -> bool {
+    match st {
+        PStmt::Return(_) => true,
+        PStmt::For { body, .. } | PStmt::While { body, .. } => body.iter().any(may_return),
+        PStmt::If { branches, otherwise } => {
+            branches.iter().any(|(_, b)| b.iter().any(may_return))
+                || otherwise.as_ref().is_some_and(|o| o.iter().any(may_return))
+        }
+        _ => false,
+    }
+}
+
+fn has_break(st: &PStmt) -> bool {
+    match st {
+        PStmt::Break | PStmt::Continue => true,
+        PStmt::For { body, .. } | PStmt::While { body, .. } => body.iter().any(has_break),
+        PStmt::If { branches, otherwise } => {
+            branches.iter().any(|(_, b)| b.iter().any(has_break))
+                || otherwise.as_ref().is_some_and(|o| o.iter().any(has_break))
+        }
+        _ => false,
+    }
+}
+
 struct Tr {
     origin: i64,
     defined: HashSet<String>,
@@ -304,12 +417,17 @@ struct Tr {
     arrays: HashSet<String>,
     params: Vec<String>,
     /// Range variables with literal integer bounds, usable as loop bounds of element assignments.
-    ranges: HashMap<String, (i64, i64)>,
+    ranges: HashMap<String, RangeInfo>,
     /// While a program is lowered: its local names and the names they were given in the output.
     locals: HashMap<String, String>,
     /// Output names of locals known to hold an array created in the program.
     local_arrays: HashSet<String>,
     prog_n: usize,
+    loop_stack: Vec<LoopCtx>,
+    /// Inside an `if` or `while` of the program being lowered.
+    cond_depth: usize,
+    /// Result and done variables when the program returns early.
+    ret: Option<(String, String)>,
     /// Rendering a gap region for the reader: pieces that cannot be converted keep their real
     /// names instead of a `?stand-in?`, and no issue is recorded.
     readable: bool,
@@ -636,6 +754,73 @@ impl Tr {
         parts.join("; ")
     }
 
+    /// The loops that fill a new array `f` from range variables, preceded by its allocation.
+    /// `idx` are the shifted index texts in the order of `rs`. A range with literal ascending
+    /// bounds is a plain `#for`; any other counts steps and derives the value, so it runs down
+    /// when the end is below the start as the source does. The array is as large as the largest
+    /// index any range reaches, and an element no iteration writes stays 0 (the source would
+    /// have no such element, or fill it with 0 below the first index written).
+    fn fill_loops(&mut self, f: &str, rs: &[(String, RangeInfo)], idx: &[String], rhs: &str) -> Result<String, String> {
+        let o = self.origin;
+        let mut head = Vec::new();
+        let mut loops = Vec::new();
+        let mut sizes = Vec::new();
+        self.prog_n += 1;
+        for (iv, info) in rs {
+            let (a, z) = (&info.a, &info.z);
+            match info.lit {
+                Some((x, y)) => {
+                    if x < o {
+                        return Err("the range starts below the array origin".into());
+                    }
+                    sizes.push((y - o + 1).to_string());
+                    loops.push(format!("#for {iv} = {x} : {y}"));
+                }
+                None => {
+                    let (lo, hi, k) = (
+                        format!("{iv}_a{}", self.prog_n),
+                        format!("{iv}_z{}", self.prog_n),
+                        format!("{iv}_k{}", self.prog_n),
+                    );
+                    head.push(format!("{lo} = {a}"));
+                    head.push(format!("{hi} = {z}"));
+                    let size = if o == 1 {
+                        format!("max({lo}; {hi})")
+                    } else {
+                        format!("max({lo}; {hi}) - {}", o - 1)
+                    };
+                    sizes.push(size);
+                    loops.push(format!(
+                        "#for {k} = 0 : abs({hi} - {lo})\n{iv} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"
+                    ));
+                }
+            }
+        }
+        let alloc = if sizes.len() == 1 {
+            format!("{f} = vector({})", sizes[0])
+        } else {
+            format!("{f} = matrix({}; {})", sizes[0], sizes[1])
+        };
+        let mut out = vec!["#val".to_string()];
+        out.extend(head);
+        out.push(alloc);
+        for (d, l) in loops.iter().enumerate() {
+            for line in l.split('\n') {
+                out.push(format!("{}{}", "    ".repeat(d), line));
+            }
+        }
+        out.push(format!(
+            "{}{f}.({}) = {rhs}",
+            "    ".repeat(loops.len()),
+            idx.join("; ")
+        ));
+        for d in (0..loops.len()).rev() {
+            out.push(format!("{}#loop", "    ".repeat(d)));
+        }
+        out.push("#end val".to_string());
+        Ok(out.join("\n"))
+    }
+
     /// Lowers a program that is the value of `name := program` to Calcpad statements and the
     /// definition of `name`. Returns the text and whether the value is an array, or the reason
     /// the program is not read. Locals get names of their own (`x_p1`), so nothing leaks into the
@@ -653,13 +838,31 @@ impl Tr {
         let saved_locals = std::mem::take(&mut self.locals);
         let saved_arrays = std::mem::take(&mut self.local_arrays);
         let mut lines = Vec::new();
+        // A `return` before the end is a result variable and a done flag, so nothing after it runs.
+        let early = body.iter().any(may_return);
+        let saved_ret = self.ret.take();
+        if early {
+            let (res_v, done_v) = (format!("ret_p{}", self.prog_n), format!("done_p{}", self.prog_n));
+            lines.push(format!("{done_v} = 0"));
+            self.ret = Some((res_v, done_v));
+        }
+        self.loop_stack.clear();
+        self.cond_depth = 0;
         let res = self.lower_stmts(body, 0, false, &mut lines);
         let out = match res {
             Ok(()) => {
                 let value = self.expr(tail);
-                let is_array = matches!(tail, Expr::Name(n)
-                    if self.locals.get(&tables::normalise_name(&n.flat())).is_some_and(|m| self.local_arrays.contains(m)));
-                let def = format!("{} = {}", name, value.s);
+                let is_array = !early
+                    && matches!(tail, Expr::Name(n)
+                        if self.locals.get(&tables::normalise_name(&n.flat())).is_some_and(|m| self.local_arrays.contains(m)));
+                let def = if let Some((res_v, done_v)) = &self.ret {
+                    lines.push(format!("#if {done_v} ≡ 0"));
+                    lines.push(format!("    {res_v} = {}", value.s));
+                    lines.push("#end if".to_string());
+                    format!("{} = {}", name, res_v)
+                } else {
+                    format!("{} = {}", name, value.s)
+                };
                 if lines.is_empty() {
                     Ok((def, is_array))
                 } else {
@@ -670,6 +873,7 @@ impl Tr {
         };
         self.locals = saved_locals;
         self.local_arrays = saved_arrays;
+        self.ret = saved_ret;
         out
     }
 
@@ -690,7 +894,7 @@ impl Tr {
             return Err("blocks nested too deeply".into());
         }
         let pad = "    ".repeat(depth);
-        for st in stmts {
+        for (k, st) in stmts.iter().enumerate() {
             match st {
                 PStmt::Local(PTarget::Var(n), e) => {
                     let flat = tables::normalise_name(&n.flat());
@@ -714,9 +918,14 @@ impl Tr {
                 }
                 PStmt::Local(PTarget::Element { base, index }, e) => {
                     let flat = tables::normalise_name(&base.flat());
-                    let Some(mapped) = self.locals.get(&flat).cloned() else {
+                    let Some(mapped) = self
+                        .locals
+                        .get(&flat)
+                        .cloned()
+                        .or_else(|| self.grow_local(&flat, index, out))
+                    else {
                         return Err(format!(
-                            "element assignment to {flat}, which the program did not create (the source would copy or grow it)"
+                            "element assignment to {flat}, which the program did not create and whose size cannot be known ahead (the source grows it, the engine cannot)"
                         ));
                     };
                     if !self.local_arrays.contains(&mapped) {
@@ -748,6 +957,21 @@ impl Tr {
                     let z = self.expr(last).s;
                     let prev = self.locals.get(&v).cloned();
                     let mapped = format!("{}_p{}", v, self.prog_n);
+                    let start = out.len();
+                    let o = self.origin;
+                    let depends_on_locals = self.locals.keys().any(|k| mentions(first, k) || mentions(last, k));
+                    let size = if depends_on_locals || body.iter().any(has_break) {
+                        None
+                    } else {
+                        match (&**first, &**last) {
+                            (Expr::Num(x), Expr::Num(y)) => match (is_int_literal(x), is_int_literal(y)) {
+                                (Some(x), Some(y)) if x <= y && x >= o => Some((y - o + 1).to_string()),
+                                _ => None,
+                            },
+                            _ if o == 1 => Some(format!("max({a}; {z})")),
+                            _ => Some(format!("max({a}; {z}) - {}", o - 1)),
+                        }
+                    };
                     let literal = |e: &Expr| match e {
                         Expr::Num(s) => is_int_literal(s),
                         _ => None,
@@ -767,7 +991,19 @@ impl Tr {
                         }
                     }
                     self.locals.insert(v.clone(), mapped);
+                    if self.ret.is_some() && body.iter().any(may_return) {
+                        let done_v = self.ret.as_ref().map(|r| r.1.clone()).unwrap_or_default();
+                        out.push(format!("{pad}    #if {done_v} ≡ 1"));
+                        out.push(format!("{pad}        #break"));
+                        out.push(format!("{pad}    #end if"));
+                    }
+                    self.loop_stack.push(LoopCtx {
+                        var: v.clone(),
+                        size,
+                        start,
+                    });
                     let r = self.lower_stmts(body, depth + 1, true, out);
+                    self.loop_stack.pop();
                     match prev {
                         Some(p) => self.locals.insert(v, p),
                         None => self.locals.remove(&v),
@@ -778,36 +1014,114 @@ impl Tr {
                 PStmt::While { cond, body } => {
                     let c = self.expr(cond).s;
                     out.push(format!("{pad}#while {c}"));
-                    self.lower_stmts(body, depth + 1, true, out)?;
+                    if self.ret.is_some() && body.iter().any(may_return) {
+                        let done_v = self.ret.as_ref().map(|r| r.1.clone()).unwrap_or_default();
+                        out.push(format!("{pad}    #if {done_v} ≡ 1"));
+                        out.push(format!("{pad}        #break"));
+                        out.push(format!("{pad}    #end if"));
+                    }
+                    self.cond_depth += 1;
+                    let r = self.lower_stmts(body, depth + 1, true, out);
+                    self.cond_depth -= 1;
+                    r?;
                     out.push(format!("{pad}#loop"));
                 }
                 PStmt::If { branches, otherwise } => {
+                    self.cond_depth += 1;
                     for (i, (c, b)) in branches.iter().enumerate() {
                         let cs = self.expr(c).s;
                         out.push(format!("{pad}{} {cs}", if i == 0 { "#if" } else { "#else if" }));
                         if b.is_empty() {
+                            self.cond_depth -= 1;
                             return Err("an empty branch".into());
                         }
                         self.lower_stmts(b, depth + 1, in_loop, out)?;
                     }
                     if let Some(b) = otherwise {
                         if b.is_empty() {
+                            self.cond_depth -= 1;
                             return Err("an empty branch".into());
                         }
                         out.push(format!("{pad}#else"));
                         self.lower_stmts(b, depth + 1, in_loop, out)?;
                     }
+                    self.cond_depth -= 1;
                     out.push(format!("{pad}#end if"));
                 }
                 PStmt::Break if in_loop => out.push(format!("{pad}#break")),
                 PStmt::Continue if in_loop => out.push(format!("{pad}#continue")),
                 PStmt::Break | PStmt::Continue => return Err("break or continue outside a loop".into()),
-                PStmt::Return(_) => return Err("a return before the end of the program (an early exit)".into()),
+                PStmt::Return(e) => {
+                    let Some((res_v, done_v)) = self.ret.clone() else {
+                        return Err("a return before the end of the program (an early exit)".into());
+                    };
+                    let v = self.expr(e).s;
+                    out.push(format!("{pad}{res_v} = {v}"));
+                    out.push(format!("{pad}{done_v} = 1"));
+                    if in_loop {
+                        out.push(format!("{pad}#break"));
+                    }
+                }
                 PStmt::Expr(_) => return Err("an expression statement before the end of the program".into()),
                 PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
             }
+            // Whatever follows a statement that may have returned runs only if it did not.
+            if k + 1 < stmts.len() && may_return(st) {
+                if let Some((_, done_v)) = self.ret.clone() {
+                    out.push(format!("{pad}#if {done_v} ≡ 0"));
+                    self.lower_stmts(&stmts[k + 1..], depth + 1, in_loop, out)?;
+                    out.push(format!("{pad}#end if"));
+                    return Ok(());
+                }
+            }
         }
         Ok(())
+    }
+
+    /// An element write to an array the program has not created: if every index is the variable
+    /// of an enclosing `for` loop (each different), the writes are unconditional, and the loops'
+    /// bounds are known ahead of the first of those loops, the array is allocated just before that
+    /// loop with the largest index each loop reaches. Returns the local's output name.
+    fn grow_local(&mut self, flat: &str, index: &[Expr], out: &mut Vec<String>) -> Option<String> {
+        if self.cond_depth > 0 || index.is_empty() || index.len() > 2 || !valid_ident(flat) {
+            return None;
+        }
+        let mut sizes = Vec::new();
+        let mut start = usize::MAX;
+        for (d, e) in index.iter().enumerate() {
+            let Expr::Name(n) = e else { return None };
+            let v = tables::normalise_name(&n.flat());
+            if index[..d]
+                .iter()
+                .any(|p| matches!(p, Expr::Name(q) if tables::normalise_name(&q.flat()) == v))
+            {
+                return None;
+            }
+            let ctx = self.loop_stack.iter().find(|c| c.var == v)?;
+            sizes.push(ctx.size.clone()?);
+            start = start.min(ctx.start);
+        }
+        let mapped = self.local_name(flat);
+        let alloc = if sizes.len() == 1 {
+            format!("{mapped} = vector({})", sizes[0])
+        } else {
+            format!("{mapped} = matrix({}; {})", sizes[0], sizes[1])
+        };
+        let pad = self
+            .loop_stack
+            .iter()
+            .position(|c| c.start == start)
+            .map(|p| "    ".repeat(p))
+            .unwrap_or_default();
+        // The nesting of the loop's line, not of the write, is the allocation's indent.
+        out.insert(start, format!("{pad}{alloc}"));
+        for c in self.loop_stack.iter_mut() {
+            if c.start >= start {
+                c.start += 1;
+            }
+        }
+        self.local_arrays.insert(mapped.clone());
+        Some(mapped)
     }
 
     /// `$Integral{body @ x = a : b}`. The bound variable is local to the body; if the bounds
@@ -1349,7 +1663,7 @@ impl Tr {
                                                                            // Names a gap redefines without our knowing their value (they must not read as stale).
         let mut poison: Vec<String> = Vec::new();
         let mut origin_assign: Option<i64> = None;
-        let mut range_def: Option<(String, (i64, i64))> = None;
+        let mut range_def: Option<(String, RangeInfo)> = None;
         let shape: &str;
 
         match &m.stmt {
@@ -1365,21 +1679,19 @@ impl Tr {
                 let mut statements: Option<&[PStmt]> = None;
                 let stub: Expr;
                 let value: &Expr = match value {
-                    Expr::Program(stmts) => match inline_program(stmts) {
-                        Some(e) => {
+                    Expr::Program(stmts) => match symexec_program(stmts, matches!(target, Target::Func(..))) {
+                        Ok(e) => {
                             inlined = Some(e);
                             inlined.as_ref().unwrap()
                         }
-                        None if matches!(target, Target::Var(_)) => {
+                        Err(_) if matches!(target, Target::Var(_)) => {
                             statements = Some(stmts);
                             value
                         }
-                        None => {
+                        Err(why) => {
                             stub = Expr::Unsupported {
                                 code: Code::ProgramBlock,
-                                detail: Some(
-                                    "a function body with loops, conditions or reassigned locals cannot be one expression".into(),
-                                ),
+                                detail: Some(format!("in a function body: {why}")),
                             };
                             &stub
                         }
@@ -1431,12 +1743,22 @@ impl Tr {
                             true,
                         ) = (value, valid_ident(&flat))
                         {
-                            if let (Expr::Num(a), Expr::Num(z)) = (&**first, &**last) {
-                                if let (Some(a), Some(z)) = (is_int_literal(a), is_int_literal(z)) {
-                                    if a <= z {
-                                        range_def = Some((flat.clone(), (a, z)));
-                                    }
-                                }
+                            // The bounds are rendered now, as the source reads them now; a range whose
+                            // bounds do not convert is a gap like any other region.
+                            let mark = self.cur.len();
+                            let a = self.expr(first).s;
+                            let z = self.expr(last).s;
+                            let bad = self.cur[mark..].iter().any(|p| p.code.severity() == Severity::Gap);
+                            self.cur.truncate(mark);
+                            if !bad {
+                                let lit = match (&**first, &**last) {
+                                    (Expr::Num(x), Expr::Num(y)) => match (is_int_literal(x), is_int_literal(y)) {
+                                        (Some(x), Some(y)) if x <= y => Some((x, y)),
+                                        _ => None,
+                                    },
+                                    _ => None,
+                                };
+                                range_def = Some((flat.clone(), RangeInfo { a, z, lit }));
                             }
                         }
                         let rhs = if range_def.is_some() {
@@ -1446,7 +1768,8 @@ impl Tr {
                         };
                         let is_array = matches!(value, Expr::Matrix { .. })
                             || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
-                        if let Some((_, (a, z))) = &range_def {
+                        if let Some((_, info)) = &range_def {
+                            let (a, z) = (&info.a, &info.z);
                             self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
                             emitted = Some(format!(
                                 "'<!-- range {flat} = {a} .. {z}: used as the loop of the element assignments that follow -->"
@@ -1510,19 +1833,32 @@ impl Tr {
                         if let Some(f) = &flat {
                             define_name = Some((f.clone(), None, true));
                         }
-                        // `v[i] := expr(i)` with a range variable `i` that has literal bounds, for an
-                        // array that has no value yet, is a loop that fills a zero vector. Anything
+                        // `v[i] := expr(i)` (or `M[i, j]` with two range variables) for an array that has
+                        // no value yet fills a zero array whose size is the largest index the ranges
+                        // reach: a loop over the range, preceded by `vector(n)` or `matrix(m; n)`. The
+                        // size is an expression the engine evaluates, so run-time bounds work. Anything
                         // else about an element assignment is reported.
-                        let range = match index.as_slice() {
-                            [Expr::Name(i)] => {
-                                let f = tables::normalise_name(&i.flat());
-                                self.ranges.get(&f).map(|b| (f, *b))
-                            }
-                            _ => None,
-                        };
-                        let why = match (&flat, &range) {
+                        let ranges: Option<Vec<(String, RangeInfo)>> = index
+                            .iter()
+                            .map(|e| match e {
+                                Expr::Name(i) => {
+                                    let f = tables::normalise_name(&i.flat());
+                                    self.ranges.get(&f).map(|b| (f, b.clone()))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let distinct = ranges.as_ref().is_some_and(|r| {
+                            r.iter()
+                                .enumerate()
+                                .all(|(k, (n, _))| r[..k].iter().all(|(m, _)| m != n))
+                        });
+                        let why = match (&flat, &ranges) {
                             (None, _) => Some("the target is not a plain indexed name"),
-                            (Some(_), None) => Some("the index is not a range variable with literal bounds"),
+                            (Some(_), None) => Some("the index is not made of range variables"),
+                            (Some(_), Some(r)) if r.is_empty() || r.len() > 2 || !distinct => {
+                                Some("the index is not one or two different range variables")
+                            }
                             (Some(f), Some(_))
                                 if self.defined.contains(f)
                                     || self.funcs.contains_key(f)
@@ -1530,34 +1866,33 @@ impl Tr {
                             {
                                 Some("the array already has a value, so growing or overwriting it element by element is not read")
                             }
-                            (Some(f), Some(_)) if mentions(value, f) => {
-                                Some("the value reads the array it is filling")
-                            }
+                            (Some(f), Some(_)) if mentions(value, f) => Some("the value reads the array it is filling"),
                             _ => None,
                         };
-                        match (why, flat, range) {
-                            (None, Some(f), Some((iv, (a, z)))) if self.origin <= a => {
-                                self.params.push(iv.clone());
+                        match (why, flat, ranges) {
+                            (None, Some(f), Some(rs)) => {
+                                for (iv, _) in &rs {
+                                    self.params.push(iv.clone());
+                                }
                                 let rhs = self.expr(value);
-                                let idx = self.index_expr(&Expr::Name(Name::new(&iv)));
-                                self.params.pop();
+                                let idx: Vec<String> = rs
+                                    .iter()
+                                    .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
+                                    .collect();
+                                for _ in &rs {
+                                    self.params.pop();
+                                }
                                 if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
-                                    let size = z - self.origin + 1;
-                                    emitted = Some(format!(
-                                        "#val\n{f} = vector({size})\n#for {iv} = {a} : {z}\n    {f}.({idx}) = {}\n#loop\n#end val",
-                                        rhs.s
-                                    ));
+                                    match self.fill_loops(&f, &rs, &idx, &rhs.s) {
+                                        Ok(t) => emitted = Some(t),
+                                        Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                    }
                                 } else {
-                                    attempt = Some(format!("{f}.({idx}) = {}  (for {iv} = {a} .. {z})", rhs.s));
+                                    attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
                                 }
                             }
-                            (None, ..) => {
-                                self.issue(
-                                    Code::ElementAssignment,
-                                    Some("the range starts below the array origin".into()),
-                                );
-                            }
                             (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
+                            (None, ..) => {}
                         }
                     }
                 }
@@ -1609,12 +1944,12 @@ impl Tr {
             } else if let Some(line) = emitted.take() {
                 self.lines.push(line);
             }
-            if let Some((name, bounds)) = &range_def {
+            if let Some((name, info)) = &range_def {
                 self.defined.remove(name);
                 self.funcs.remove(name);
                 self.arrays.remove(name);
                 self.gap_names.remove(name);
-                self.ranges.insert(name.clone(), *bounds);
+                self.ranges.insert(name.clone(), info.clone());
             } else if let Some((name, arity, is_array)) = define_name {
                 self.ranges.remove(&name);
                 self.gap_names.remove(&name);
@@ -1811,6 +2146,9 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
         prog_n: 0,
+        loop_stack: Vec::new(),
+        cond_depth: 0,
+        ret: None,
         readable: false,
         cur: Vec::new(),
         uses_trig: false,

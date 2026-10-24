@@ -352,7 +352,10 @@ fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
         .find(|i| i.code == Code::ElementAssignment)
         .expect("gap");
     assert!(
-        g.detail.as_deref().unwrap_or("").contains("not a range variable"),
+        g.detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("not made of range variables"),
         "{g:?}"
     );
     // A range with a step, or with a bound that is not a literal, stays a range-variable gap.
@@ -360,11 +363,12 @@ fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
         "<ml:range><ml:sequence><ml:real>0</ml:real><ml:real>2</ml:real></ml:sequence><ml:real>10</ml:real></ml:range>";
     let res = convert(&[define("j", stepped)]);
     assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
-    let res = convert(&[
-        define("m1", &r("5")),
-        define("k", &format!("<ml:range>{}{}</ml:range>", r("1"), n("m1"))),
-    ]);
-    assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
+    // A bound that does not convert keeps the range a gap.
+    let res = convert(&[define(
+        "k",
+        &format!("<ml:range>{}{}</ml:range>", r("1"), n("undefined_bound")),
+    )]);
+    assert!(res.report.gaps().any(|i| i.code == Code::UndefinedVariable));
 }
 
 // ---- 4. programs -------------------------------------------------------------------------------------------
@@ -600,28 +604,6 @@ fn programs_that_cannot_be_read_faithfully_say_why() {
             .and_then(|i| i.detail.clone())
             .unwrap_or_default()
     };
-    // An array that grows element by element.
-    let res = convert(&[define(
-        "G",
-        &program(&[
-            for_in("i", &r("1"), &r("3"), &[local_el("g", &n("i"), &n("i"))]),
-            n("g"),
-        ]),
-    )]);
-    assert!(reason(&res).contains("did not create"), "{}", reason(&res));
-    // An early return.
-    let res = convert(&[define(
-        "E",
-        &program(&[
-            if_then(
-                &gt(&r("2"), &r("1")),
-                &["<ml:return><ml:real>1</ml:real></ml:return>".to_string()],
-                None,
-            ),
-            r("2"),
-        ]),
-    )]);
-    assert!(reason(&res).contains("early exit"), "{}", reason(&res));
     // try/catch.
     let res = convert(&[define(
         "C",
@@ -642,17 +624,21 @@ fn programs_that_cannot_be_read_faithfully_say_why() {
         n("x"),
         program(&[
             local("s", &r("0")),
-            for_in("i", &r("1"), &r("2"), &[local("s", &n("i"))]),
+            for_in("i", &r("1"), &n("x"), &[local("s", &n("i"))]),
             n("s")
         ])
     )]);
-    assert!(reason(&res).contains("one expression"), "{}", reason(&res));
+    assert!(reason(&res).contains("usable inside a block"), "{}", reason(&res));
     // A gap leaves the name blocked for later uses.
     let res = convert(&[
         define(
             "G",
             &program(&[
-                for_in("i", &r("1"), &r("3"), &[local_el("g", &n("i"), &n("i"))]),
+                format!(
+                    "<ml:tryCatch>{}{}</ml:tryCatch>",
+                    program(&[local("g", &r("1"))]),
+                    program(&[r("0")])
+                ),
                 n("g"),
             ]),
         ),
@@ -760,4 +746,350 @@ fn equality_is_written_the_way_the_engine_reads_it() {
     let nums = numbers(&res.calcpad);
     assert_close(nums[nums.len() - 2], 1.0);
     assert_close(nums[nums.len() - 1], 0.0);
+}
+
+#[test]
+fn ranges_with_run_time_bounds_and_two_dimensions_preallocate() {
+    // n = 4, i = 1..n, x[i] = i^2: x[3] = 9.
+    let res = convert(&[
+        define("n", &r("4")),
+        define("i", &format!("<ml:range>{}{}</ml:range>", r("1"), n("n"))),
+        set_element("x", &n("i"), &sq(&n("i"))),
+        eval(&index1("x", &r("3"))),
+        eval(&index1("x", &r("4"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("x = vector(max("), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 9.0);
+    assert_close(nums[nums.len() - 1], 16.0);
+    // A descending range 3..1: x[2] = 20.
+    let res = convert(&[
+        define("i", &format!("<ml:range>{}{}</ml:range>", r("3"), r("1"))),
+        set_element("x", &n("i"), &times(&n("i"), &r("10"))),
+        eval(&index1("x", &r("2"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 20.0);
+    // Origin 0 with a run-time end: y[3] = 6.
+    let res = convert_origin(
+        &[
+            define("n", &r("3")),
+            define("i", &format!("<ml:range>{}{}</ml:range>", r("0"), n("n"))),
+            set_element("y", &n("i"), &times(&r("2"), &n("i"))),
+            eval(&index1("y", &r("3"))),
+        ],
+        0,
+    );
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 6.0);
+    // Two ranges fill a matrix: M[2,3] = 23 and M[1,2] = 12.
+    let res = convert(&[
+        define("i", &format!("<ml:range>{}{}</ml:range>", r("1"), r("2"))),
+        define("j", &format!("<ml:range>{}{}</ml:range>", r("1"), r("3"))),
+        format!(
+            "<ml:define>{}{}</ml:define>",
+            index2("M", &n("i"), &n("j")),
+            plus(&times(&n("i"), &r("10")), &n("j"))
+        ),
+        eval(&index2("M", &r("2"), &r("3"))),
+        eval(&index2("M", &r("1"), &r("2"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("M = matrix("), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 23.0);
+    assert_close(nums[nums.len() - 1], 12.0);
+}
+
+// ---- arrays built element by element, early returns -------------------------------------------------------
+
+fn index_n(base: &str, idx: &[String]) -> String {
+    format!(
+        "<ml:apply><ml:indexer/>{}<ml:sequence>{}</ml:sequence></ml:apply>",
+        n(base),
+        idx.join("")
+    )
+}
+fn local_el2(base: &str, i: &str, j: &str, value: &str) -> String {
+    format!(
+        "<ml:localDefine>{}{}</ml:localDefine>",
+        index_n(base, &[i.to_string(), j.to_string()]),
+        value
+    )
+}
+fn ret(value: &str) -> String {
+    format!("<ml:return>{value}</ml:return>")
+}
+
+#[test]
+fn a_program_that_grows_an_array_in_loops_preallocates_it() {
+    // K[i, j] = 10 i + j over i = 1..3, j = 1..2: K[3,2] = 32, K[2,1] = 21, and K has 3 rows.
+    let res = convert(&[
+        define(
+            "K",
+            &program(&[
+                for_in(
+                    "i",
+                    &r("1"),
+                    &r("3"),
+                    &[for_in(
+                        "j",
+                        &r("1"),
+                        &r("2"),
+                        &[local_el2(
+                            "k",
+                            &n("i"),
+                            &n("j"),
+                            &plus(&times(&n("i"), &r("10")), &n("j")),
+                        )],
+                    )],
+                ),
+                n("k"),
+            ]),
+        ),
+        eval(&index2("K", &r("3"), &r("2"))),
+        eval(&index2("K", &r("2"), &r("1"))),
+        eval(&call("rows", &[n("K")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("k_p1 = matrix(3; 2)"), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 3], 32.0);
+    assert_close(nums[nums.len() - 2], 21.0);
+    assert_close(nums[nums.len() - 1], 3.0);
+    // A run-time bound is an expression the engine evaluates: n = 4, q[i] = i^2, 4 rows, q[3] = 9.
+    let res = convert(&[
+        define("n", &r("4")),
+        define(
+            "Q",
+            &program(&[
+                for_in("i", &r("1"), &n("n"), &[local_el("q", &n("i"), &sq(&n("i")))]),
+                n("q"),
+            ]),
+        ),
+        eval(&index1("Q", &r("3"))),
+        eval(&call("rows", &[n("Q")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 9.0);
+    assert_close(nums[nums.len() - 1], 4.0);
+}
+
+#[test]
+fn growth_that_cannot_be_sized_ahead_is_a_gap_with_the_reason() {
+    let reason = |res: &ImportResult| -> String {
+        res.report
+            .gaps()
+            .find(|i| i.code == Code::ProgramBlock)
+            .and_then(|i| i.detail.clone())
+            .unwrap_or_default()
+    };
+    // Written under a condition: the array may end up smaller than the loop.
+    let res = convert(&[define(
+        "G",
+        &program(&[
+            for_in(
+                "i",
+                &r("1"),
+                &r("3"),
+                &[if_then(&gt(&n("i"), &r("1")), &[local_el("g", &n("i"), &n("i"))], None)],
+            ),
+            n("g"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("cannot be known ahead"), "{}", reason(&res));
+    // Indexed by a counter, not by the loop variable.
+    let res = convert(&[define(
+        "H",
+        &program(&[
+            local("c", &r("0")),
+            for_in(
+                "i",
+                &r("1"),
+                &r("3"),
+                &[local("c", &plus(&n("c"), &r("1"))), local_el("h", &n("c"), &n("i"))],
+            ),
+            n("h"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("cannot be known ahead"), "{}", reason(&res));
+    // A bound that is itself a local of the program cannot be written ahead of the loop.
+    let res = convert(&[define(
+        "J",
+        &program(&[
+            local("m", &r("3")),
+            for_in("i", &r("1"), &n("m"), &[local_el("j", &n("i"), &n("i"))]),
+            n("j"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("cannot be known ahead"), "{}", reason(&res));
+}
+
+#[test]
+fn early_return_from_a_loop_uses_a_result_and_a_done_flag() {
+    // The first i with i^2 > 20 is 5; with a threshold nothing reaches the program returns 0.
+    for (limit, want) in [(20.0, 5.0), (200.0, 0.0)] {
+        let res = convert(&[define(
+            "R",
+            &program(&[
+                for_in(
+                    "i",
+                    &r("1"),
+                    &r("10"),
+                    &[if_then(
+                        &gt(&sq(&n("i")), &r(&limit.to_string())),
+                        &[ret(&n("i"))],
+                        None,
+                    )],
+                ),
+                r("0"),
+            ]),
+        )]);
+        assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+        assert!(res.calcpad.contains("done_p1"), "{}", res.calcpad);
+        assert_close(last(&res.calcpad), want);
+    }
+    // Nested loops: the first (i, j) with i*j > 6 is (2, 4), returned as 204; the outer loop stops too.
+    let res = convert(&[define(
+        "R",
+        &program(&[
+            local("count", &r("0")),
+            for_in(
+                "i",
+                &r("1"),
+                &r("5"),
+                &[for_in(
+                    "j",
+                    &r("1"),
+                    &r("5"),
+                    &[
+                        local("count", &plus(&n("count"), &r("1"))),
+                        if_then(
+                            &gt(&times(&n("i"), &n("j")), &r("6")),
+                            &[ret(&plus(&times(&n("i"), &r("100")), &n("j")))],
+                            None,
+                        ),
+                    ],
+                )],
+            ),
+            r("-1"),
+        ]),
+    )]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 204.0);
+}
+
+// ---- function bodies that are not a single expression --------------------------------------------------------
+
+fn function(name: &str, params: &[&str], body: &str) -> String {
+    let p: String = params.iter().map(|x| n(x)).collect();
+    format!(
+        "<ml:define><ml:function>{}<ml:boundVars>{p}</ml:boundVars></ml:function>{body}</ml:define>",
+        n(name)
+    )
+}
+
+#[test]
+fn function_bodies_with_conditions_and_returns_become_one_expression() {
+    // f(x): y = x; if x > 10 then y = 10; y * 2. f(3) = 6, f(30) = 20.
+    let res = convert(&[
+        function(
+            "f",
+            &["x"],
+            &program(&[
+                local("y", &n("x")),
+                if_then(&gt(&n("x"), &r("10")), &[local("y", &r("10"))], None),
+                times(&n("y"), &r("2")),
+            ]),
+        ),
+        eval(&call("f", &[r("3")])),
+        eval(&call("f", &[r("30")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(!res.calcpad.contains('#'), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 6.0);
+    assert_close(nums[nums.len() - 1], 20.0);
+    // g(x): early returns. g(-5) = -1, g(0) = 0, g(7) = 1.
+    let res = convert(&[
+        function(
+            "g",
+            &["x"],
+            &program(&[
+                if_then(&lt(&n("x"), &r("0")), &[ret(&r("-1"))], None),
+                if_then(&app("equal", &[n("x"), r("0")]), &[ret(&r("0"))], None),
+                r("1"),
+            ]),
+        ),
+        eval(&call("g", &[r("-5")])),
+        eval(&call("g", &[r("0")])),
+        eval(&call("g", &[r("7")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 3], -1.0);
+    assert_close(nums[nums.len() - 2], 0.0);
+    assert_close(nums[nums.len() - 1], 1.0);
+    // A short literal loop is unrolled: t = x*1 + x*2 + x*3, so s(2) = 12.
+    let res = convert(&[
+        function(
+            "s",
+            &["x"],
+            &program(&[
+                local("t", &r("0")),
+                for_in(
+                    "k",
+                    &r("1"),
+                    &r("3"),
+                    &[local("t", &plus(&n("t"), &times(&n("x"), &n("k"))))],
+                ),
+                n("t"),
+            ]),
+        ),
+        eval(&call("s", &[r("2")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 12.0);
+    // Units pass through a condition: k(3 m) = 3 m, k(1 m) = 2 m.
+    let m2 = times(&r("2"), &n("m"));
+    let res = convert(&[
+        function(
+            "k",
+            &["x"],
+            &program(&[if_then(&gt(&n("x"), &m2), &[ret(&n("x"))], None), m2.clone()]),
+        ),
+        eval(&call("k", &[times(&r("3"), &n("m"))])),
+        eval(&call("k", &[times(&r("1"), &n("m"))])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 3.0);
+    assert_close(nums[nums.len() - 1], 2.0);
+}
+
+#[test]
+fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
+    let res = convert(&[function(
+        "h",
+        &["x"],
+        &program(&[
+            local("t", &r("0")),
+            for_in("k", &r("1"), &n("x"), &[local("t", &plus(&n("t"), &n("k")))]),
+            n("t"),
+        ]),
+    )]);
+    let g = res.report.gaps().find(|i| i.code == Code::ProgramBlock).expect("gap");
+    let d = g.detail.as_deref().unwrap_or("");
+    assert!(
+        d.contains("$While") && d.contains("loop statement usable inside a block"),
+        "{d}"
+    );
+    // And the readable line still shows the function.
+    assert!(
+        res.calcpad.contains("| h(x) = program { t = 0; for k in 1 .. x"),
+        "{}",
+        res.calcpad
+    );
 }
