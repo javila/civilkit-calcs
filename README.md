@@ -62,7 +62,7 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
 * **`#UI` input forms:** entries, drop-downs, radio buttons, checkboxes and data grids. A chosen
   select, radio or checkbox is carried into the report, PDF and Word output.
 * **Dark theme:** the preview keeps form controls, drawings and plots readable.
-* **Import worksheet:** `File > Import worksheet...`, the Document tab's Import button, or dropping a `.xmcd` file on
+* **Import worksheet:** `File > Import worksheet...`, the Document tab's Import button, or dropping a `.xmcd` or `.mcdx` file on
   the page converts a worksheet of the spreadsheet-like format of another calculation tool into a new unsaved
   worksheet, locally in the page (its own WebAssembly module, loaded on first use). Text, definitions,
   evaluations, functions, matrices, units and pictures convert; what does not is shown as a static picture of the
@@ -112,7 +112,7 @@ the browser's print dialog, so it carries the browser's own header and footer.
 * `calcpad-wasm`: the engine's WebAssembly binding (wasm-bindgen).
 * `calcpad-docx` and `calcpad-docx-wasm`: the Word and Excel writers and their binding.
 * `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`): a spike that translates the simple subset of
-  a foreign worksheet format (`.xmcd`) into Calcpad text, with a report of what did not convert.
+  a foreign worksheet format (`.xmcd`, `.mcdx`) into Calcpad text, with a report of what did not convert.
   See [Importing foreign worksheets](#importing-foreign-worksheets-spike).
 * `calcpad-sheet` and `calcpad-sheet-wasm`: the sheet syntax compiler and its binding.
 * `web/`: the web app. `web/calcpad-frontend` is the shared frontend, `web/calcpad-web` the page
@@ -123,7 +123,7 @@ the browser's print dialog, so it carries the browser's own header and footer.
 
 ## Importing foreign worksheets (spike)
 
-`calcpad-import-xmcd` reads the `.xmcd` files of the spreadsheet-like worksheet format of a commercial
+`calcpad-import-xmcd` reads the `.xmcd` and `.mcdx` files of the spreadsheet-like worksheet format of a commercial
 calculation tool and writes Calcpad worksheet text for this engine, so existing sheets can be brought
 over. It evaluates nothing itself. Text, definitions, evaluations, functions, vectors and matrices,
 indexing (with the array origin shifted to Calcpad's 1), units, the common built-in functions and picture regions
@@ -131,7 +131,7 @@ indexing (with the array origin shifted to Calcpad's 1), units, the common built
 Range variables, programs, solve blocks, symbolic evaluation, plots, pictures and embedded objects do
 not: each becomes a static picture of the original when the file has one, else a visible placeholder line
 carrying its region id, and the report counts them by code.
-The newer `.mcdx` container is not read yet. Details, the mapping tables and how to run the batch
+The `.mcdx` container (a zip) is read by its own front end onto the same translator. Details, the mapping tables and how to run the batch
 runner over a folder: [docs/worksheet-import.md](docs/worksheet-import.md).
 
 ```text
@@ -180,7 +180,7 @@ cd web && npx playwright install chromium
 node e2e/browser-check.mjs        # worksheets through the UI, input forms, files, exports, scripts, printing
 node e2e/ribbon-check.mjs --url http://127.0.0.1:4173/ --lint
 node e2e/verify-ribbon-snippets.mjs --cli ../target/release/Cli
-node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd, pictures, toggles, error paths, drop, save, exports
+node e2e/import-check.mjs         # Import worksheet: a synthetic .xmcd and .mcdx, pictures, toggles, error paths, drop, save, exports
 node ../tools/set_version.mjs --check
 ```
 

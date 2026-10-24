@@ -1,18 +1,18 @@
 # Importing foreign worksheets (spike)
 
 Crate: `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`, not published). It reads the
-`.xmcd` worksheet files of a commercial calculation tool, the spreadsheet-like worksheet format with
+`.xmcd` and `.mcdx` worksheet files of a commercial calculation tool, the spreadsheet-like worksheet format with
 text, equations and plots placed freely on a page, and writes **Calcpad worksheet text** for the existing
 engine. It evaluates nothing itself: one engine, one language. Every number in the output is a literal
 that was in the source.
 
 It is a spike. It answers two questions: how much of real files converts, and which missing features
-come first. It is not wired into the web app.
+come first. The two file formats share one translator; see [The .mcdx front door](#the-mcdx-front-door).
 
 ## In the app
 
-`File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd`
-file, or dropping a `.xmcd` file anywhere on the page (a dashed hint shows while a file is dragged over it).
+`File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd` or
+`.mcdx` file, or dropping one anywhere on the page (a dashed hint shows while a file is dragged over it).
 
 1. The file is read in the page and converted by the importer module (`calcpad_import_xmcd_wasm`, in its own web
    worker, loaded on first use; the engine module is not involved). **Nothing is uploaded**: the file never leaves
@@ -26,8 +26,8 @@ file, or dropping a `.xmcd` file anywhere on the page (a dashed hint shows while
    (default on) and **Show saved results as static values** (default off).
 
 Errors are messages, never crashes: a file that is not `.xmcd` ("... is not a worksheet this importer reads"),
-malformed XML or a DTD ("not well-formed XML"), text that is not UTF-8, and a `.mcdx` zip ("Prime (.mcdx) files are
-not supported yet.").
+malformed XML or a DTD ("not well-formed XML"), text that is not UTF-8, and a `.mcdx` zip that cannot be read
+("the file is a zip package that cannot be read").
 
 **Pictures and Save.** The `.cpd` text refers to pictures by library path (`<img src="imported/<name>/R12.svg">`).
 The report, the preview and the HTML, Word and Excel exports resolve those paths against the library and inline
@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,131,136 bytes raw, 464,060 bytes gzipped (`tools/build_wasm.sh import`).
+Size of the module: 1,152,164 bytes raw, 473,567 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader added about 21 KB.
 
 ## Use
 
@@ -230,6 +230,7 @@ summary key on them.
 | `bare-expression` | An expression with no definition or evaluation operator (documentation, or a solve-block constraint) |
 | `element-assignment`, `disabled-region` | `v[i] := x`; a region switched off in the source |
 | `plot`, `ole-object`, `component`, `worksheet-reference`, `other-region` | Counted only, never converted; shown as a static picture when the file has one (see Pictures) |
+| `header-footer`, `rich-text-element`, `text-unreadable` | `.mcdx` only: a page header or footer; an element of a text region that would hide content (a table, a picture, a floating block; the element name is the detail); a text region whose prose could not be read from the package |
 | `image` | A picture region with nothing usable (no metafile, no raster picture) |
 | `unknown-element` | An element name the reader does not know (the name is the detail) |
 | `unmapped-unit`, `builtin-missing`, `addin-function`, `reference-function`, `undefined-variable` | See above |
@@ -238,7 +239,8 @@ summary key on them.
 
 Notes (the region converted, with a caveat): `global-definition`, `angle-mode`, `array-origin`,
 `origin-assigned`, `log-base`, `round-digits`, `abs-of-array`, `call-as-multiplication`, `unit-override`.
-Whole-file problems: `xml-error`, `not-a-worksheet`, `input-too-large`.
+Whole-file problems: `xml-error`, `not-a-worksheet`, `input-too-large`, `unsupported-container` (a zip that is damaged,
+encrypted or uses a zip feature the reader refuses).
 
 ### Element names: seen in real files, or assumed
 
@@ -306,31 +308,72 @@ Apache-2.0) and `emf-core` 0.1.1 (MIT, default features off, so no `tracing`), w
 and `unicode-width` (all MIT or Apache-2.0 alternatives). Nothing non-permissive; `THIRD_PARTY_LICENSES.md`
 is regenerated. The importer never executes anything from the file.
 
-## Front doors: adding the `.mcdx` container later
+A `.mcdx` is a zip, which adds its own guards (`src/zip.rs`): the entry count (20 000) and the declared size of
+each entry are capped before anything is allocated; inflate stops at the declared size, so an entry that lies
+about it fails instead of growing; the total of decoded bytes is capped (192 MiB, the same budget as pictures);
+encryption, zip64 and compression methods other than stored and deflate are refused; entries are looked up by
+name inside the archive and never written to disk, and a relationship target is folded (`..` cannot climb out).
+The CRC is not checked. A flow document is a second, nested zip and gets the same treatment. The XML parts obey
+the same DTD, depth and node limits as an `.xmcd`.
 
-`.mcdx` (the newer format) is not covered. The design keeps it a new front door onto the same translator:
-the translator consumes the format-neutral `ir::Sheet` (regions with position, text paragraphs, math
-statements as a small expression tree), and `xmcd.rs` is the only code that knows XML. A reader for
-another container produces a `Sheet` and calls `import_sheet`.
+## The .mcdx front door
 
-What a `.mcdx` reader needs, from the seven sample files that were looked at (structure only):
+`.mcdx` is the newer container of the same worksheet language. `import_xmcd_bytes` looks at the first bytes: a zip
+signature goes to `mcdx::read` (also callable as `import_mcdx`), anything else is read as the plain XML. Both
+produce the same `ir::Sheet`, so the translator, the report and the placeholder rule are shared. The mcdx
+reader is `src/mcdx.rs`; the zip walker `src/zip.rs`; the math reader of `xmcd.rs` is reused (namespaces are matched
+by family, so `math30` and `math50` are both `math`).
 
-1. A zip reader. The container is an OPC-style zip (`_rels/.rels`, the main worksheet XML part, relationship
-   parts, embedded objects). The repo already has `miniz_oxide` for inflate; a small central-directory
-   walker (stored and deflate entries) is enough, with the same size and entry-count limits as the XML.
-2. A second schema reader. `worksheet.xml` uses the next schema generation (namespaces ending
-   `worksheet50` and `math50`, plus the unchanged units and provenance ones). The math tree looks like
-   the old one but is not guaranteed to be the same; it needs its own verified element list and tests.
-3. Text from a different place. Text regions point at separate XAML flow-document packages instead of
-   carrying inline runs, so paragraphs and styles come from those parts.
-4. Embedded objects stay `ole-object` gaps.
+What the reader does with the package:
 
-Estimated at two to three days with the same corpus-driven approach.
+* The worksheet part is found through the package relationships (any part called `worksheet.xml` as a fallback).
+  Its siblings are read relative to it: `result.xml` (saved results, joined to a math region by `resultRef`),
+  `settings/calculation.xml` (the array origin; 0 when absent) and the header and footer parts.
+* **Text.** A text region names a XAML flow document through a relationship. That part is a nested zip holding
+  `Xaml/Document.xaml`. Paragraphs, runs, bold, italic, underline, sub and superscript, line breaks, hyperlinks
+  (the text stays, the address does not), bulleted lists and decimal lists (numbered "1. ", "2. ") convert.
+  Colours, fonts and sizes are dropped, as for `.xmcd`. Math nested in a text region becomes its own region at the
+  text's position, as before.
+* **Math.** The tree is the same family as `.xmcd`. What differs: a value followed by its unit is a `scale`
+  application (read as a product); an identifier's subscript is a styled span inside it (`T` + subscript `max`
+  reads as `T_max`); a call with one argument has no `sequence` wrapper; an empty slot is a `placeholder`
+  (an empty unit override means "no unit"; a placeholder anywhere else is an `unknown-element` gap). Matrices are
+  stored column by column, as in `.xmcd` (read off a 3 x 2 matrix in the sample files, a column of names then a column of numbers).
+* **Programs** (`if`, `for`, `while`, `return`, try/catch, local definitions) are `program-block` gaps, as in
+  `.xmcd`; `summation` is a `summation-operator` gap; derivatives and integrals are `calculus-operator` gaps.
+* **Collapsible areas** only group regions: their regions are read as if on the page, positioned relative to
+  the area.
+* **Pictures** with a PNG convert like `.xmcd` pictures (the PNG is stored in the library). The package carries no
+  cached rendering of a region, so an unconverted region is a placeholder line, never a static picture.
+
+Skipped, with a code and a visible placeholder line each (nothing is dropped silently):
+
+| Part | Code |
+| --- | --- |
+| Embedded object of another application (`oleObject`) | `ole-object` |
+| Spreadsheet and chart components, with the regions inside them | `component` |
+| Reference to another worksheet | `worksheet-reference` (and `reference-function` for calls it may define) |
+| Plot | `plot` |
+| Page header and footer (when they hold regions) | `header-footer` |
+| Table, picture or floating block inside a text region | `rich-text-element` (the element name is the detail) |
+| A text region whose flow document is missing or unreadable | `text-unreadable` |
+| Any other region kind | `other-region` |
+| Calls into an external library | `addin-function` (as in `.xmcd`) |
+
+Not read: the unit system setting, strings-use-origin and the other calculation settings; the regions inside a
+component (they belong to the skipped component); a definition whose target is a matrix of names
+(`bad-structure`).
+
+Checked against seven worksheets of a thermodynamic property handbook, which are mostly text and calls into an
+external library, so they exercise the reader and the skip reports far more than the maths. Their counts are kept
+out of the repository with the files. The synthetic packages in `tests/mcdx.rs` cover assignment, arithmetic with
+units, a function, a matrix, a program, a range variable, text, areas, skipped parts, saved results and zip abuse;
+each math case is built once and imported through both front doors, and the two must agree.
 
 ## Not covered
 
 Range variables (top engine gap to close, see the ranked list), programs, solve blocks, symbolic
 evaluation, plots, pictures, embedded objects, data tables and components, strings, derivative and integral
-operators, worksheet references and includes, `.mcdx`, text colours and fonts, tables of results. Types
+operators, worksheet references and includes, text colours and fonts, tables of results. Types
 are not tracked, so `|x|` of a vector or matrix is only noted when the operand was defined from a matrix
 literal.
