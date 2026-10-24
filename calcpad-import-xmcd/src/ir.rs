@@ -117,6 +117,8 @@ pub enum Target {
     Func(Name, Vec<Name>),
     /// `v[i] := ...`, with the array's name when the target is a plain indexed name.
     Element(Option<Name>),
+    /// `[a, b] := ...`: several names defined at once by a matrix of names.
+    Multi(Vec<Name>),
 }
 
 /// An identifier with its literal subscript (`x_i` is base `x`, sub `i`).

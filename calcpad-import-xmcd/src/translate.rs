@@ -821,6 +821,8 @@ impl Tr {
         let mut emitted: Option<String> = None;
         let mut attempt: Option<String> = None;
         let mut define_name: Option<(String, Option<usize>, bool)> = None; // name, arity, is array
+                                                                           // Names a gap redefines without our knowing their value (they must not read as stale).
+        let mut poison: Vec<String> = Vec::new();
         let mut origin_assign: Option<i64> = None;
         let shape: &str;
 
@@ -883,6 +885,18 @@ impl Tr {
                         if *global {
                             self.issue(Code::GlobalDefinition, None);
                         }
+                    }
+                    Target::Multi(names) => {
+                        self.issue(
+                            Code::BadStructure,
+                            Some("matrix of names as a definition target".into()),
+                        );
+                        poison.extend(
+                            names
+                                .iter()
+                                .map(|b| tables::normalise_name(&b.flat()))
+                                .filter(|f| valid_ident(f)),
+                        );
                     }
                     Target::Element(base) => {
                         self.issue(Code::ElementAssignment, None);
@@ -973,6 +987,12 @@ impl Tr {
                 .and_then(|p| p.root)
                 .or_else(|| gap_codes.iter().copied().find(|c| *c != Code::DependsOnGap))
                 .unwrap_or(Code::DependsOnGap);
+            for p in poison {
+                self.defined.remove(&p);
+                self.funcs.remove(&p);
+                self.arrays.remove(&p);
+                self.gap_names.insert(p, root);
+            }
             if let Some((name, arity, _)) = define_name {
                 self.defined.remove(&name);
                 self.funcs.remove(&name);

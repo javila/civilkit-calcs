@@ -646,6 +646,15 @@ fn read_target(n: Node, lim: &Limits) -> Option<Target> {
                 .unwrap_or_default();
             Some(Target::Func(read_name(*name), params))
         }
+        "matrix" => {
+            let names: Vec<Name> = ml_kids(n)
+                .into_iter()
+                .map(unwrap_provenance)
+                .filter(|k| local(*k) == "id")
+                .map(read_name)
+                .collect();
+            (!names.is_empty() && names.len() == ml_kids(n).len()).then_some(Target::Multi(names))
+        }
         "apply" => {
             let _ = lim;
             let kids = ml_kids(n);

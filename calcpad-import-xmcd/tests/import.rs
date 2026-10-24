@@ -373,6 +373,37 @@ fn element_assignment_poisons_the_array_name() {
 }
 
 #[test]
+fn matrix_of_names_target_poisons_each_name() {
+    // `[P, H] := f(...)` is not converted, and P and H must not keep an earlier value.
+    let regs = [
+        math(1, 0.0, 0.0, &define("P", &r("1200"))),
+        math(
+            2,
+            0.0,
+            20.0,
+            &format!(
+                "<ml:define><ml:matrix rows=\"2\" cols=\"1\">{}{}</ml:matrix>{}</ml:define>",
+                n("P"),
+                n("H"),
+                call("solver", &[r("1")])
+            ),
+        ),
+        math(3, 0.0, 40.0, &eval(&n("P"))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    assert!(res
+        .report
+        .gaps()
+        .any(|i| i.code == Code::BadStructure && i.region_id.as_deref() == Some("2")));
+    assert!(res
+        .report
+        .gaps()
+        .any(|i| i.code == Code::DependsOnGap && i.region_id.as_deref() == Some("3")));
+    assert!(!lines(&res).iter().any(|l| l == "P"));
+}
+
+#[test]
 fn indexing_is_shifted_from_origin_zero() {
     let regs = [
         math(1, 0.0, 0.0, &define("v", &matrix(3, 1, &["10", "20", "30"]))),
