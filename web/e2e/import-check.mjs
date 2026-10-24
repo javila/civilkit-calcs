@@ -4,7 +4,8 @@
 // metafile picture, a raster picture, and an unconvertible region that carries a saved picture and a
 // saved result). The check imports it through the File menu, the ribbon button and a drop, and looks at
 // the tab, the calculated maths, the pictures (naturalWidth), the dialog counts and toggles, the error
-// paths (bad extension, malformed XML, a .mcdx) and what Save and the exports do with the pictures.
+// paths (bad extension, malformed XML, a damaged .mcdx) and what Save and the exports do with the pictures.
+// A small synthetic .mcdx package (a zip, built here) is imported through the File menu and a drop too.
 //
 //   node e2e/import-check.mjs [--port 4179] [--dist DIR] [--real FILE.xmcd --shots DIR]
 //
@@ -12,7 +13,7 @@
 // the imported sheet in the dark and the light theme (local use: the file is read from disk, never copied).
 import { createServer } from 'node:http';
 import { execFileSync } from 'node:child_process';
-import { deflateSync } from 'node:zlib';
+import { deflateRawSync, deflateSync } from 'node:zlib';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, normalize, resolve } from 'node:path';
@@ -101,6 +102,52 @@ ${region(6, 250, '<picture><png item-idref="2"/></picture>')}
 <item item-id="3">${b64(wmf())}</item>
 </binaryContent>
 </worksheet>`;
+}
+
+// ---- a synthetic .mcdx package (a zip of parts, with the prose in a nested flow-document zip) ------------------
+function zipOf(parts) {
+    const locals = [], centrals = [];
+    let offset = 0;
+    for (const [name, data] of parts) {
+        const raw = Buffer.from(data);
+        const body = deflateRawSync(raw);
+        const nm = Buffer.from(name);
+        const common = Buffer.alloc(26);
+        common.writeUInt16LE(20, 0); common.writeUInt16LE(0, 2); common.writeUInt16LE(8, 4);
+        common.writeUInt16LE(0, 6); common.writeUInt16LE(0x21, 8); common.writeUInt32LE(crc32(raw), 10);
+        common.writeUInt32LE(body.length, 14); common.writeUInt32LE(raw.length, 18);
+        common.writeUInt16LE(nm.length, 22); common.writeUInt16LE(0, 24);
+        const local = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), common, nm, body]);
+        const cen = Buffer.alloc(20);
+        const central = Buffer.concat([Buffer.from([0x50, 0x4b, 1, 2]), Buffer.from([20, 0]), common, cen.subarray(0, 10), (() => { const b = Buffer.alloc(4); b.writeUInt32LE(offset, 0); return b; })(), nm]);
+        locals.push(local); centrals.push(central);
+        offset += local.length;
+    }
+    const cd = Buffer.concat(centrals);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(parts.length, 8); end.writeUInt16LE(parts.length, 10);
+    end.writeUInt32LE(cd.length, 12); end.writeUInt32LE(offset, 16);
+    return Buffer.concat([...locals, cd, end]);
+}
+const rels = list => `<?xml version="1.0" encoding="utf-8"?><Relationships xmlns="http://example.invalid/package/relationships">${list.map(([id, type, target]) => `<Relationship Type="http://example.invalid/rel/${type}" Target="${target}" Id="${id}" />`).join('')}</Relationships>`;
+function syntheticMcdx() {
+    const xaml = zipOf([['Xaml/Document.xaml', '<Section xmlns="http://example.invalid/presentation" xml:space="preserve"><Paragraph><Run FontWeight="Bold">Package test sheet</Run></Paragraph><Paragraph><Run>A second line of prose.</Run></Paragraph></Section>']]);
+    const mregion = (id, top, inner) => `<region region-id="${id}" top="${top}" left="10" actualWidth="100" actualHeight="20"><math resultRef="${id}">${inner}</math></region>`;
+    const ws = `<?xml version="1.0" encoding="utf-8"?><worksheet xmlns="http://example.invalid/worksheet50" xmlns:ml="http://example.invalid/math50"><regions>
+<region region-id="1" top="10" left="10" width="400" actualWidth="400" actualHeight="40"><text item-idref="Rt1"><FlowDocument xmlns="http://example.invalid/presentation" /></text></region>
+${mregion(2, 70, '<ml:define><ml:id>x</ml:id><ml:real>2</ml:real></ml:define>')}
+${mregion(3, 110, '<ml:eval><ml:apply><ml:plus/><ml:id>x</ml:id><ml:real>3</ml:real></ml:apply></ml:eval>')}
+<region region-id="4" top="150" left="10" width="100" height="30"><oleObject item-idref="Ro"><OleViewportSize width="0" height="0" /></oleObject></region>
+${mregion(5, 190, '<ml:eval><ml:apply><ml:id>vendor_fn</ml:id><ml:real>1</ml:real></ml:apply></ml:eval>')}
+</regions></worksheet>`;
+    return zipOf([
+        ['_rels/.rels', rels([['Rdoc', 'officeDocument', '/pkg/worksheet.xml']])],
+        ['pkg/worksheet.xml', ws],
+        ['pkg/_rels/worksheet.xml.rels', rels([['Rt1', 'flowDocument', '/pkg/xaml/FlowDocument1.XamlPackage'], ['Ro', 'oleObject', '/pkg/ole/object0.ole']])],
+        ['pkg/settings/calculation.xml', '<calculation xmlns="http://example.invalid/settings/calculation10"><builtInVariables array-origin="1" /></calculation>'],
+        ['pkg/xaml/FlowDocument1.XamlPackage', xaml],
+        ['pkg/ole/object0.ole', 'not a real object'],
+    ]);
 }
 
 // ---- the page -----------------------------------------------------------------------------------------------
@@ -228,8 +275,8 @@ m = await importVia('broken.xmcd', '<worksheet><regions><region></worksheet>');
 check(/Import failed/.test(m) && /not well-formed XML/.test(m), `malformed XML: ${m.replace(/\s+/g, ' ').slice(0, 100)}`);
 m = await importVia('bomb.xmcd', '<?xml version="1.0"?><!DOCTYPE d [<!ENTITY a "aaaa"><!ENTITY b "&a;&a;&a;&a;">]><worksheet><regions><region><text><p>&b;</p></text></region></regions></worksheet>');
 check(/Import failed/.test(m), 'a DTD (entity bomb) is refused with a message');
-m = await importVia('prime.mcdx', Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(64)]));
-check(/Prime \(\.mcdx\) files are not supported yet\./.test(m), `.mcdx: ${m.replace(/\s+/g, ' ').slice(0, 80)}`);
+m = await importVia('damaged.mcdx', Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(64)]));
+check(/Import failed/.test(m) && /zip package that cannot be read/.test(m), `damaged .mcdx: ${m.replace(/\s+/g, ' ').slice(0, 100)}`);
 m = await importVia('binary.xmcd', Buffer.from([0xff, 0xfe, 0x00, 0x01, 0x02]));
 check(/Import failed/.test(m), 'non-text content is refused with a message');
 await closeDialog();
@@ -271,6 +318,43 @@ try {
 } catch (e) {
     check(false, `the Word export (${String(e).slice(0, 120)})`);
 }
+
+// ---- 7. a .mcdx package: File menu, then a drop -------------------------------------------------------------------------------
+await closeDialog();
+const mcdx = syntheticMcdx();
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'package.mcdx', mcdx);
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'package.mcdx' }).waitFor({ timeout: 60000 });
+const msum = await page.locator('[data-cprs-import-summary]').innerText();
+check(/Imported package\.mcdx: 3 of 5 regions converted live, 0 shown as static pictures, 2 need attention\./.test(msum), `mcdx dialog counts: ${msum}`);
+const mgaps = await page.locator('[data-cprs-import-gaps] li').allInnerTexts();
+check(mgaps.some(g => /embedded objects/.test(g)) && mgaps.some(g => /add-in/.test(g)), `mcdx skipped items are listed (${mgaps.join(' | ')})`);
+await closeDialog();
+const mtext = await editorText();
+check(/<b>Package test sheet<\/b>/.test(mtext) && /A second line of prose\./.test(mtext), 'mcdx: the prose comes from the flow document');
+check(/x = 2/.test(mtext) && /x \+ 3/.test(mtext), 'mcdx: the maths is converted');
+check(/import-gap R4 ole-object/.test(mtext) && /import-gap R5 /.test(mtext), 'mcdx: skipped regions are placeholder lines, not dropped');
+const mtitle = await page.evaluate(() => window.calcpadTabs?.activeTab?.title ?? [...document.querySelectorAll('.tab, [role=tab]')].map(e => e.textContent).join('|'));
+check(/package\.cpd/.test(String(mtitle)), `mcdx: a new tab named after the file (${mtitle})`);
+const mfr = await previewFrame('Package test sheet');
+check(!!mfr, 'mcdx: the preview renders');
+if (mfr) {
+    const body = await mfr.evaluate(() => document.body.innerText);
+    check(/x\s*=\s*2/.test(body) && /=\s*5\b/.test(body), 'mcdx: the live maths calculates (x = 2, x + 3 = 5)');
+}
+const mdropped = await page.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'dropped-package.mcdx', { type: 'application/octet-stream' }));
+    document.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    document.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
+    return true;
+}, mcdx.toString('base64'));
+check(mdropped, 'mcdx: dropped on the page');
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'dropped-package.mcdx' }).waitFor({ timeout: 30000 });
+check(true, 'mcdx: a dropped .mcdx is imported');
+await closeDialog();
+check(errors.length === 0, `no page errors after the mcdx imports (${errors.slice(0, 2).join(' | ')})`);
 
 await browser.close();
 server.close();

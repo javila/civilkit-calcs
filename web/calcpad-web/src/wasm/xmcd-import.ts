@@ -1,4 +1,4 @@
-// calcpad-rs: "Import worksheet...". Reads a foreign `.xmcd` worksheet in the page, converts it with the
+// calcpad-rs: "Import worksheet...". Reads a foreign `.xmcd` or `.mcdx` worksheet in the page, converts it with the
 // importer module (import-worker.ts, its own wasm, loaded on first use), stores the picture files in the
 // library under /imported/<name>/, opens the converted sheet as a new unsaved tab, and tells the user
 // what converted and what did not. Everything runs locally; nothing is uploaded.
@@ -52,6 +52,9 @@ const WORDING: Record<string, string> = {
     'depends-on-gap': 'regions that use something that did not convert',
     'element-assignment': 'assignments to matrix elements',
     'disabled-region': 'regions that are switched off in the original',
+    'header-footer': 'page headers and footers',
+    'rich-text-element': 'tables, pictures and floating blocks inside text',
+    'text-unreadable': 'text that could not be read from the file',
 };
 
 export function wording(code: string, reason: string): string {
@@ -190,12 +193,8 @@ export class XmcdImport {
 
     async importFile(file: File): Promise<void> {
         const name = file.name;
-        if (/\.mcdx$/i.test(name)) {
-            this.message('Import worksheet', 'Prime (.mcdx) files are not supported yet.');
-            return;
-        }
-        if (!/\.xmcd$/i.test(name)) {
-            this.message('Import worksheet', `${name} is not a worksheet this importer reads. Choose a .xmcd file.`);
+        if (!/\.(xmcd|mcdx)$/i.test(name)) {
+            this.message('Import worksheet', `${name} is not a worksheet this importer reads. Choose a .xmcd or .mcdx file.`);
             return;
         }
         if (this.busy) {
@@ -232,7 +231,7 @@ export class XmcdImport {
         s.paths = next;
         const tabs = this.host.tabs();
         if (first) {
-            s.tabId = tabs.newUntitled(result.calcpad, `${s.name.replace(/\.xmcd$/i, '')}.cpd`);
+            s.tabId = tabs.newUntitled(result.calcpad, `${s.name.replace(/\.(xmcd|mcdx)$/i, '')}.cpd`);
         } else {
             tabs.activate(s.tabId);
             tabs.activeModel?.setValue?.(result.calcpad);
