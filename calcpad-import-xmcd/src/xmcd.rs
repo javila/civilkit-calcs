@@ -648,7 +648,16 @@ fn read_target(n: Node, lim: &Limits) -> Option<Target> {
         }
         "apply" => {
             let _ = lim;
-            Some(Target::Element)
+            let kids = ml_kids(n);
+            let base = match kids.as_slice() {
+                [op, first, ..]
+                    if local(unwrap_provenance(*op)) == "indexer" && local(unwrap_provenance(*first)) == "id" =>
+                {
+                    Some(read_name(unwrap_provenance(*first)))
+                }
+                _ => None,
+            };
+            Some(Target::Element(base))
         }
         _ => None,
     }

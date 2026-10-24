@@ -115,8 +115,8 @@ pub enum Stmt {
 pub enum Target {
     Var(Name),
     Func(Name, Vec<Name>),
-    /// `v[i] := ...`
-    Element,
+    /// `v[i] := ...`, with the array's name when the target is a plain indexed name.
+    Element(Option<Name>),
 }
 
 /// An identifier with its literal subscript (`x_i` is base `x`, sub `i`).

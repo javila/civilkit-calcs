@@ -884,8 +884,16 @@ impl Tr {
                             self.issue(Code::GlobalDefinition, None);
                         }
                     }
-                    Target::Element => {
+                    Target::Element(base) => {
                         self.issue(Code::ElementAssignment, None);
+                        // The array is no longer what an earlier definition said: later uses of its
+                        // name must not read the stale value (or, for a name such as `L`, a unit).
+                        if let Some(b) = base {
+                            let flat = tables::normalise_name(&b.flat());
+                            if valid_ident(&flat) {
+                                define_name = Some((flat, None, true));
+                            }
+                        }
                     }
                 }
             }

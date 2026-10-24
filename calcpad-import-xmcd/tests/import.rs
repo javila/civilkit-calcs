@@ -340,6 +340,39 @@ fn index(base: &str, idx: &[String]) -> String {
 }
 
 #[test]
+fn element_assignment_poisons_the_array_name() {
+    // After `v[1] := 9` (not converted) the earlier value of `v` is stale, and a name such as `L`
+    // that is also a unit must not quietly turn into the unit.
+    let regs = [
+        math(1, 0.0, 0.0, &define("v", &matrix(2, 1, &["1", "2"]))),
+        math(
+            2,
+            0.0,
+            20.0,
+            &format!("<ml:define>{}{}</ml:define>", index("v", &[r("1")]), r("9")),
+        ),
+        math(3, 0.0, 40.0, &eval(&n("v"))),
+        math(
+            4,
+            0.0,
+            60.0,
+            &format!("<ml:define>{}{}</ml:define>", index("L", &[r("1")]), r("9")),
+        ),
+        math(5, 0.0, 80.0, &eval(&n("L"))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    let dep: Vec<_> = res
+        .report
+        .gaps()
+        .filter(|i| i.code == Code::DependsOnGap)
+        .filter_map(|i| i.region_id.clone())
+        .collect();
+    assert_eq!(dep, vec!["3", "5"], "{:?}", res.report.issues);
+    assert!(!res.calcpad.contains("L\n") && !lines(&res).iter().any(|l| l == "v" || l == "L"));
+}
+
+#[test]
 fn indexing_is_shifted_from_origin_zero() {
     let regs = [
         math(1, 0.0, 0.0, &define("v", &matrix(3, 1, &["10", "20", "30"]))),
