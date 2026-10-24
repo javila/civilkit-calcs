@@ -570,7 +570,7 @@ impl Tr {
                     // The value is read before the name is a local: `x <- x + 1` starts from the outer x.
                     let rhs = self.expr(e).s;
                     let is_array = matches!(e, Expr::Matrix { .. })
-                        || matches!(e, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack"));
+                        || matches!(e, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
                     let mapped = match self.locals.get(&flat) {
                         Some(m) => m.clone(),
                         None => self.local_name(&flat),
@@ -844,6 +844,13 @@ impl Tr {
                     self.issue(Code::ArityMismatch, Some(flat));
                     return atom("?call?");
                 }
+                if rule == FnRule::Submatrix {
+                    let mut parts = vec![rendered[0].clone()];
+                    for a in &args[1..] {
+                        parts.push(self.index_expr(a));
+                    }
+                    return atom(format!("submatrix({})", parts.join("; ")));
+                }
                 return self.apply_rule(rule, &rendered);
             }
         }
@@ -859,6 +866,7 @@ impl Tr {
 
     fn apply_rule(&mut self, rule: FnRule, a: &[String]) -> R {
         match rule {
+            FnRule::Submatrix => atom(format!("submatrix({})", a.join("; "))),
             FnRule::Direct(name) => atom(format!("{}({})", name, a.join("; "))),
             FnRule::Trig(name) => {
                 self.uses_trig = true;
@@ -1301,7 +1309,7 @@ impl Tr {
                             self.expr(value)
                         };
                         let is_array = matches!(value, Expr::Matrix { .. })
-                            || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack"));
+                            || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
                         if let Some((_, (a, z))) = &range_def {
                             self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
                             emitted = Some(format!(

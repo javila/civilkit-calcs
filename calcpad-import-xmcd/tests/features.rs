@@ -659,3 +659,54 @@ fn programs_that_cannot_be_read_faithfully_say_why() {
     ]);
     assert!(res.report.gaps().any(|i| i.code == Code::DependsOnGap));
 }
+
+// ---- 5. matrix functions the engine has ---------------------------------------------------------------------
+
+fn index2(base: &str, i: &str, j: &str) -> String {
+    format!(
+        "<ml:apply><ml:indexer/>{}<ml:sequence>{i}{j}</ml:sequence></ml:apply>",
+        n(base)
+    )
+}
+fn mat(rows: usize, cols: usize, items: &[&str]) -> String {
+    let body: String = items.iter().map(|v| r(v)).collect();
+    format!(r#"<ml:matrix rows="{rows}" cols="{cols}">{body}</ml:matrix>"#)
+}
+
+#[test]
+fn lsolve_and_augment_with_more_than_two_arguments() {
+    // [2 0; 0 4] x = [2; 8] gives x = [1; 2].
+    let res = convert(&[
+        define("A", &mat(2, 2, &["2", "0", "0", "4"])),
+        define("b", &mat(2, 1, &["2", "8"])),
+        define("X", &call("lsolve", &[n("A"), n("b")])),
+        eval(&index1("X", &r("1"))),
+        eval(&index1("X", &r("2"))),
+        define("M", &call("augment", &[n("b"), n("b"), n("b")])),
+        eval(&index2("M", &r("2"), &r("3"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 3], 1.0);
+    assert_close(nums[nums.len() - 2], 2.0);
+    assert_close(nums[nums.len() - 1], 8.0);
+}
+
+#[test]
+fn submatrix_indexes_follow_the_array_origin() {
+    // A = [1 2 3; 4 5 6; 7 8 10]; submatrix(A, 1, 2, 0, 1) at origin 0 is rows 1..2, columns 0..1
+    // = [4 5; 7 8], so S[0, 1] = 5 and S[1, 1] = 8.
+    let res = convert_origin(
+        &[
+            define("A", &mat(3, 3, &["1", "4", "7", "2", "5", "8", "3", "6", "10"])),
+            define("S", &call("submatrix", &[n("A"), r("1"), r("2"), r("0"), r("1")])),
+            eval(&index2("S", &r("0"), &r("1"))),
+            eval(&index2("S", &r("1"), &r("1"))),
+        ],
+        0,
+    );
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 5.0);
+    assert_close(nums[nums.len() - 1], 8.0);
+}

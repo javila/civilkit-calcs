@@ -123,6 +123,8 @@ pub enum FnRule {
     Log,
     /// `round(x)` or `round(x, digits)`.
     Round,
+    /// `submatrix(A, ir, jr, ic, jc)`: the four indexes are shifted from the sheet's array origin.
+    Submatrix,
 }
 
 /// (source name, rule, minimum arguments, maximum arguments)
@@ -177,8 +179,10 @@ pub const FUNCTIONS: &[(&str, FnRule, usize, usize)] = &[
     ("matrix", FnRule::Direct("matrix"), 2, 2),
     ("det", FnRule::Direct("det"), 1, 1),
     ("rank", FnRule::Direct("rank"), 1, 1),
-    ("augment", FnRule::Direct("augment"), 2, 2),
-    ("stack", FnRule::Direct("stack"), 2, 2),
+    ("augment", FnRule::Direct("augment"), 2, 64),
+    ("lsolve", FnRule::Direct("lsolve"), 2, 2),
+    ("submatrix", FnRule::Submatrix, 5, 5),
+    ("stack", FnRule::Direct("stack"), 2, 64),
     ("sort", FnRule::Direct("sort"), 1, 1),
     ("reverse", FnRule::Direct("reverse"), 1, 1),
     ("mean", FnRule::Direct("mean"), 1, 64),
@@ -270,7 +274,6 @@ pub const BUILTIN_MISSING: &[&str] = &[
     "condi",
     "cumsum",
     "cumint",
-    "lsolve",
     "linsolve",
     "lookup",
     "hlookup",
@@ -389,7 +392,6 @@ pub const BUILTIN_MISSING: &[&str] = &[
     "isreal",
     "tail",
     "mid",
-    "submatrix",
     "last",
     "diag",
     "hypot",

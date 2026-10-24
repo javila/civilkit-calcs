@@ -616,6 +616,7 @@ fn every_mapped_function_runs_in_the_engine() {
             FnRule::Direct(t) | FnRule::Trig(t) => *t,
             FnRule::Log => "log",
             FnRule::Round => "round",
+            FnRule::Submatrix => "submatrix",
         };
         // Matrix functions take matrix arguments; give them one.
         let arg = match target {
@@ -623,6 +624,7 @@ fn every_mapped_function_runs_in_the_engine() {
             "det" | "rank" => "[1; 2|3; 4]",
             "identity" | "matrix" => "2",
             "augment" | "stack" => "[1; 2]",
+            "lsolve" => "[1; 2|3; 4]",
             "if" => "1",
             "acos" | "asin" | "atanh" => "0.5",
             "acosh" => "2",
@@ -632,6 +634,8 @@ fn every_mapped_function_runs_in_the_engine() {
             "if" => vec!["1 > 0", "2", "3"],
             "matrix" => vec!["2", "2"],
             "augment" | "stack" => vec![arg, arg],
+            "lsolve" => vec!["[1; 2|3; 4]", "[1; 2]"],
+            "submatrix" => vec!["[1; 2|3; 4]", "1", "2", "1", "2"],
             "mod" | "gcd" | "lcm" | "atan2" => vec!["4", "6"],
             _ => vec![arg; (*lo).max(1)],
         };
