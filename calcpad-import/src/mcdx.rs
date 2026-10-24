@@ -672,7 +672,16 @@ fn inline(n: Node, fmt: &Run, pieces: &mut Vec<Piece>, skipped: &mut Vec<String>
         if c.is_text() {
             let t = c.text().unwrap_or("");
             if !t.is_empty() {
-                push_text(pieces, t, fmt);
+                if fmt.font.as_deref().is_some_and(|f| f.eq_ignore_ascii_case("symbol")) {
+                    // The run is in the symbol font: its letters are Greek ones.
+                    let plain = Run {
+                        font: None,
+                        ..fmt.clone()
+                    };
+                    push_text(pieces, &symbol_font_to_unicode(t), &plain);
+                } else {
+                    push_text(pieces, t, fmt);
+                }
             }
         } else if c.is_element() {
             match c.tag_name().name() {
@@ -690,4 +699,17 @@ fn inline(n: Node, fmt: &Run, pieces: &mut Vec<Piece>, skipped: &mut Vec<String>
             }
         }
     }
+}
+
+/// Text typed in the symbol font, where the letter `S` is the capital sigma, as Unicode.
+fn symbol_font_to_unicode(t: &str) -> String {
+    const UPPER: &str = "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ";
+    const LOWER: &str = "αβχδεφγηιϕκλμνοπθρστυϖωξψζ";
+    t.chars()
+        .map(|c| match c {
+            'A'..='Z' => UPPER.chars().nth((c as u8 - b'A') as usize).unwrap_or(c),
+            'a'..='z' => LOWER.chars().nth((c as u8 - b'a') as usize).unwrap_or(c),
+            c => c,
+        })
+        .collect()
 }

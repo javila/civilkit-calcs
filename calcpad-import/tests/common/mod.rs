@@ -9,7 +9,7 @@
 pub fn legacy(code: &str) -> String {
     let lines: Vec<&str> = code.lines().collect();
     let mut skip = vec![false; lines.len()];
-    let is_eq = |l: &str| l.trim_start().starts_with("'<div class=\"imp-eq\">");
+    let is_eq = |l: &str| l.trim_start().starts_with("'<div class=\"imp-eq\"");
     for i in 0..lines.len() {
         let t = lines[i].trim();
         if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") || t.starts_with("#settings") {

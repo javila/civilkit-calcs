@@ -21,7 +21,11 @@ fn a_vector_is_a_bracketed_table_with_the_unit_once() {
         h.contains("<mo>[</mo><mtable><mtr><mtd><mn>1.5</mn></mtd><mtd><mn>2.5</mn></mtd><mtd><mo>\u{2212}</mo><mn>3</mn></mtd></mtr></mtable><mo>]</mo>"),
         "{h}"
     );
-    assert_eq!(h.matches("<mi mathvariant=\"normal\">kN</mi>").count(), 1, "{h}");
+    assert_eq!(
+        h.matches("<mi mathvariant=\"normal\" class=\"ru\">kN</mi>").count(),
+        1,
+        "{h}"
+    );
 }
 
 #[test]
@@ -29,7 +33,22 @@ fn a_scalar_has_its_number_and_a_compound_unit() {
     let h = render("#settings {\"valMathml\": true}\n#round 3\ng = 1234.5678*kN*m/s^2\n#val\ng\n#end val\n");
     assert!(h.contains("<mn>1234.568</mn>"), "{h}");
     assert!(
-        h.contains("<mo>\u{22C5}</mo>") && h.contains("<msup><mi mathvariant=\"normal\">s</mi><mn>2</mn></msup>"),
+        h.contains("<mfrac><mrow>")
+            && h.contains("<mo>\u{22C5}</mo>")
+            && h.contains("<msup><mi mathvariant=\"normal\" class=\"ru\">s</mi><mn>2</mn></msup></mrow></mfrac>"),
+        "{h}"
+    );
+}
+
+#[test]
+fn a_fractional_power_of_a_unit_is_a_stacked_fraction() {
+    let h = render("#settings {\"valMathml\": true}\n#round 3\nc = 0.035*s/ft^0.75\n#val\nc\n#end val\n");
+    assert!(
+        h.contains("<msup><mi mathvariant=\"normal\" class=\"ru\">ft</mi><mfrac><mn>3</mn><mn>4</mn></mfrac></msup>"),
+        "{h}"
+    );
+    assert!(
+        h.contains("<mfrac><mrow><mi mathvariant=\"normal\" class=\"ru\">s</mi></mrow>"),
         "{h}"
     );
 }

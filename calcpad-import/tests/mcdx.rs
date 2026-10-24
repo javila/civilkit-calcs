@@ -442,6 +442,20 @@ fn text_region(id: u32, top: f64, rel: &str, nested: &str) -> String {
 }
 
 #[test]
+fn text_in_the_symbol_font_is_greek() {
+    let xaml = xaml_package(
+        r#"<Paragraph><Run>Since </Run><Run FontFamily="Symbol">S </Run><Run>F</Run><Run FontFamily="Symbol">a</Run></Paragraph>"#,
+    );
+    let res = Pkg::new(&text_region(1, 0.0, "Rt1", ""))
+        .rel("Rt1", "flowDocument", "/ws/xaml/FlowDocument1.XamlPackage")
+        .part(part("ws/xaml/FlowDocument1.XamlPackage", xaml))
+        .import();
+    let l = res.calcpad.lines().find(|x| x.contains("Since")).expect("line");
+    assert!(l.contains("\u{3A3}") && l.contains("\u{3B1}"), "{l}");
+    assert!(!l.contains("Symbol"), "{l}");
+}
+
+#[test]
 fn text_region_reads_font_size_colour_and_alignment() {
     // 16 px is 12 pt; the colour is #AARRGGBB.
     let xaml = xaml_package(

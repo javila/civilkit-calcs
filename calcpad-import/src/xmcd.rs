@@ -398,7 +398,10 @@ fn walk_inline<'a, 'i>(
     for c in n.children() {
         if c.is_text() {
             let t = c.text().unwrap_or("");
-            if !t.is_empty() {
+            // Indentation between formatting elements (a line break and tabs only) is not text:
+            // `<b>e</b>` newline `<b>xternal</b>` is one word.
+            let indentation = t.contains('\n') && t.trim().is_empty();
+            if !t.is_empty() && !indentation {
                 push_text(pieces, t, fmt);
             }
         } else if c.is_element() && ns_kind(c) == "worksheet" {

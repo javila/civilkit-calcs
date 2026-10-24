@@ -968,9 +968,76 @@ impl Variable {
 
 /// A unit's text (`kip·ft`, `m/s^2`, `m²`) as upright MathML identifiers with the powers as superscripts.
 fn units_to_mathml(text: &str) -> String {
+    // A quotient of units is a stacked fraction, as a result is written on paper.
+    let mut depth = 0i32;
+    let mut slash = None;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '/' | '\u{2215}' if depth == 0 => {
+                slash = Some((i, c.len_utf8()));
+                break;
+            }
+            _ => {}
+        }
+    }
+    if let Some((i, w)) = slash {
+        let strip = |t: &str| -> String {
+            let t = t.trim();
+            match t.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+                Some(inner) if !inner.contains('(') => inner.to_string(),
+                _ => t.to_string(),
+            }
+        };
+        let num = strip(&text[..i]);
+        let den = strip(&text[i + w..]);
+        let num_ml = if num.is_empty() {
+            "<mn>1</mn>".to_string()
+        } else {
+            units_inline(&num)
+        };
+        return format!(
+            "<mfrac><mrow>{num_ml}</mrow><mrow>{}</mrow></mfrac>",
+            units_inline(&den)
+        );
+    }
+    units_inline(text)
+}
+
+/// A power written as a decimal that is a simple fraction (`0.75`) is shown as one (`3/4`).
+fn exponent_ml(p: &str) -> String {
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;");
+    if let Some((n, d)) = p.split_once('/') {
+        if n.trim_start_matches('-').parse::<u32>().is_ok() && d.parse::<u32>().is_ok() {
+            let sign = if n.starts_with('-') { "<mo>\u{2212}</mo>" } else { "" };
+            return format!(
+                "{sign}<mfrac><mn>{}</mn><mn>{}</mn></mfrac>",
+                n.trim_start_matches('-'),
+                d
+            );
+        }
+    }
+    if let Ok(x) = p.parse::<f64>() {
+        let (neg, a) = (x < 0.0, x.abs());
+        for d in [2.0, 3.0, 4.0, 8.0] {
+            let n = (a * d).round();
+            if (a * d - n).abs() < 1e-9 && n.rem_euclid(d) != 0.0 {
+                let sign = if neg { "<mo>\u{2212}</mo>" } else { "" };
+                return format!("{sign}<mfrac><mn>{}</mn><mn>{}</mn></mfrac>", n as i64, d as i64);
+            }
+        }
+    }
+    format!("<mn>{}</mn>", esc(p))
+}
+
+fn units_inline(text: &str) -> String {
     fn flush(name: &mut String, out: &mut String) {
         if !name.is_empty() {
-            out.push_str(&format!("<mi mathvariant=\"normal\">{}</mi>", escape_ml(name)));
+            out.push_str(&format!(
+                "<mi mathvariant=\"normal\" class=\"ru\">{}</mi>",
+                escape_ml(name)
+            ));
             name.clear();
         }
     }
@@ -995,16 +1062,30 @@ fn units_to_mathml(text: &str) -> String {
         if c == '^' {
             let mut j = i + 1;
             let mut p = String::new();
-            while j < chars.len() && (chars[j].is_ascii_digit() || chars[j] == '-' || chars[j] == '.') {
+            // `^2`, `^-1`, `^0.75` or `^(3/4)`.
+            let bracketed = chars.get(j) == Some(&'(');
+            if bracketed {
+                j += 1;
+            }
+            while j < chars.len()
+                && (chars[j].is_ascii_digit() || chars[j] == '-' || chars[j] == '.' || (bracketed && chars[j] == '/'))
+            {
                 p.push(chars[j]);
                 j += 1;
+            }
+            if bracketed {
+                if chars.get(j) == Some(&')') {
+                    j += 1;
+                } else {
+                    p.clear();
+                }
             }
             if !p.is_empty() && !name.is_empty() {
                 let base = std::mem::take(&mut name);
                 out.push_str(&format!(
-                    "<msup><mi mathvariant=\"normal\">{}</mi><mn>{}</mn></msup>",
+                    "<msup><mi mathvariant=\"normal\" class=\"ru\">{}</mi>{}</msup>",
                     escape_ml(&base),
-                    escape_ml(&p)
+                    exponent_ml(&p)
                 ));
                 i = j;
                 continue;
@@ -1013,7 +1094,7 @@ fn units_to_mathml(text: &str) -> String {
         } else if let Some(p) = sup.filter(|_| !name.is_empty()) {
             let base = std::mem::take(&mut name);
             out.push_str(&format!(
-                "<msup><mi mathvariant=\"normal\">{}</mi><mn>{}</mn></msup>",
+                "<msup><mi mathvariant=\"normal\" class=\"ru\">{}</mi><mn>{}</mn></msup>",
                 escape_ml(&base),
                 p
             ));

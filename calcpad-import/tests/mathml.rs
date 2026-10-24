@@ -181,9 +181,15 @@ fn a_vector_arrow_covers_the_whole_product_and_a_transpose_is_a_superscript() {
         .lines()
         .rfind(|l| l.contains("<mover") || l.contains("<mtable>"))
         .unwrap();
-    assert_eq!(count(last, "<mi mathvariant=\"normal\">kip</mi>"), 1, "{last}");
+    assert_eq!(
+        count(last, "<mi mathvariant=\"normal\" class=\"ru\">kip</mi>"),
+        1,
+        "{last}"
+    );
     assert!(
-        html.contains("</mtable><mo>]</mo><mspace width=\"0.25em\"></mspace><mi mathvariant=\"normal\">kip</mi>"),
+        html.contains(
+            "</mtable><mo>]</mo><mspace width=\"0.25em\"></mspace><mi mathvariant=\"normal\" class=\"ru\">kip</mi>"
+        ),
         "{html}"
     );
 }
@@ -391,4 +397,136 @@ fn an_imported_sheet_asks_the_editor_not_to_report_unused_names() {
         head.iter().any(|l| l.contains("\"LintIgnore\": [\"CPD-3312\"]")),
         "{head:?}"
     );
+}
+
+/// A worksheet whose regions have the given geometry: `(left, top, align-y, width, height, kind, inner)`.
+fn placed(regions: &[(f64, f64, f64, f64, f64, &str)]) -> ImportResult {
+    let body: String = regions
+        .iter()
+        .enumerate()
+        .map(|(i, (left, top, ay, w, h, inner))| {
+            format!(
+                r#"<region region-id="{}" left="{left}" top="{top}" width="{w}" height="{h}" align-y="{ay}">{inner}</region>"#,
+                i + 1
+            )
+        })
+        .collect();
+    let sheet = format!(
+        r#"<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>{body}</regions></worksheet>"#
+    );
+    import_xmcd_opts(&sheet, &ImportOptions::default())
+}
+
+fn text_inner(s: &str) -> String {
+    format!(r#"<text><p style="Normal">{s}</p></text>"#)
+}
+
+#[test]
+fn a_number_before_its_unit_has_no_dot_and_every_unit_is_one_class() {
+    let res = convert(&[define("L", &app("mult", &[r("50"), n("ft")]))]);
+    let line = res.calcpad.lines().rfind(|l| l.contains("<math")).unwrap();
+    assert!(!line.contains("class=\"dot\""), "{line}");
+    assert!(
+        line.contains("<mn>50</mn><mspace width=\"0.2em\"></mspace><mi mathvariant=\"normal\" class=\"ru\">ft</mi>"),
+        "{line}"
+    );
+    // A product of two names keeps its dot.
+    let res = convert(&[define("a", &r("2")), define("b", &app("mult", &[n("a"), n("a")]))]);
+    assert!(res.calcpad.contains("class=\"dot\""), "{}", res.calcpad);
+}
+
+#[test]
+fn the_vector_arrow_is_drawn_by_the_page_across_the_whole_operand() {
+    let vec_op = |x: &str| format!("<ml:apply><ml:vectorize/>{x}</ml:apply>");
+    let res = convert(&[
+        define("c", &mat(3, 1, &["1", "2", "3"])),
+        define("F", &vec_op(&app("mult", &[n("c"), n("c")]))),
+    ]);
+    let line = res.calcpad.lines().find(|l| l.contains("<mover")).expect("an arrow");
+    assert!(line.contains("<mover class=\"va\""), "{line}");
+    // The arrow is a line and a head painted by the stylesheet; the character stays for the export.
+    assert!(res.calcpad.contains("mover.va{background:linear-gradient"), "no style");
+    assert!(line.contains("\u{2192}"), "{line}");
+    assert!(!res.calcpad.contains("mover.va{font-weight"), "");
+}
+
+#[test]
+fn a_value_beside_a_label_that_wraps_shares_its_row_and_keeps_its_offset() {
+    // The label is two lines tall (top 100, height 40, baseline of its first line at 110); the value
+    // sits to its right on the second line (baseline 130).
+    let res = placed(&[
+        (
+            6.0,
+            100.0,
+            110.0,
+            120.0,
+            40.0,
+            &text_inner("A label that wraps onto two lines"),
+        ),
+        (
+            200.0,
+            120.0,
+            130.0,
+            50.0,
+            18.0,
+            &format!("<math>{}</math>", define("a", &r("2"))),
+        ),
+    ]);
+    assert!(res.calcpad.contains("class=\"imported-row\""), "{}", res.calcpad);
+    assert!(res.calcpad.contains("align-items:last baseline"), "{}", res.calcpad);
+    // 200 - (6 + 120) = 74 units from the end of the label, less the row's own gap.
+    assert!(res.calcpad.contains("margin-left:50pt"), "{}", res.calcpad);
+}
+
+#[test]
+fn an_equation_keeps_its_indent_from_the_page_margin() {
+    let res = placed(&[
+        (6.0, 10.0, 20.0, 100.0, 14.0, &text_inner("Heading line")),
+        (
+            30.0,
+            40.0,
+            50.0,
+            60.0,
+            18.0,
+            &format!("<math>{}</math>", define("a", &r("2"))),
+        ),
+    ]);
+    assert!(
+        res.calcpad
+            .contains("<div class=\"imp-eq\" style=\"margin-left:24pt\">"),
+        "{}",
+        res.calcpad
+    );
+}
+
+#[test]
+fn an_expression_of_a_range_variable_is_typeset_with_its_column_of_values() {
+    // i := 1..3; w := [4 5 6]^T; w_i evaluated: the author's left side and a column of values.
+    let res = convert(&[
+        define("i", &range("1", "3")),
+        define("w", &mat(3, 1, &["4", "5", "6"])),
+        eval(&indexed(&n("w"), &n("i"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let (html, errors) = run(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert!(
+        html.contains("<msub><mi>w</mi><mrow><mi>i</mi></mrow></msub><mo>=</mo>"),
+        "{html}"
+    );
+    assert!(
+        html.contains("<mtd><mn>4</mn></mtd></mtr><mtr><mtd><mn>5</mn></mtd></mtr><mtr><mtd><mn>6</mn></mtd>"),
+        "{html}"
+    );
+    assert!(!html.contains("tbl_"), "{html}");
+}
+
+#[test]
+fn a_function_the_tool_provides_by_another_name_is_upright() {
+    let res = convert(&[
+        define("h", &mat(2, 1, &["1", "2"])),
+        define("x", &app_call(&n("SIUnitsOf"), &n("h"))),
+    ]);
+    let line = res.calcpad.lines().rfind(|l| l.contains("<math")).expect("a line");
+    assert!(line.contains("<mi mathvariant=\"normal\">SIUnitsOf</mi>"), "{line}");
 }

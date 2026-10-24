@@ -919,6 +919,20 @@ fn math_nested_in_text_is_flattened_and_ordered_by_position() {
     assert_eq!(res.report.regions_total(), 3);
 }
 
+#[test]
+fn indentation_between_runs_of_one_word_is_not_a_space() {
+    let regs = text(
+        1,
+        0.0,
+        "<p style=\"Normal\">\n\t<b>exte</b>\n\t<b>rn</b>\n\t<b>al</b> load\n</p>",
+    );
+    let res = import_xmcd(&sheet(&regs));
+    let l = lines(&res);
+    assert_eq!(l.len(), 1, "{l:?}");
+    assert!(l[0].contains("external"), "{}", l[0]);
+    assert!(!l[0].contains("exte rn"), "{}", l[0]);
+}
+
 // ---- reading order ----------------------------------------------------------------------------------------------
 
 fn mk(id: &str, left: f64, top: f64, baseline: Option<f64>) -> Region {

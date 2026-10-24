@@ -156,7 +156,11 @@ impl MathMl<'_> {
         let as_function = kind == Kind::Func;
         let shown = (self.original)(&n.base).unwrap_or_else(|| n.base.clone());
         let (stem, primes) = split_primes(&shown);
-        let mut base = ident(&stem, unit || as_function);
+        let mut base = if unit {
+            format!("<mi mathvariant=\"normal\" class=\"ru\">{}</mi>", esc(&stem))
+        } else {
+            ident(&stem, as_function)
+        };
         if as_function && (stem == "if" || stem == "otherwise") {
             base = "<mi mathvariant=\"normal\" class=\"kw\">".to_string() + &esc(&stem) + "</mi>";
         }
@@ -178,7 +182,7 @@ impl MathMl<'_> {
         }
         let flat = crate::tables::normalise_name(&n.flat());
         let builtin = n.sub.is_none()
-            && (matches!(n.base.as_str(), "if" | "otherwise")
+            && (matches!(n.base.as_str(), "if" | "otherwise" | "SIUnitsOf")
                 || crate::tables::lookup_function(&flat).is_some()
                 || crate::tables::is_builtin_missing(&flat)
                 || crate::tables::is_solve_name(&flat));
@@ -347,6 +351,17 @@ impl MathMl<'_> {
         format!("<msub>{}{subs}</msub>", self.name(&plain, Kind::Var))
     }
 
+    /// An expression made only of units (and the numbers of their powers).
+    fn is_unit_expr(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Name(n) => (self.is_unit)(n),
+            Expr::Num(_) => false,
+            Expr::Bin(BinOp::Mul | BinOp::Div, a, b) => self.is_unit_expr(a) && self.is_unit_expr(b),
+            Expr::Bin(BinOp::Pow, a, b) => self.is_unit_expr(a) && matches!(**b, Expr::Num(_) | Expr::Un(UnOp::Neg, _)),
+            _ => false,
+        }
+    }
+
     fn group_unless(&self, m: M, min: u8) -> String {
         if m.prec >= min && !(m.frac && min >= P_POW) {
             m.s
@@ -381,8 +396,10 @@ impl MathMl<'_> {
                 atom(format!("<msup>{base}<mi mathvariant=\"normal\">T</mi></msup>"))
             }
             // The arrow spans the whole operand, and the operand needs no brackets for it.
+            // The page draws the arrow itself (class `va`: a line and a head across the whole operand,
+            // which no font stretches reliably); the `mo` stays for the Office Math export.
             UnOp::Vectorize => atom(format!(
-                "<mover accent=\"true\"><mpadded height=\"+0.3em\"><mrow>{}</mrow></mpadded><mo stretchy=\"true\">\u{2192}</mo></mover>",
+                "<mover class=\"va\" accent=\"true\"><mrow>{}</mrow><mo stretchy=\"true\">\u{2192}</mo></mover>",
                 x.s
             )),
         })
@@ -406,6 +423,18 @@ impl MathMl<'_> {
             });
         }
         let (x, y) = (self.expr(a)?, self.expr(b)?);
+        // A number written before its unit is read `100 ft`: no multiplication dot.
+        if op == BinOp::Mul && matches!(a, Expr::Num(_)) && self.is_unit_expr(b) {
+            return Some(M {
+                s: format!(
+                    "{}<mspace width=\"0.2em\"></mspace>{}",
+                    x.s,
+                    self.group_unless(y, P_MUL + 1)
+                ),
+                prec: P_MUL,
+                frac: false,
+            });
+        }
         let (sym, prec, class) = match op {
             BinOp::Add => ("+", P_ADD, ""),
             BinOp::Sub => ("\u{2212}", P_ADD, ""),

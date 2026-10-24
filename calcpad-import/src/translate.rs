@@ -300,6 +300,46 @@ pub fn reading_rows(regions: Vec<Region>) -> Vec<Vec<Region>> {
         rows_idx.push(row);
         i = j;
     }
+    // A value written beside a label that wraps (the label's baseline is its first line, the
+    // value sits on a later one) is on the label's row: it lies to the right of the whole row
+    // and its baseline falls inside the label's height.
+    let mut k = 0;
+    while k + 1 < rows_idx.len() {
+        let text = rows_idx[k]
+            .iter()
+            .filter(|&&a| matches!(regions[a].kind, RegionKind::Text(_)) && regions[a].width > 0.0)
+            .max_by(|&&a, &&b| {
+                regions[a]
+                    .left
+                    .partial_cmp(&regions[b].left)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied();
+        let merge = text.is_some_and(|t| {
+            let t = &regions[t];
+            let right_of_row = rows_idx[k]
+                .iter()
+                .map(|&a| regions[a].left + regions[a].width)
+                .fold(f64::MIN, f64::max);
+            rows_idx[k + 1].iter().all(|&b| {
+                let r = &regions[b];
+                !matches!(r.kind, RegionKind::Text(_)) && r.left >= right_of_row - 1.0 && key(r) <= t.top + t.height
+            })
+        });
+        if merge {
+            let next = rows_idx.remove(k + 1);
+            rows_idx[k].extend(next);
+            rows_idx[k].sort_by(|&a, &b| {
+                regions[a]
+                    .left
+                    .partial_cmp(&regions[b].left)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.cmp(&b))
+            });
+        } else {
+            k += 1;
+        }
+    }
     let mut old: Vec<Option<Region>> = regions.into_iter().map(Some).collect();
     rows_idx
         .into_iter()
@@ -1532,6 +1572,8 @@ impl Tr {
                     .all(|w| w[0].width > 0.0 && w[1].left >= w[0].left + w[0].width - 1.0)
             })
             .collect();
+        let page_left = rows.iter().flatten().map(|r| r.left).fold(f64::INFINITY, f64::min);
+        let page_left = if page_left.is_finite() { page_left } else { 0.0 };
         let shown = |row: &Vec<Cell>| row.iter().filter(|c| c.visible()).count();
         let text_pair = |k: usize| {
             let row = &done[k];
@@ -1563,19 +1605,38 @@ impl Tr {
                     self.lines.extend(c.lines.iter().cloned());
                 }
                 self.lines.push(
-                    "'<div class=\"imported-row\" style=\"display:flex;flex-wrap:wrap;gap:0 2em;align-items:baseline\">"
+                    "'<div class=\"imported-row\" style=\"display:flex;flex-wrap:wrap;gap:0 2em;align-items:baseline;align-items:last baseline\">"
                         .to_string(),
                 );
-                for c in done[i].iter().filter(|c| c.visible()) {
-                    self.lines.push("'<div>".to_string());
+                // Each block sits where the source puts it: the gap to the block before it, when the
+                // file gives widths.
+                let mut prev_right: Option<f64> = None;
+                for (c, r) in done[i].iter().zip(rows[i].iter()).filter(|(c, _)| c.visible()) {
+                    let style = match prev_right {
+                        Some(pr) if r.left - pr > 16.0 => {
+                            format!(" style=\"margin-left:{:.0}pt\"", (r.left - pr - 24.0).clamp(0.0, 600.0))
+                        }
+                        _ => String::new(),
+                    };
+                    prev_right = (r.width > 0.0).then_some(r.left + r.width);
+                    self.lines.push(format!("'<div{style}>"));
                     self.lines.extend(c.lines.iter().cloned());
                     self.lines.push("'</div>".to_string());
                 }
                 self.lines.push("'</div>".to_string());
                 i += 1;
             } else {
-                for c in &done[i] {
-                    self.lines.extend(c.lines.iter().cloned());
+                for (c, r) in done[i].iter().zip(rows[i].iter()) {
+                    // An equation keeps the indent the source gives it from the page margin.
+                    let indent = r.left - page_left;
+                    let typeset = c.lines.iter().any(|l| l.contains("class=\"imp-eq\""));
+                    if matches!(r.kind, RegionKind::Math(_)) && typeset && indent >= 3.0 {
+                        let with = format!("class=\"imp-eq\" style=\"margin-left:{indent:.0}pt\"");
+                        self.lines
+                            .extend(c.lines.iter().map(|l| l.replace("class=\"imp-eq\"", &with)));
+                    } else {
+                        self.lines.extend(c.lines.iter().cloned());
+                    }
                 }
                 i += 1;
             }
@@ -2694,6 +2755,20 @@ impl Tr {
             format!("0.{}", "#".repeat(places as usize))
         };
         let mut scroll = false;
+        // An expression of a range variable: the loop that collects the values stays out of sight,
+        // and the author's left side is shown with the collected column as its value.
+        if let Stmt::Eval { expr, .. } = &m.stmt {
+            if self.table_range(expr).is_some() {
+                if let Some((hide, last)) = line.rsplit_once('\n').filter(|(h, _)| h.ends_with("#end hide")) {
+                    if let Some(head) = self.typeset_eval_head(expr) {
+                        self.uses_val_ml = true;
+                        return format!(
+                            "{hide}\n#round {places}\n'<div class=\"imp-eq\"><math class=\"imp-m\">{head}\n#val\n{last}\n#end val\n'</math></div>\n#round 12"
+                        );
+                    }
+                }
+            }
+        }
         if let Stmt::Eval { expr, unit } = &m.stmt {
             let shown = self.display_eval(expr, unit.as_ref());
             // The author's left side typeset, and the engine's own value after it (with its unit once).
@@ -2794,7 +2869,7 @@ impl Tr {
 
     /// The left side of an evaluation (`expr =`) as MathML.
     fn typeset_eval_head(&self, expr: &Expr) -> Option<String> {
-        if !self.opts.mathml || self.table_range(expr).is_some() {
+        if !self.opts.mathml {
             return None;
         }
         let is_unit = |n: &Name| self.is_unit_name(n);
@@ -3521,7 +3596,13 @@ fn style_block(colors: &std::collections::BTreeSet<String>, maths: bool) -> Opti
         css.push_str(
             ".vec{display:none}b>var{font-weight:normal}sup>small.nth:first-child{display:none}.imp-scroll{overflow-x:auto;white-space:nowrap}\
 .imp-eq{overflow-x:auto;padding:.2em 0;margin:.3em 0}.imp-m{font-size:1.15em;math-style:normal;font-family:Cambria Math,STIX Two Math,Latin Modern Math,Noto Sans Math,math}\
-.imp-m mi.v{font-style:italic}.imp-m .kw,.imp-m .dot,.imp-m .beq{font-weight:bold}",
+.imp-m mi.v{font-style:italic}\
+.imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-family:STIX Two Text,Times New Roman,Times,serif}\
+.imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-weight:bold}.imp-m .ru{font-style:italic}\
+.imp-m .ru{color:rgb(28,61,153)}.dark-theme .imp-m .ru{color:rgb(143,176,255)}\
+.imp-m mover.va>mo{visibility:hidden}.imp-m mover.va{background:linear-gradient(currentColor,currentColor) 0 .2em/100% 1.3px no-repeat,\
+linear-gradient(to top right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .08em/.22em .12em no-repeat,\
+linear-gradient(to bottom right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .2em/.22em .12em no-repeat}",
         );
     }
     for c in colors {
