@@ -690,6 +690,7 @@ impl Tr {
                 }
                 Some(t)
             }
+            Stmt::Bare(e) if matches!(e, Expr::Bin(BinOp::Eq, ..)) => Some(self.expr(e).s.replace(" ≡ ", " = ")),
             Stmt::Bare(e) => Some(self.expr(e).s),
             Stmt::Unsupported { .. } => None,
         };
@@ -1912,6 +1913,18 @@ impl Tr {
                 } else {
                     attempt = Some(text);
                 }
+            }
+            Stmt::Bare(expr) if matches!(expr, Expr::Bin(BinOp::Eq, ..)) => {
+                // An equation on its own line is a constraint (a solve block's equation, or a check):
+                // it is shown with its real names, not reported name by name.
+                shape = "expression";
+                self.issue(Code::ConstraintEquation, None);
+                let saved = std::mem::take(&mut self.cur);
+                self.readable = true;
+                let text = self.expr(expr).s.replace(" ≡ ", " = ");
+                self.readable = false;
+                self.cur = saved;
+                attempt = Some(text);
             }
             Stmt::Bare(expr) => {
                 shape = "expression";

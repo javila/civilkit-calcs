@@ -1093,3 +1093,27 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
         res.calcpad
     );
 }
+
+// ---- constraint equations ---------------------------------------------------------------------------------------
+
+#[test]
+fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
+    // f_B = c*L + d with c and d unknown (a solve block would find them).
+    let eq = app("equal", &[n("fB"), plus(&times(&n("c"), &n("L")), &n("d"))]);
+    let res = convert(&[
+        define("L", &times(&r("6"), &n("m"))),
+        eq,
+        eval(&app("mult", &[r("2"), r("3")])),
+    ]);
+    let codes: Vec<Code> = res.report.gaps().map(|i| i.code).collect();
+    assert_eq!(codes, vec![Code::ConstraintEquation], "{:?}", res.report.issues);
+    let l = gap_line(&res, "2");
+    assert!(l.contains("constraint-equation"), "{l}");
+    assert!(l.contains("| fB = c*L + d"), "{l}");
+    // The constraint does not stop the sheet: the later region converted.
+    let nums = numbers(&res.calcpad);
+    assert_close(*nums.last().unwrap(), 6.0);
+    // Any other bare expression is still a bare expression.
+    let res = convert(&[eval(&n("zz"))]);
+    assert!(!res.report.gaps().any(|i| i.code == Code::ConstraintEquation));
+}
