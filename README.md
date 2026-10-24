@@ -65,8 +65,11 @@ with `civilkit-calcs-engine = "0.1"` in `Cargo.toml`. The crates have their own 
 * **Import worksheet:** `File > Import worksheet...`, the Document tab's Import button, or dropping a `.xmcd` or `.mcdx` file on
   the page converts a worksheet of the spreadsheet-like format of another calculation tool into a new unsaved
   worksheet, locally in the page (its own WebAssembly module, loaded on first use). Text, definitions,
-  evaluations, functions, matrices, units and pictures convert; what does not is shown as a static picture of the
-  original when the file has one, and counted in a summary. See [docs/worksheet-import.md](docs/worksheet-import.md).
+  evaluations, functions, matrices, units, sums, integrals, simple programs and pictures convert; what does not is
+  shown as a typeset not-calculated equation or a static picture of the original, and counted in a summary. See [docs/worksheet-import.md](docs/worksheet-import.md).
+* **Installable and offline:** a web app manifest and a service worker that caches the whole build (about 19 MB), so
+  the page can be installed on a phone or desktop and opens and calculates without a connection. Plotly charts need the
+  CDN script loaded once while online.
 * **Samples browser:** 101 worksheets, all copied from CalcpadCE's examples (structural and maths),
   with groups, search and a preview. We rewrote their deprecated `? {default}` input fields as
   `#UI` declarations, and kept a conversion only where the engine renders it like the original.
@@ -111,9 +114,9 @@ the browser's print dialog, so it carries the browser's own header and footer.
   WebAssembly binding. The snippet data is `calcpad-highlighter/src/snippets/snippets.json`.
 * `calcpad-wasm`: the engine's WebAssembly binding (wasm-bindgen).
 * `calcpad-docx` and `calcpad-docx-wasm`: the Word and Excel writers and their binding.
-* `calcpad-import` (package `civilkit-calcs-import`): a spike that translates the simple subset of
-  a foreign worksheet format (`.xmcd`, `.mcdx`) into Calcpad text, with a report of what did not convert.
-  See [Importing foreign worksheets](#importing-foreign-worksheets-spike).
+* `calcpad-import` (package `civilkit-calcs-import`, not published): translates a foreign worksheet format
+  (`.xmcd`, `.mcdx`) into Calcpad text, with a report of what did not convert.
+  See [Importing foreign worksheets](#importing-foreign-worksheets).
 * `calcpad-sheet` and `calcpad-sheet-wasm`: the sheet syntax compiler and its binding.
 * `web/`: the web app. `web/calcpad-frontend` is the shared frontend, `web/calcpad-web` the page
   (Vue, Monaco), `web/e2e` the browser checks.
@@ -121,16 +124,18 @@ the browser's print dialog, so it carries the browser's own header and footer.
 * `docs/`: [DEPLOY.md](docs/DEPLOY.md), the model-bindings specification and
   [the foreign worksheet importer](docs/worksheet-import.md).
 
-## Importing foreign worksheets (spike)
+## Importing foreign worksheets
 
 `calcpad-import` reads the `.xmcd` and `.mcdx` files of the spreadsheet-like worksheet format of a commercial
 calculation tool and writes Calcpad worksheet text for this engine, so existing sheets can be brought
-over. It evaluates nothing itself. Text, definitions, evaluations, functions, vectors and matrices,
-indexing (with the array origin shifted to Calcpad's 1), units, the common built-in functions and picture regions
-(metafile to SVG) convert.
-Range variables, programs, solve blocks, symbolic evaluation, plots, pictures and embedded objects do
-not: each becomes a static picture of the original when the file has one, else a visible placeholder line
-carrying its region id, and the report counts them by code.
+over. It evaluates nothing itself; the engine does. Text (with its fonts, sizes and colours), definitions,
+evaluations, functions, vectors and matrices, indexing (with the array origin shifted to Calcpad's 1), units,
+sums, products, integrals, range variables, programs made of loops and conditions, the common built-in
+functions, input-component values and pictures convert. The author's equations are shown as they were written
+(stacked fractions, sums with bounds, subscripts, a transpose superscript) and computed out of sight, and regions
+that share a row keep their side by side layout. What does not convert (plots, add-in libraries, some programs,
+solve blocks, symbolic evaluation) is shown as a typeset, not-calculated equation or a static picture of the
+original, and the report counts it by code.
 The `.mcdx` container (a zip) is read by its own front end onto the same translator. Details, the mapping tables and how to run the batch
 runner over a folder: [docs/worksheet-import.md](docs/worksheet-import.md).
 
