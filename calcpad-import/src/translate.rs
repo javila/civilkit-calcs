@@ -620,6 +620,9 @@ struct Tr {
     /// Arrays made by assigning one element at a literal index (name, engine index of that element).
     elem_built: HashMap<String, usize>,
     prog_n: usize,
+    /// The file's named paragraph styles, and the colours the text used.
+    text_styles: HashMap<String, TextStyle>,
+    colors: std::collections::BTreeSet<String>,
     /// Assignments to temporaries that an expression needs before the line it is on (the engine
     /// cannot index the result of a call: `t = f(x)` then `t.(1; 2)`).
     hoisted: Vec<String>,
@@ -1335,6 +1338,46 @@ impl Tr {
                 self.lines.iter().any(|l| !l.starts_with("'<!--"))
             }
         }
+        // A picture with text to its right that spans the picture's height is one block: the picture
+        // on the left and those texts stacked beside it, whatever baselines the texts sit on.
+        let mut beside: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
+        let mut taken: HashSet<(usize, usize)> = HashSet::new();
+        for (ri, row) in rows.iter().enumerate() {
+            for (ci, p) in row.iter().enumerate() {
+                if !matches!(p.kind, RegionKind::Picture(_))
+                    || p.width <= 0.0
+                    || p.height <= 0.0
+                    || taken.contains(&(ri, ci))
+                {
+                    continue;
+                }
+                let bottom = p.top + p.height;
+                let mut stack = Vec::new();
+                for (rj, other) in rows.iter().enumerate().skip(ri) {
+                    if other
+                        .iter()
+                        .all(|q| q.baseline.unwrap_or(q.top) > bottom + ROW_TOLERANCE)
+                    {
+                        break;
+                    }
+                    for (cj, q) in other.iter().enumerate() {
+                        if (rj, cj) != (ri, ci)
+                            && matches!(q.kind, RegionKind::Text(_))
+                            && q.left >= p.left + p.width - 1.0
+                            && q.top < bottom
+                            && q.top + q.height > p.top
+                            && !taken.contains(&(rj, cj))
+                        {
+                            stack.push((rj, cj));
+                        }
+                    }
+                }
+                if !stack.is_empty() {
+                    taken.extend(stack.iter().copied());
+                    beside.insert((ri, ci), stack);
+                }
+            }
+        }
         let mut done: Vec<Vec<Cell>> = Vec::new();
         for row in rows {
             let mut cells = Vec::new();
@@ -1348,6 +1391,21 @@ impl Tr {
                 });
             }
             done.push(cells);
+        }
+        for (&(ri, ci), stack) in &beside {
+            let mut block = vec![
+                "'<div class=\"imported-side\" style=\"display:flex;gap:1em;align-items:flex-start\">".to_string(),
+                "'<div style=\"flex:none\">".to_string(),
+            ];
+            block.extend(done[ri][ci].lines.iter().cloned());
+            block.push("'</div>".to_string());
+            block.push("'<div>".to_string());
+            for &(rj, cj) in stack {
+                block.extend(std::mem::take(&mut done[rj][cj].lines));
+            }
+            block.push("'</div>".to_string());
+            block.push("'</div>".to_string());
+            done[ri][ci].lines = block;
         }
         // Side by side only when the regions of the row do not overlap across (a region nested in a
         // text region sits inside it, not beside it).
@@ -2391,7 +2449,7 @@ impl Tr {
             RegionKind::PageBreak => self.report.page_breaks += 1,
             RegionKind::Text(paras) => {
                 for p in paras {
-                    if let Some(l) = text_line(p) {
+                    if let Some(l) = text_line(p, &self.text_styles, &mut self.colors) {
                         self.lines.push(l);
                     }
                 }
@@ -2995,8 +3053,141 @@ impl Tr {
     }
 }
 
-/// One output line for a paragraph, or `None` if it holds no text.
-fn text_line(p: &Paragraph) -> Option<String> {
+/// A font family as a CSS stack: the file's name first, then the metric-compatible and generic fallbacks
+/// a browser on any platform has. Only plain name characters are kept.
+fn font_stack(name: &str) -> String {
+    // No quote characters anywhere: a `'` inside a text line would switch the engine to maths. A family
+    // name is written as the plain run of words CSS allows, and one that is not (a word that starts with
+    // a digit) is left out.
+    let clean: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+        .collect();
+    let clean = if clean
+        .split_whitespace()
+        .all(|w| !w.starts_with(|c: char| c.is_ascii_digit() || c == '-'))
+    {
+        clean.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        String::new()
+    };
+    let clean = clean.as_str();
+    let lower = clean.to_ascii_lowercase();
+    let fallback = match lower.as_str() {
+        "times new roman" | "times" | "cambria" | "georgia" | "garamond" | "book antiqua" | "palatino linotype" => {
+            "Times New Roman,Times,Liberation Serif,serif"
+        }
+        "arial" | "helvetica" | "arial narrow" | "calibri" | "verdana" | "tahoma" | "segoe ui" | "trebuchet ms" => {
+            "Arial,Helvetica,Liberation Sans,sans-serif"
+        }
+        "courier new" | "courier" | "consolas" | "lucida console" => "Courier New,Courier,Liberation Mono,monospace",
+        _ => "sans-serif",
+    };
+    if clean.is_empty() {
+        return fallback.to_string();
+    }
+    let first = clean.to_string();
+    if fallback.split(',').next() == Some(first.as_str()) || fallback.contains(&first) {
+        fallback.to_string()
+    } else {
+        format!("{first},{fallback}")
+    }
+}
+
+fn pt(v: f64) -> String {
+    format!("{}", (v * 100.0).round() / 100.0)
+}
+
+/// `#rrggbb` as hue, saturation and lightness in 0..=1.
+fn to_hsl(hex: &str) -> (f64, f64, f64) {
+    let c = |i: usize| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
+    let (r, g, b) = (c(1), c(3), c(5));
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (mx + mn) / 2.0;
+    if (mx - mn).abs() < 1e-9 {
+        return (0.0, 0.0, l);
+    }
+    let d = mx - mn;
+    let s = if l > 0.5 { d / (2.0 - mx - mn) } else { d / (mx + mn) };
+    let h = if (mx - r).abs() < 1e-9 {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if (mx - g).abs() < 1e-9 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+fn from_hsl(h: f64, s: f64, l: f64) -> String {
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let ch = |t: f64| {
+        let t = t.rem_euclid(1.0);
+        let v = if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        };
+        (v * 255.0).round() as u8
+    };
+    format!("#{:02x}{:02x}{:02x}", ch(h + 1.0 / 3.0), ch(h), ch(h - 1.0 / 3.0))
+}
+
+/// The colour a source colour is shown in on a light page and on a dark one. A dark colour is
+/// lightened on the dark page (keeping its hue) and a very light one is darkened on the light page.
+/// Black, white and greys carry no hue and are left to the app's own text colour (`None`).
+fn theme_colors(hex: &str) -> Option<(String, String)> {
+    let (h, s, l) = to_hsl(hex);
+    if s < 0.1 && (l < 0.2 || l > 0.9) {
+        return None;
+    }
+    let light = if l > 0.85 {
+        from_hsl(h, s, 0.35)
+    } else {
+        hex.to_string()
+    };
+    let dark = if l < 0.65 {
+        from_hsl(h, s.clamp(0.35, 0.6), 0.72)
+    } else {
+        hex.to_string()
+    };
+    Some((light, dark))
+}
+
+/// The class a colour is given; its rules are written once at the top of the output.
+fn color_class(hex: &str, colors: &mut std::collections::BTreeSet<String>) -> Option<String> {
+    theme_colors(hex)?;
+    colors.insert(hex.to_string());
+    Some(format!("imp-c-{}", &hex[1..]))
+}
+
+fn style_block(colors: &std::collections::BTreeSet<String>) -> Option<String> {
+    if colors.is_empty() {
+        return None;
+    }
+    let mut css = String::new();
+    for c in colors {
+        if let Some((light, dark)) = theme_colors(c) {
+            let cls = format!(".imp-c-{}", &c[1..]);
+            css.push_str(&format!("{cls}{{color:{light}}}.dark-theme {cls}{{color:{dark}}}"));
+        }
+    }
+    Some(format!("'<style>{css}</style>"))
+}
+
+/// One output line for a paragraph, or `None` if it holds no text. `styles` are the file's named
+/// paragraph styles; the colours used are collected in `colors`.
+fn text_line(
+    p: &Paragraph,
+    styles: &HashMap<String, TextStyle>,
+    colors: &mut std::collections::BTreeSet<String>,
+) -> Option<String> {
+    let st = styles.get(&p.style).cloned().unwrap_or_default();
     let heading = match p.style.as_str() {
         "Heading 1" => Some(1),
         "Heading 2" => Some(2),
@@ -3034,7 +3225,9 @@ fn text_line(p: &Paragraph) -> Option<String> {
                 match segs.last_mut() {
                     Some(Seg::Text(prev))
                         if (prev.bold, prev.italic, prev.underline, prev.sub, prev.sup)
-                            == (r.bold, r.italic, r.underline, r.sub, r.sup) =>
+                            == (r.bold, r.italic, r.underline, r.sub, r.sup)
+                            && (&prev.font, prev.size.map(f64::to_bits), &prev.color)
+                                == (&r.font, r.size.map(f64::to_bits), &r.color) =>
                     {
                         prev.text.push_str(&r.text);
                     }
@@ -3107,20 +3300,90 @@ fn text_line(p: &Paragraph) -> Option<String> {
                 if r.sup {
                     s = format!("<sup>{}</sup>", s);
                 }
+                // Only what differs from the paragraph's own style gets a span of its own.
+                let mut css = Vec::new();
+                if r.font.is_some() && r.font != st.font {
+                    css.push(format!("font-family:{}", font_stack(r.font.as_deref().unwrap_or(""))));
+                }
+                if r.size.is_some() && r.size != st.size {
+                    css.push(format!("font-size:{}pt", pt(r.size.unwrap_or(0.0))));
+                }
+                let cls = match &r.color {
+                    Some(c) if r.color != st.color => color_class(c, colors),
+                    _ => None,
+                };
+                if !css.is_empty() || cls.is_some() {
+                    let class = cls.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
+                    let style = if css.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" style=\"{}\"", css.join(";"))
+                    };
+                    s = format!("<span{class}{style}>{s}</span>");
+                }
                 html.push_str(&s);
             }
         }
     }
+    // The paragraph's own style: font, size, weight and colour; alignment and margins on a block around it.
+    let mut css = Vec::new();
+    if let Some(f) = &st.font {
+        css.push(format!("font-family:{}", font_stack(f)));
+    }
+    if let Some(z) = st.size {
+        css.push(format!("font-size:{}pt", pt(z)));
+    }
+    if st.bold && heading.is_none() {
+        css.push("font-weight:bold".to_string());
+    }
+    if st.italic && heading.is_none() {
+        css.push("font-style:italic".to_string());
+    }
+    if st.underline {
+        css.push("text-decoration:underline".to_string());
+    }
+    let cls = st.color.as_deref().and_then(|c| color_class(c, colors));
+    let class = cls.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
+    let mut block = Vec::new();
+    match p.align.as_deref().or(st.align.as_deref()) {
+        Some(a) if a != "left" => block.push(format!("text-align:{a}")),
+        _ => {}
+    }
+    if p.margin_left > 0.0 {
+        block.push(format!("padding-left:{}pt", pt(p.margin_left)));
+    }
+    if p.text_indent.abs() > 0.0 {
+        block.push(format!("text-indent:{}pt", pt(p.text_indent)));
+    }
     Some(match heading {
-        Some(n) => format!("'<h{n}>{html}</h{n}>"),
+        Some(n) => {
+            let style = join_style(&css, &block);
+            format!("'<h{n}{class}{style}>{html}</h{n}>")
+        }
         None => {
-            if p.style == "List" {
-                format!("'&bull; {}", html)
+            let inner = if p.style == "List" {
+                format!("&bull; {}", html)
             } else {
-                format!("'{}", html)
+                html
+            };
+            if class.is_empty() && css.is_empty() && block.is_empty() {
+                format!("'{inner}")
+            } else {
+                // An HTML line gets no paragraph of its own from the engine, so it is one here.
+                let style = join_style(&css, &block);
+                format!("'<p{class}{style}>{inner}</p>")
             }
         }
     })
+}
+
+fn join_style(a: &[String], b: &[String]) -> String {
+    let all: Vec<&str> = a.iter().chain(b.iter()).map(String::as_str).collect();
+    if all.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", all.join(";"))
+    }
 }
 
 /// Translates a sheet. See the crate documentation.
@@ -3206,6 +3469,8 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         zero_units: HashMap::new(),
         elem_built: HashMap::new(),
         prog_n: 0,
+        text_styles: std::mem::take(&mut sheet.text_styles),
+        colors: Default::default(),
         hoisted: Vec::new(),
         loop_stack: Vec::new(),
         cond_depth: 0,
@@ -3234,6 +3499,10 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         tr.report.regions_total(),
         GAP_MARKER
     ));
+    if let Some(block) = style_block(&tr.colors) {
+        out.push_str(&block);
+        out.push('\n');
+    }
     if tr.uses_trig {
         out.push_str("#rad\n");
         tr.report.issues.insert(

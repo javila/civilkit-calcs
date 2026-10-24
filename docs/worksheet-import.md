@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,250,623 bytes raw, 515,567 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
+Size of the module: 1,286,579 bytes raw, 524,327 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
 
 ## Use
 
@@ -61,6 +61,27 @@ The report has, per region kind (`text`, `math`, `plot`, `image`, `ole`, `compon
 Page breaks are layout and are not counted. `report.issues` lists every issue with a stable code, a
 short reason, the `region-id` and the source line. `report.ranked_gaps()` ranks the missing features by
 the number of regions they block.
+
+### Text, pictures and layout
+
+- **Text styles.** The named paragraph styles of an `.xmcd` file (font family, size in points, weight, slant, underline, colour,
+  alignment) and the per-run font and colour elements are read. Each styled paragraph is written as `<p style="...">` (a heading
+  style stays `<h1>`/`<h2>`) with the family as a CSS stack (the file's name, then metric-compatible and generic fallbacks, with
+  no quote characters because a `'` inside a text line would switch the engine to maths), the size in `pt`, and a run that differs
+  from its paragraph's style gets a `<span>` of its own. Alignment other than left, the left margin and the first-line indent are
+  kept. A `.mcdx` file carries these on the XAML elements (`FontFamily`, `FontSize` in pixels, `Foreground`, `TextAlignment`,
+  `TextIndent`, `Margin`) and has no named style table here. Maths keeps the app's own styling. The file's alignment is what is
+  written: the source of the seismic sample says `left` everywhere, so the importer does not justify text the original page shows justified.
+- **Colours and the dark page.** A colour becomes a class (`imp-c-rrggbb`) whose rules are written once, in a `<style>` line at the
+  top: the source colour on a light page and, under `.dark-theme`, the same hue lightened to about 70 % lightness with its
+  saturation held between 0.35 and 0.6, so dark red and teal headings stay readable on the dark preview. A very light colour is
+  darkened on the light page. Black, white and greys carry no hue and are left to the app's text colour.
+- **Pictures.** A `<png>` or `<metafile>` written straight into a region is a picture region like any other: it keeps its size and
+  position and carries no caption. The italic "static picture of the original" caption is only for a picture that stands in for
+  something that did not convert (maths, plots, components).
+- **Picture beside text.** A picture with text regions to its right that overlap its vertical extent is one flex block: the picture on the left and
+  those texts stacked beside it in reading order, whatever baselines the texts sit on (a title picture with a chapter line and a
+  title line). Text below the picture is not pulled in.
 
 ### The placeholder rule
 

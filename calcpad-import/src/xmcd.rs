@@ -195,10 +195,42 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
             collect_region(&ctx, r, 0, &mut regions);
         }
     }
+    let mut text_styles = HashMap::new();
+    for n in root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "textStyle")
+    {
+        let Some(name) = n.attribute("name") else { continue };
+        let mut st = TextStyle::default();
+        for k in n.children().filter(|k| k.is_element()) {
+            match k.tag_name().name() {
+                "blockAttr" => {
+                    st.align = k.attribute("text-align").and_then(parse_align);
+                }
+                "inlineAttr" => {
+                    st.font = k
+                        .attribute("font-family")
+                        .map(|f| f.trim().to_string())
+                        .filter(|f| !f.is_empty());
+                    st.size = k
+                        .attribute("font-size")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .filter(|v| *v > 0.0);
+                    st.bold = k.attribute("font-weight") == Some("bold");
+                    st.italic = k.attribute("font-style") == Some("italic");
+                    st.underline = k.attribute("underline") == Some("true");
+                    st.color = k.attribute("color").and_then(parse_hex_color);
+                }
+                _ => {}
+            }
+        }
+        text_styles.insert(name.to_string(), st);
+    }
     Ok(Sheet {
         origin,
         regions,
         component_names: Vec::new(),
+        text_styles,
     })
 }
 
@@ -229,6 +261,18 @@ impl Ctx<'_, '_> {
     fn item_of(&self, n: Node) -> Option<Vec<u8>> {
         self.item(n.attribute("item-idref")?)
     }
+}
+
+/// `#rrggbb` (any case) as lower-case `#rrggbb`; `inherit` and anything else is `None`.
+pub(crate) fn parse_hex_color(v: &str) -> Option<String> {
+    let v = v.trim();
+    let h = v.strip_prefix('#')?;
+    (h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit())).then(|| format!("#{}", h.to_ascii_lowercase()))
+}
+
+pub(crate) fn parse_align(v: &str) -> Option<String> {
+    let v = v.trim().to_ascii_lowercase();
+    matches!(v.as_str(), "left" | "right" | "center" | "justify").then_some(v)
 }
 
 fn num_attr(n: Node, name: &str) -> Option<f64> {
@@ -283,9 +327,13 @@ fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
             for p in c.children().filter(|x| is_ws(*x, "p")) {
                 let mut pieces = Vec::new();
                 walk_inline(p, &Run::default(), &mut pieces, &mut nested, depth, lim);
+                let pt = |name: &str| num_attr(p, name).unwrap_or(0.0);
                 paras.push(Paragraph {
                     style: p.attribute("style").unwrap_or("Normal").to_string(),
                     pieces,
+                    align: p.attribute("text-align").and_then(parse_align),
+                    margin_left: pt("margin-left"),
+                    text_indent: pt("text-indent"),
                 });
             }
             // The text region precedes the regions nested in it.
@@ -299,6 +347,18 @@ fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
         "picture" => {
             let mut pic = Picture::default();
             for k in c.children().filter(|k| k.is_element()) {
+                match local(k) {
+                    "metafile" if pic.metafile.is_none() => pic.metafile = ctx.item_of(k),
+                    "png" if pic.png.is_none() => pic.png = ctx.item_of(k).filter(|b| picture::is_png(b)),
+                    _ => {}
+                }
+            }
+            out.push(mk(RegionKind::Picture(pic), rendering));
+        }
+        // A picture written straight into the region (no `picture` wrapper).
+        "png" | "metafile" => {
+            let mut pic = Picture::default();
+            for k in r.children().filter(|k| k.is_element() && ns_kind(*k) == "worksheet") {
                 match local(k) {
                     "metafile" if pic.metafile.is_none() => pic.metafile = ctx.item_of(k),
                     "png" if pic.png.is_none() => pic.png = ctx.item_of(k).filter(|b| picture::is_png(b)),
@@ -395,7 +455,28 @@ fn walk_inline<'a, 'i>(
                     depth + 1,
                     lim,
                 ),
-                // f (font), c (colour), inlineAttr and unknown wrappers: keep their text.
+                "f" => {
+                    let mut f = fmt.clone();
+                    if let Some(v) = c.attribute("family").map(str::trim).filter(|v| !v.is_empty()) {
+                        f.font = Some(v.to_string());
+                    }
+                    if let Some(v) = c
+                        .attribute("size")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .filter(|v| *v > 0.0)
+                    {
+                        f.size = Some(v);
+                    }
+                    walk_inline(c, &f, pieces, nested, depth + 1, lim)
+                }
+                "c" => {
+                    let mut f = fmt.clone();
+                    if let Some(v) = c.attribute("val").and_then(parse_hex_color) {
+                        f.color = Some(v);
+                    }
+                    walk_inline(c, &f, pieces, nested, depth + 1, lim)
+                }
+                // inlineAttr and unknown wrappers: keep their text.
                 _ => walk_inline(c, fmt, pieces, nested, depth + 1, lim),
             }
         }

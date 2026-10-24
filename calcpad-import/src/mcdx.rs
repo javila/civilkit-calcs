@@ -248,6 +248,7 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         origin,
         regions,
         component_names,
+        text_styles: Default::default(),
     })
 }
 
@@ -520,6 +521,30 @@ fn format_of(n: Node, base: &Run) -> Run {
             ],
         );
     }
+    if let Some(v) = n.attribute("FontFamily").map(str::trim).filter(|v| !v.is_empty()) {
+        // A font list (`Arial, Helvetica`): the first name.
+        f.font = Some(v.split(',').next().unwrap_or(v).trim().to_string());
+    }
+    // Device-independent pixels, 96 to the inch: 4/3 pixels to the point.
+    if let Some(px) = n
+        .attribute("FontSize")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+    {
+        f.size = Some((px * 0.75 * 100.0).round() / 100.0);
+    }
+    if let Some(v) = n.attribute("Foreground") {
+        // `#AARRGGBB` or `#RRGGBB`; a fully transparent colour is not a colour.
+        let h = v.trim().trim_start_matches('#');
+        let rgb = match h.len() {
+            8 if !h.starts_with("00") => Some(&h[2..]),
+            6 => Some(h),
+            _ => None,
+        };
+        if let Some(rgb) = rgb.and_then(|c| crate::xmcd::parse_hex_color(&format!("#{c}"))) {
+            f.color = Some(rgb);
+        }
+    }
     if let Some(v) = n.attribute("FontStyle") {
         f.italic = flag(v, &["Italic", "Oblique"]);
     }
@@ -588,9 +613,19 @@ fn blocks(
                     }
                     None => {}
                 }
+                let margin_left = c
+                    .attribute("Margin")
+                    .and_then(|m| m.split(',').next().and_then(|v| v.trim().parse::<f64>().ok()))
+                    .map_or(0.0, |px| px * 0.75);
                 paras.push(Paragraph {
                     style: style.to_string(),
                     pieces,
+                    align: c.attribute("TextAlignment").and_then(crate::xmcd::parse_align),
+                    margin_left,
+                    text_indent: c
+                        .attribute("TextIndent")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .map_or(0.0, |px| px * 0.75),
                 });
             }
             "List" => {

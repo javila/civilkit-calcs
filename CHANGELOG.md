@@ -22,6 +22,7 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 - Import worksheet: regions that share a row are laid out side by side (a table for rows of symbol and description text, a wrapping row for everything else) while keeping the order they are evaluated in.
 
 - Import worksheet: loop blocks no longer print raw engine values as plain text in the preview (they are hidden; errors inside are still recorded by the engine). An array started from 0 and then accumulated into takes the units of the first value added, which converts the stiffness-assembly style of program.
+- Import worksheet: text keeps the source's look: paragraph styles and per-run font, size, colour and alignment are read and written as inline CSS (headings stay headings, colours get a lightened variant on the dark preview), plain picture regions are quiet and keep their size, and a picture with text to its right is one row. Picture regions that were reported as an unknown region kind now convert.
 
 ### Changed
 - The worksheet importer crate and its WebAssembly module are renamed to be format-neutral, since they read both `.xmcd` and `.mcdx`: `calcpad-import` (package `civilkit-calcs-import`, not published) and `calcpad-import-wasm` (`calcpad_import_wasm.js` / `_bg.wasm`). Earlier entries below use the old names.

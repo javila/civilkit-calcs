@@ -108,6 +108,7 @@ fn marker(r: &Region, text: String) -> Region {
         kind: RegionKind::Text(vec![Paragraph {
             style: "Normal".into(),
             pieces: vec![Piece::Run(Run { text, ..Run::default() })],
+            ..Paragraph::default()
         }]),
         rendering: None,
         ..r.clone()

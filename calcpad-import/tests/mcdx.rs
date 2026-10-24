@@ -436,6 +436,25 @@ fn text_region(id: u32, top: f64, rel: &str, nested: &str) -> String {
 }
 
 #[test]
+fn text_region_reads_font_size_colour_and_alignment() {
+    // 16 px is 12 pt; the colour is #AARRGGBB.
+    let xaml = xaml_package(
+        r##"<Paragraph TextAlignment="Center"><Run FontFamily="Arial" FontSize="16" Foreground="#FF0000FF">blue text</Run></Paragraph>"##,
+    );
+    let res = Pkg::new(&text_region(1, 0.0, "Rt1", ""))
+        .rel("Rt1", "flowDocument", "/ws/xaml/FlowDocument1.XamlPackage")
+        .part(part("ws/xaml/FlowDocument1.XamlPackage", xaml))
+        .import();
+    let l = res.calcpad.lines().find(|x| x.contains("blue text")).expect("line");
+    assert!(l.contains("text-align:center"), "{l}");
+    assert!(
+        l.contains("font-family:Arial,Helvetica") && l.contains("font-size:12pt"),
+        "{l}"
+    );
+    assert!(l.contains("imp-c-0000ff"), "{l}");
+}
+
+#[test]
 fn text_region_reads_the_flow_document() {
     let xaml = xaml_package(
         r#"<Paragraph><Run FontWeight="Bold">Beam </Run><Run>check</Run><Run FontStyle="Italic"> (draft)</Run><LineBreak /><Run TextDecorations="Underline">second line</Run></Paragraph><Paragraph><Run>   </Run></Paragraph>"#,

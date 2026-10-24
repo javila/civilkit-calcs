@@ -168,7 +168,7 @@ ${mregion(4, 160, 4, '<ml:eval><ml:apply><ml:mult/><ml:id>count</ml:id><ml:real>
 
 // ---- the page -----------------------------------------------------------------------------------------------
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
+const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true, colorScheme: arg('--theme', 'light').toLowerCase() === 'dark' ? 'dark' : 'light' });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
@@ -214,6 +214,10 @@ if (realFile) {
     const fr = await previewFrame('');
     if (fr) await fr.evaluate(() => { const im = [...document.images].find(i => i.src.startsWith('data:image/svg')) || document.images[0]; im?.scrollIntoView({ block: 'center' }); });
     await page.waitForTimeout(1000);
+    for (const f of page.frames().slice(1)) { try { console.log('FRAME TEXT:', JSON.stringify(await f.evaluate(() => document.body.innerText.slice(0, 600)))); } catch { /* detached */ } }
+    for (const f of page.frames()) {
+        try { console.log('frame', JSON.stringify(await f.evaluate(() => { const e = document.querySelector('.imp-c-008080'); return e ? [document.body.className, getComputedStyle(document.body).backgroundColor, getComputedStyle(e).color] : null; }))); } catch { /* detached */ }
+    }
     await page.screenshot({ path: join(shotsDir, `import-sheet-${t}.png`) });
     await browser.close();
     server.close();
@@ -383,6 +387,28 @@ const ftext = await editorText();
 check(/count = 2/.test(ftext) && /frozen, not live/.test(ftext), 'the frozen definition is in the sheet with its note');
 check(/import-gap R1 component/.test(ftext), 'the component itself is a marked gap');
 check(errors.length === 0, `no page errors after the frozen import (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- 9. a loop block prints nothing of its own; text styles and a picture beside text reach the preview ----------------------
+const loopSheet = `<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><presentation><textRendering><textStyles><textStyle name="Normal"><blockAttr text-align="left"/><inlineAttr font-family="Times New Roman" font-size="12" color="inherit"/></textStyle><textStyle name="Heading 1"><blockAttr text-align="left"/><inlineAttr font-family="Times New Roman" font-size="12" font-weight="bold" color="#800000"/></textStyle></textStyles></textRendering></presentation><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>
+<region region-id="9" left="0" top="0" width="200" height="14" align-y="10"><text><p style="Heading 1">Styled head</p></text></region>
+<region region-id="1" left="0" top="20" width="10" height="10" align-y="30"><math><ml:define><ml:id>i</ml:id><ml:range><ml:real>1</ml:real><ml:real>3</ml:real></ml:range></ml:define></math></region>
+<region region-id="2" left="0" top="40" width="10" height="10" align-y="50"><math><ml:define><ml:apply><ml:indexer/><ml:id>h</ml:id><ml:id>i</ml:id></ml:apply><ml:apply><ml:mult/><ml:id>i</ml:id><ml:apply><ml:mult/><ml:real>2</ml:real><ml:id>m</ml:id></ml:apply></ml:apply></ml:define></math></region>
+<region region-id="3" left="0" top="60" width="10" height="10" align-y="70"><math><ml:eval><ml:id>h</ml:id></ml:eval></math></region>
+</regions></worksheet>`;
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'loops.xmcd', loopSheet);
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'loops.xmcd' }).waitFor({ timeout: 60000 });
+await closeDialog();
+const lfr = await previewFrame('Styled head');
+check(!!lfr, 'loops: the preview renders');
+if (lfr) {
+    const body = (await lfr.evaluate(() => document.body.innerText)).replace(/[\s\u2190]+/g, ' ').trim();
+    check(/h\s*=\s*\[\s*2 m\s+4 m\s+6 m\s*\]/.test(body), `loops: the vector is shown (${body})`);
+    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/⃗h\s*=\s*\[[^\]]*\]/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
+    const st = await lfr.evaluate(() => { const h = document.querySelector('h1'); const cs = h && getComputedStyle(h); return cs ? [cs.color, cs.fontFamily, cs.fontSize] : null; });
+    check(st && st[0] === 'rgb(128, 0, 0)' && /Times New Roman/.test(st[1]) && st[2] === '16px', `text style: heading keeps the source colour, family and size (${JSON.stringify(st)})`);
+}
+check(errors.length === 0, `no page errors after the loop import (${errors.slice(0, 2).join(' | ')})`);
 
 await browser.close();
 server.close();
