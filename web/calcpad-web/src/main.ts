@@ -2934,3 +2934,11 @@ bootstrap().catch((err) => {
     panel.textContent = `CivilKit Calcs failed to start.\n\n${detail}`;
     document.body.appendChild(panel);
 });
+
+// Offline use: sw.js (written at build time by pwa-plugin.ts) caches the whole build.
+// `?nosw` skips it, which is what the browser checks use.
+if (import.meta.env.PROD && import.meta.env.VITE_PLATFORM === 'web' && 'serviceWorker' in navigator && !location.search.includes('nosw')) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => { /* private window or blocked: the app works online as before */ });
+    });
+}
