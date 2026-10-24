@@ -189,6 +189,21 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         }
     }
 
+    // The number of decimal places results are shown with, from the presentation settings.
+    let mut default_precision = None;
+    if let Ok(Some(b)) = zip.read(&format!("{base}settings/presentation.xml"), limits.max_item_bytes) {
+        if let Ok(t) = utf8(&b) {
+            if let Ok(d) = parse(t, &limits) {
+                default_precision = d
+                    .descendants()
+                    .find(|n| n.is_element() && local(*n) == "general")
+                    .and_then(|g| g.attribute("precision"))
+                    .and_then(|v| v.trim().parse::<i32>().ok())
+                    .filter(|v| (0..=15).contains(v));
+            }
+        }
+    }
+
     // Saved results, keyed by result id.
     let result_bytes = zip
         .read(&format!("{base}result.xml"), limits.max_item_bytes)
@@ -249,6 +264,7 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         regions,
         component_names,
         text_styles: Default::default(),
+        default_precision,
     })
 }
 
@@ -466,6 +482,7 @@ impl Ctx<'_, '_> {
                 saved_result: None,
                 saved_expr: None,
                 frozen: true,
+                precision: None,
             }),
         })
     }

@@ -226,11 +226,17 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
         }
         text_styles.insert(name.to_string(), st);
     }
+    // The document default sits in the presentation settings: `results` holds a `general` element.
+    let default_precision = root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "results")
+        .find_map(general_precision);
     Ok(Sheet {
         origin,
         regions,
         component_names: Vec::new(),
         text_styles,
+        default_precision,
     })
 }
 
@@ -529,7 +535,20 @@ pub(crate) fn read_math(m: Node, lim: &Limits) -> MathRegion {
         saved_result,
         saved_expr,
         frozen: false,
+        precision: m
+            .children()
+            .find(|c| c.is_element() && c.tag_name().name() == "resultFormat")
+            .and_then(general_precision),
     }
+}
+
+/// The `precision` attribute of the `general` element under `n`.
+pub(crate) fn general_precision(n: Node) -> Option<i32> {
+    n.children()
+        .find(|c| c.is_element() && c.tag_name().name() == "general")
+        .and_then(|g| g.attribute("precision"))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .filter(|v| (0..=15).contains(v))
 }
 
 /// The stored result as an expression, only when it is complete and exact: a number, or a matrix of

@@ -636,6 +636,19 @@ struct Tr {
     readable: bool,
     /// Set while rendering for the reader when something written cannot be Calcpad maths.
     readable_bad: bool,
+    /// Rendering the author's own equation for display (never computed): the original names, the
+    /// transpose as a superscript, a row as a row. Set only around `display_*`.
+    display: bool,
+    /// A math region was written to the page (the page then carries the maths styling).
+    maths_shown: bool,
+    /// Set while displaying when a name was written as the author's name instead of the engine's.
+    display_renamed: bool,
+    /// Engine name -> the author's name, for the names renamed to keep a variable apart from a unit.
+    renamed: HashMap<String, String>,
+    /// The decimal places the file shows results with, and the `#format` currently in force.
+    default_precision: Option<i32>,
+    /// The `#format` in force (`None`: the default).
+    fmt_cur: Option<String>,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -875,6 +888,15 @@ impl Tr {
                 if let Expr::Un(UnOp::Transpose, y) = x {
                     return self.expr(y);
                 }
+                if self.display {
+                    // The author's form: the operand with a superscript T (the engine has no transpose
+                    // operator, so this is typeset only, never computed).
+                    let inner = self.operand(x, P_ATOM, true);
+                    return R {
+                        s: format!("{inner}^(T)"),
+                        prec: P_POW,
+                    };
+                }
                 if let Expr::Matrix { rows: 1, cols, items } = x {
                     if *cols > 1 {
                         return self.matrix(*cols, 1, items);
@@ -937,6 +959,95 @@ impl Tr {
 
     fn render_args(&mut self, args: &[Expr]) -> Vec<String> {
         args.iter().map(|a| self.expr(a).s).collect()
+    }
+
+    /// The `#format` line that puts the number format in force (`None`: the default), or nothing when it already is.
+    /// Numbers written in an equation shown for reading are rounded by the format like any other, so a
+    /// displayed equation is always shown under the default one.
+    fn format_line(&mut self, want: Option<String>) -> Option<String> {
+        if self.fmt_cur == want {
+            return None;
+        }
+        self.fmt_cur = want.clone();
+        Some(match want {
+            Some(f) => format!("#format {f}"),
+            None => "#format default".to_string(),
+        })
+    }
+
+    /// The author's name for an engine name (the same name unless it was renamed to stay apart from a unit).
+    fn author_name(&self, flat: &str) -> String {
+        self.renamed.get(flat).cloned().unwrap_or_else(|| flat.to_string())
+    }
+
+    /// Runs `f` in display mode (the author's own equation, typeset and never computed) with the
+    /// issue list, parameters and temporaries left as they were. Returns what `f` made, and whether
+    /// the rendering is clean: nothing the engine could not convert, nothing hoisted.
+    fn displaying<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, bool) {
+        let saved_cur = std::mem::take(&mut self.cur);
+        let saved_params = std::mem::take(&mut self.params);
+        let saved_hoisted = std::mem::take(&mut self.hoisted);
+        self.display = true;
+        self.display_renamed = false;
+        let out = f(self);
+        let clean = self.cur.iter().all(|p| p.code.severity() != Severity::Gap) && self.hoisted.is_empty();
+        self.display = false;
+        self.params = saved_params;
+        self.hoisted = saved_hoisted;
+        self.cur = saved_cur;
+        (out, clean)
+    }
+
+    /// `name = value` as the author wrote the definition, for a `#noc` block; `None` when it cannot
+    /// be shown faithfully (then the computed form is shown as before).
+    fn display_define(&mut self, target: &Target, value: &Expr) -> Option<String> {
+        let (text, clean) = self.displaying(|t| {
+            let head = match target {
+                Target::Var(n) => t.author_name(&tables::normalise_name(&n.flat())),
+                Target::Func(n, ps) => {
+                    let plist: Vec<String> = ps.iter().map(|p| tables::normalise_name(&p.flat())).collect();
+                    t.params = plist.clone();
+                    let shown: Vec<String> = plist.iter().map(|p| t.author_name(p)).collect();
+                    format!(
+                        "{}({})",
+                        t.author_name(&tables::normalise_name(&n.flat())),
+                        shown.join("; ")
+                    )
+                }
+                _ => return None,
+            };
+            Some(format!("{head} = {}", t.expr(value).s))
+        });
+        text.filter(|t| clean && plausible_calcpad(t))
+    }
+
+    /// `name.(index) = value` for the definition of one element or of every element over range variables.
+    fn display_element(&mut self, base: &Name, index: &[Expr], value: &Expr) -> Option<String> {
+        let (text, clean) = self.displaying(|t| {
+            let idx: Vec<String> = index.iter().map(|i| t.expr(i).s).collect();
+            let head = format!(
+                "{}.({})",
+                t.author_name(&tables::normalise_name(&base.flat())),
+                idx.join("; ")
+            );
+            format!("{head} = {}", t.expr(value).s)
+        });
+        Some(text).filter(|t| clean && plausible_calcpad(t))
+    }
+
+    /// An evaluation's expression as the author wrote it, for a `#noc` block, and whether any name in
+    /// it differs from the engine's.
+    fn display_eval(&mut self, expr: &Expr, unit: Option<&Expr>) -> Option<(String, bool)> {
+        let ((text, renamed), clean) = self.displaying(|t| {
+            let e = t.expr(expr);
+            let mut s = e.s.clone();
+            if let Some(u) = unit {
+                let inner = if e.prec >= P_ATOM { e.s } else { format!("({})", e.s) };
+                s = format!("{}|{}", inner, t.expr(u).s);
+            }
+            (s, t.display_renamed)
+        });
+        (clean && plausible_calcpad(&text)).then_some((text, renamed))
     }
 
     /// The statement of an unconverted region as the reader should see it: Calcpad-style maths
@@ -1942,6 +2053,24 @@ impl Tr {
     }
 
     fn name_ref(&mut self, n: &Name) -> R {
+        if self.display {
+            // A range variable is a name like any other on the page.
+            let flat = tables::normalise_name(&n.flat());
+            if self.ranges.contains_key(&flat) && !n.unit {
+                return atom(self.author_name(&flat));
+            }
+        }
+        let r = self.name_ref_engine(n);
+        if self.display {
+            if let Some(orig) = self.renamed.get(&r.s) {
+                self.display_renamed = true;
+                return atom(orig.clone());
+            }
+        }
+        r
+    }
+
+    fn name_ref_engine(&mut self, n: &Name) -> R {
         let flat = tables::normalise_name(&n.flat());
         // The file says this identifier is a unit: it is, whatever variables exist.
         if n.unit && n.sub.is_none() {
@@ -2127,7 +2256,8 @@ impl Tr {
 
     /// An array index shifted from the sheet's origin to Calcpad's 1.
     fn index_expr(&mut self, e: &Expr) -> String {
-        let delta = 1 - self.origin;
+        // The author's own index is shown as written; only the computed form is shifted to the engine's origin.
+        let delta = if self.display { 0 } else { 1 - self.origin };
         if delta != 0 {
             self.issue(Code::ArrayOrigin, None);
         }
@@ -2186,10 +2316,16 @@ impl Tr {
         }
         if cols == 1 {
             let v: Vec<String> = (0..rows).map(|r| at(r, 0)).collect();
-            return atom(format!("[{}]", v.join("; ")));
+            // Displayed, a column has one item per row (`|` starts a row).
+            let sep = if self.display { " | " } else { "; " };
+            return atom(format!("[{}]", v.join(sep)));
         }
         if rows == 1 {
             let v: Vec<String> = (0..cols).map(|c| at(0, c)).collect();
+            if self.display {
+                // Displayed, a row is the items side by side.
+                return atom(format!("[{}]", v.join("; ")));
+            }
             return atom(format!("transp([{}])", v.join("|")));
         }
         let body: Vec<String> = (0..rows)
@@ -2276,6 +2412,9 @@ impl Tr {
             let one_line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
             if *eq {
                 if !in_noc {
+                    if let Some(l) = self.format_line(None) {
+                        self.lines.push(l);
+                    }
                     self.lines.push("#noc".to_string());
                     in_noc = true;
                 }
@@ -2480,6 +2619,77 @@ impl Tr {
         }
     }
 
+    /// The lines a converted math region puts on the page. A plain definition is computed out of
+    /// sight and shows the author's equation only (a definition shows no result in the source). An
+    /// evaluation shows the expression and its result at the precision the file used; when the
+    /// engine would show a renamed variable, the author's expression is typeset first.
+    fn present(&mut self, m: &MathRegion, shape: &str, plain_def: bool, elem_def: bool, line: String) -> String {
+        if plain_def {
+            if let Stmt::Define { target, value, .. } = &m.stmt {
+                if let Some(shown) = self.display_define(target, value) {
+                    let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
+                    return format!("{fmt}#hide\n{line}\n#end hide\n#noc\n{shown}\n#end noc");
+                }
+            }
+            return line;
+        }
+        if elem_def {
+            if let Stmt::Define {
+                target: Target::Element { base: Some(b), index },
+                value,
+                ..
+            } = &m.stmt
+            {
+                if let Some(shown) = self.display_element(b, index, value) {
+                    // The whole computation goes out of sight, the author's equation is shown.
+                    let hidden = match line.split_once("\n#show\n") {
+                        Some((alloc, assign)) if line.starts_with("#hide\n") => {
+                            format!("{alloc}\n#show\n#hide\n{assign}\n#end hide")
+                        }
+                        _ => line,
+                    };
+                    let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
+                    return format!("{fmt}{hidden}\n#noc\n{shown}\n#end noc");
+                }
+            }
+            return line;
+        }
+        if shape != "evaluation" {
+            return line;
+        }
+        let mut out = String::new();
+        // The file's decimal places (three when it says nothing, the tool's own default), as a number
+        // format: fixed decimals without trailing zeros. Display only: every value is computed in full.
+        let places = m.precision.or(self.default_precision).unwrap_or(3);
+        let fmt = if places == 0 {
+            "0".to_string()
+        } else {
+            format!("0.{}", "#".repeat(places as usize))
+        };
+        let mut scroll = false;
+        if let Stmt::Eval { expr, unit } = &m.stmt {
+            if let Some((shown, renamed)) = self.display_eval(expr, unit.as_ref()) {
+                if renamed {
+                    if let Some(l) = self.format_line(None) {
+                        out.push_str(&format!("{l}\n"));
+                    }
+                    out.push_str(&format!("#noc\n{shown}\n#end noc\n"));
+                }
+            }
+            // A matrix result is one row of the page in the source, and scrolls there when long.
+            scroll = self.yields_array(expr);
+        }
+        if let Some(l) = self.format_line(Some(fmt)) {
+            out.push_str(&format!("{l}\n"));
+        }
+        if scroll {
+            out.push_str(&format!("'<div class=\"imp-scroll\">\n{line}\n'</div>"));
+        } else {
+            out.push_str(&line);
+        }
+        out
+    }
+
     fn math(&mut self, r: &Region, m: &MathRegion) {
         self.cur.clear();
         self.params.clear();
@@ -2497,6 +2707,8 @@ impl Tr {
         let mut origin_assign: Option<i64> = None;
         let mut range_def: Option<(String, RangeInfo)> = None;
         let mut multi_names: Vec<String> = Vec::new();
+        let mut plain_def = false;
+        let mut elem_def = false;
         let shape: &str;
 
         match &m.stmt {
@@ -2608,6 +2820,7 @@ impl Tr {
                             ));
                         } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                             emitted = Some(format!("{} = {}", flat, rhs.s));
+                            plain_def = true;
                         } else {
                             attempt = Some(format!("{} = {}", flat, rhs.s));
                         }
@@ -2636,6 +2849,7 @@ impl Tr {
                         let head = format!("{}({})", flat, plist.join("; "));
                         if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                             emitted = Some(format!("{} = {}", head, rhs.s));
+                            plain_def = true;
                         } else {
                             attempt = Some(format!("{} = {}", head, rhs.s));
                         }
@@ -2758,6 +2972,7 @@ impl Tr {
                                     "#hide\n{f} = resize({f}; max(len({f}); {idx}))\n#show\n{f}.({idx}) = {}",
                                     rhs.s
                                 ));
+                                elem_def = true;
                                 self.elem_built.remove(&f);
                             } else {
                                 attempt = Some(format!("{f}.({idx}) = {}", rhs.s));
@@ -2791,6 +3006,7 @@ impl Tr {
                                     };
                                     emitted =
                                         Some(format!("#hide\n{alloc}\n#show\n{f}.({}) = {}", idx.join("; "), rhs.s));
+                                    elem_def = true;
                                     if idx.len() == 1 {
                                         self.elem_built.insert(f.clone(), idx[0].parse().unwrap_or(0));
                                     }
@@ -2817,7 +3033,8 @@ impl Tr {
                                             match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
                                                 Ok(t) => {
                                                     self.elem_built.remove(&f);
-                                                    emitted = Some(t)
+                                                    emitted = Some(t);
+                                                    elem_def = true;
                                                 }
                                                 Err(w) => self.issue(Code::ElementAssignment, Some(w)),
                                             }
@@ -2905,6 +3122,7 @@ impl Tr {
                 sanitize_id(&r.id)
             );
             emitted = emitted.map(|e| format!("{note}\n{e}"));
+            plain_def = false;
         }
 
         // Temporaries the line needs first (a call result that is indexed).
@@ -2958,6 +3176,7 @@ impl Tr {
                         v.s
                     ));
                     attempt = None;
+                    plain_def = false;
                     define_name = Some((flat, None, is_array));
                 } else {
                     self.cur = stash;
@@ -2982,7 +3201,9 @@ impl Tr {
                 self.lines
                     .push(format!("'<!-- ORIGIN assigned {} in the source -->", v));
             } else if let Some(line) = emitted.take() {
-                self.lines.push(line);
+                self.maths_shown = true;
+                let text = self.present(m, shape, plain_def, elem_def, line);
+                self.lines.push(text);
             }
             for name in &multi_names {
                 self.ranges.remove(name);
@@ -3166,11 +3387,18 @@ fn color_class(hex: &str, colors: &mut std::collections::BTreeSet<String>) -> Op
     Some(format!("imp-c-{}", &hex[1..]))
 }
 
-fn style_block(colors: &std::collections::BTreeSet<String>) -> Option<String> {
-    if colors.is_empty() {
+fn style_block(colors: &std::collections::BTreeSet<String>, maths: bool) -> Option<String> {
+    // The source draws a vector's name plain (no arrow, no bold) and a transpose as a plain
+    // superscript; the engine marks array names and powers of arrays, which the page leaves out.
+    if colors.is_empty() && !maths {
         return None;
     }
     let mut css = String::new();
+    if maths {
+        css.push_str(
+            ".vec{display:none}b>var{font-weight:normal}sup>small.nth:first-child{display:none}.imp-scroll{overflow-x:auto;white-space:nowrap}",
+        );
+    }
     for c in colors {
         if let Some((light, dark)) = theme_colors(c) {
             let cls = format!(".imp-c-{}", &c[1..]);
@@ -3390,7 +3618,7 @@ fn join_style(a: &[String], b: &[String]) -> String {
 /// A name the file labels as a unit in one place and defines as a variable in another (a matrix
 /// `N` next to forces in `N`): the engine would read every `N` as the variable, so the variable is
 /// renamed `N_v` everywhere and the unit keeps its name.
-fn rename_unit_clashes(sheet: &mut Sheet) {
+fn rename_unit_clashes(sheet: &mut Sheet) -> HashMap<String, String> {
     let mut units: HashSet<String> = HashSet::new();
     let mut vars: HashSet<String> = HashSet::new();
     let mut scan = |stmt: &mut Stmt| {
@@ -3432,8 +3660,9 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
         }
     }
     let clash: HashSet<String> = units.intersection(&vars).cloned().collect();
+    let renamed: HashMap<String, String> = clash.iter().map(|c| (format!("{c}_v"), c.clone())).collect();
     if clash.is_empty() {
-        return;
+        return renamed;
     }
     for r in sheet.regions.iter_mut() {
         if let RegionKind::Math(m) = &mut r.kind {
@@ -3444,10 +3673,11 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
             });
         }
     }
+    renamed
 }
 
 pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
-    rename_unit_clashes(&mut sheet);
+    let renamed = rename_unit_clashes(&mut sheet);
     let rows = reading_rows(std::mem::take(&mut sheet.regions));
     let has_references = rows.iter().flatten().any(|r| matches!(r.kind, RegionKind::Reference));
     let mut tr = Tr {
@@ -3477,6 +3707,12 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         ret: None,
         readable: false,
         readable_bad: false,
+        display: false,
+        maths_shown: false,
+        display_renamed: false,
+        renamed,
+        default_precision: sheet.default_precision,
+        fmt_cur: None,
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),
@@ -3499,9 +3735,15 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         tr.report.regions_total(),
         GAP_MARKER
     ));
-    if let Some(block) = style_block(&tr.colors) {
+    if let Some(block) = style_block(&tr.colors, tr.maths_shown) {
         out.push_str(&block);
         out.push('\n');
+    }
+    // Results are shown as the source shows them: the expression and its value, no substituted step.
+    if tr.maths_shown {
+        // Equations shown for reading carry the numbers as written (see `format_line`); results are
+        // shown under a number format set where they are.
+        out.push_str("#nosub\n#round 12\n");
     }
     if tr.uses_trig {
         out.push_str("#rad\n");

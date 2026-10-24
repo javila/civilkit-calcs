@@ -6,6 +6,42 @@ use calcpad_import::{
     import_bytes, import_mcdx, import_xmcd, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
 };
 
+/// The page as it was before definitions were shown as the author's equation: the computed form of
+/// every region (a definition echoes its value, substituted steps shown), so numbers can be read
+/// from the engine's output. Only the wrappers the display adds are removed.
+pub fn legacy(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+    let mut skip = vec![false; lines.len()];
+    for i in 0..lines.len() {
+        let t = lines[i].trim();
+        if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") {
+            skip[i] = true;
+        } else if t == "#end hide" && lines.get(i + 1).map(|l| l.trim()) == Some("#noc") {
+            // The author's equation shown after a hidden computation: dropped. When the computation
+            // is one line it was hidden for this display only and is shown again (a definition then
+            // echoes its value, as before).
+            let close = (i + 2..lines.len())
+                .find(|&k| lines[k].trim() == "#end noc")
+                .unwrap_or(i + 1);
+            for s in &mut skip[i + 1..=close] {
+                *s = true;
+            }
+            if i >= 2 && lines[i - 2].trim() == "#hide" {
+                skip[i - 2] = true;
+                skip[i] = true;
+            }
+        }
+    }
+    let mut out = String::new();
+    for (l, s) in lines.iter().zip(&skip) {
+        if !s {
+            out.push_str(l);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 // ---- a minimal zip writer ------------------------------------------------------------------------
 
 fn crc32(data: &[u8]) -> u32 {
@@ -231,7 +267,11 @@ fn lines(res: &ImportResult) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut in_noc = false;
     let mut in_gap = false;
-    for l in res.calcpad.lines().filter(|l| !l.starts_with("'<!-- Imported")) {
+    let code = legacy(&res.calcpad);
+    for l in code
+        .lines()
+        .filter(|l| !l.starts_with("'<!-- Imported") && !l.starts_with("'<style>"))
+    {
         if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
             let head = rest.split(" --><small>").next().unwrap_or(rest);
             out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
@@ -853,7 +893,7 @@ fn converted_package_runs_in_the_engine() {
     ]);
     assert_eq!(res.report.regions_needing_attention(), 0);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     assert!(
         !parser.html_result.contains("class=\"err\""),
         "engine error in:\n{}\n---\n{}",
@@ -916,7 +956,7 @@ fn a_definition_read_from_an_input_component_takes_the_saved_value() {
     // Only the component itself needs attention; everything that read the input converted.
     assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {
@@ -995,7 +1035,7 @@ fn a_variable_named_like_a_unit_is_renamed_so_the_unit_keeps_its_name() {
     assert!(res.calcpad.contains("N_v = [1; 2]"), "{}", res.calcpad);
     assert!(res.calcpad.contains("F = 3*N"), "{}", res.calcpad);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {
@@ -1159,7 +1199,7 @@ fn the_numbers_of_a_components_workbook_define_the_name_and_downstream_regions_c
     // Only the component needs attention; the regions that read the name converted.
     assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {

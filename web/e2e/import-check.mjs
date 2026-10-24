@@ -404,11 +404,32 @@ check(!!lfr, 'loops: the preview renders');
 if (lfr) {
     const body = (await lfr.evaluate(() => document.body.innerText)).replace(/[\s\u2190]+/g, ' ').trim();
     check(/h\s*=\s*\[\s*2 m\s+4 m\s+6 m\s*\]/.test(body), `loops: the vector is shown (${body})`);
-    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/⃗h\s*=\s*\[[^\]]*\]/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
+    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/⃗?h\s*=\s*\[[^\]]*\]/, '').replace(/hi\s*=\s*i\s*·\s*2\s*·\s*m/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
     const st = await lfr.evaluate(() => { const h = document.querySelector('h1'); const cs = h && getComputedStyle(h); return cs ? [cs.color, cs.fontFamily, cs.fontSize] : null; });
     check(st && st[0] === 'rgb(128, 0, 0)' && /Times New Roman/.test(st[1]) && st[2] === '16px', `text style: heading keeps the source colour, family and size (${JSON.stringify(st)})`);
 }
 check(errors.length === 0, `no page errors after the loop import (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- 10. a definition shows the author's equation only; no array arrow; results at the file's precision ------------------------
+const eqSheet = `<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>
+<region region-id="9" left="0" top="0" width="200" height="14" align-y="10"><text><p style="Normal">Shown equations</p></text></region>
+<region region-id="1" left="0" top="20" width="10" height="10" align-y="30"><math><ml:define><ml:id>w</ml:id><ml:apply><ml:mult/><ml:apply><ml:transpose/><ml:matrix rows="1" cols="3"><ml:real>16</ml:real><ml:real>12</ml:real><ml:real>13.5</ml:real></ml:matrix></ml:apply><ml:id>ft</ml:id></ml:apply></ml:define></math></region>
+<region region-id="2" left="0" top="40" width="10" height="10" align-y="50"><math><ml:define><ml:id>x</ml:id><ml:apply><ml:div/><ml:real>2</ml:real><ml:real>3</ml:real></ml:apply></ml:define></math></region>
+<region region-id="3" left="0" top="60" width="10" height="10" align-y="70"><math><ml:eval><ml:id>x</ml:id></ml:eval><resultFormat><general precision="3"/></resultFormat></math></region>
+</regions></worksheet>`;
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'eq.xmcd', eqSheet);
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'eq.xmcd' }).waitFor({ timeout: 60000 });
+await closeDialog();
+const efr = await previewFrame('Shown equations');
+check(!!efr, 'equations: the preview renders');
+if (efr) {
+    const body = (await efr.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').trim();
+    check(/w = \[16; 12; 13\.5\]\s*T\s*· ft/.test(body), `equations: the definition reads as the author wrote it (${body})`);
+    check(!/16 ft/.test(body) && !/⃗/.test(body), 'equations: no result after a definition and no array arrow');
+    check(/x = 0\.667\b/.test(body) && !/0\.6667/.test(body), 'equations: the result has the three decimals the file used');
+}
+check(errors.length === 0, `no page errors after the equations import (${errors.slice(0, 2).join(' | ')})`);
 
 await browser.close();
 server.close();

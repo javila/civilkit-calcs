@@ -19,6 +19,8 @@ pub struct Sheet {
     pub component_names: Vec<Name>,
     /// Named paragraph styles the file defines (empty when it has none or the reader does not read them).
     pub text_styles: std::collections::HashMap<String, TextStyle>,
+    /// The number of decimal places the file shows results with unless a region says otherwise.
+    pub default_precision: Option<i32>,
 }
 
 /// What a named paragraph style says about its text. `None` and `false` mean "not stated".
@@ -124,6 +126,8 @@ pub struct MathRegion {
     /// The value is data the reader took from an input component's saved workbook: a definition
     /// that is live from here on, but frozen at what the file held.
     pub frozen: bool,
+    /// The decimal places the file shows this region's result with (its own result format).
+    pub precision: Option<i32>,
 }
 
 /// A stored scalar result: the number (or string) as written, and its unit in the source's spelling.
