@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,286,579 bytes raw, 524,327 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
+Size of the module: 1,294,244 bytes raw, 527,274 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features, the workbook reader and the equation display added about 100 KB.
 
 ## Use
 
@@ -82,6 +82,37 @@ the number of regions they block.
 - **Picture beside text.** A picture with text regions to its right that overlap its vertical extent is one flex block: the picture on the left and
   those texts stacked beside it in reading order, whatever baselines the texts sit on (a title picture with a chapter line and a
   title line). Text below the picture is not pulled in.
+
+### Equations as the author wrote them
+
+A converted math region is shown as the author's equation and computed out of sight, so the page reads like the source.
+
+- **A definition** (`:=`) is computed inside `#hide` ... `#end hide` and shown as a typeset `#noc` block that carries the
+  source's own names, subscripts, operators and matrix orientation: `s = [16; 12; 13.5]^(T)*ft` (a row transposed, a
+  superscript T, a dot product), with **no result after it**, as in the source. The computation is still in the text, so the
+  engine records its errors as before. An element definition over a range variable (`h[i] := ...`) is shown the same way
+  (`h.(i) = ...`, indexes as written, no shift to the engine's origin). A definition that cannot be written faithfully
+  (a program block, a range, a call result that is indexed, a gap) keeps the earlier form, computed and visible.
+- **An evaluation** (`=`) is the expression and its result, to the precision the file used (below), under a document-wide
+  `#nosub` so the substituted step the engine normally prints is left out, as in the source. When a name in it was renamed
+  (a variable that has the name of a unit, `s_v` for `s`), the author's expression is typeset first in a `#noc` block and
+  the engine's result line follows, so the original name is on the page and the engine name is too. A result that is an
+  array is wrapped in a scrolling box (`imp-scroll`) instead of wrapping over several lines.
+- **Names without the engine's marks.** The engine draws an arrow over the name of a vector, writes a matrix name in bold
+  and marks a power of an array with a small circle. The source has none of these, and they cannot be turned off in a
+  `#noc` block (they follow what the name holds), so the page carries a small `<style>` that hides them
+  (`.vec`, `b>var`, `sup>small.nth`). The same rules hide them in the worksheet's own results.
+- **Precision.** The file stores the decimal places per result (`precision`, with a document default). The importer writes
+  a `#format 0.###` (as many `#` as places) before the results that use it, only when it changes. `#format` is display
+  only: every value is computed in full (a test checks that `2/3` shown with three places still gives 1000 when
+  multiplied by 1500). It is used instead of `#round` because `#round` keeps one more digit for values below 1
+  (`0.6667` for three places) and the source shows `0.667`. Numbers written inside a typeset equation follow the format
+  in force too, so a shown equation is always preceded by `#format default` (and a `#round 12` at the top of the sheet
+  keeps the literals as typed). Trailing zeros and the source's exponent threshold are not reproduced.
+
+Differences that remain: the engine spells some units differently (`s` for `sec`), prints a unit after every element of a
+vector (the source prints it once after the brackets), writes a transposed result as `transp(h)` (the engine has no
+transpose operator), shows `≡` for an equality and typesets a row of a matrix literal with `;` and a column with `|`.
 
 ### The placeholder rule
 
