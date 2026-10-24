@@ -375,14 +375,14 @@ fn element_assignment_poisons_the_array_name() {
             2,
             0.0,
             20.0,
-            &format!("<ml:define>{}{}</ml:define>", index("v", &[r("1")]), r("9")),
+            &format!("<ml:define>{}{}</ml:define>", index("v", &[n("kk")]), r("9")),
         ),
         math(3, 0.0, 40.0, &eval(&n("v"))),
         math(
             4,
             0.0,
             60.0,
-            &format!("<ml:define>{}{}</ml:define>", index("L", &[r("1")]), r("9")),
+            &format!("<ml:define>{}{}</ml:define>", index("L", &[n("kk")]), r("9")),
         ),
         math(5, 0.0, 80.0, &eval(&n("L"))),
     ]
@@ -537,9 +537,44 @@ fn undefined_before_defined_follows_reading_order() {
 #[test]
 fn global_definitions_convert_with_a_note() {
     let res = one(&format!("<ml:globalDefine>{}{}</ml:globalDefine>", n("c"), r("5")));
-    assert_eq!(lines(&res), vec!["c = 5"]);
+    // Defined out of sight at the top, as a global holds everywhere, and converted where it stands.
+    assert_eq!(lines(&res), vec!["#hide", "c = 5", "#show", "c = 5"]);
     assert!(res.report.notes().any(|i| i.code == Code::GlobalDefinition));
     assert_eq!(res.report.regions_needing_attention(), 0);
+}
+
+#[test]
+fn a_constant_global_defined_below_its_use_is_still_defined_there() {
+    // gg == 4 is written under the line that uses it; a global holds from the top.
+    let regs = [
+        math(1, 0.0, 0.0, &eval(&app("mult", &[n("gg"), r("2")]))),
+        math(
+            2,
+            0.0,
+            20.0,
+            &format!("<ml:globalDefine>{}{}</ml:globalDefine>", n("gg"), r("4")),
+        ),
+        math(
+            3,
+            0.0,
+            40.0,
+            &format!(
+                "<ml:globalDefine>{}{}</ml:globalDefine>",
+                n("hh"),
+                app("mult", &[n("gg"), r("2")])
+            ),
+        ),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    assert!(
+        !res.report.gaps().any(|i| i.code == Code::UndefinedVariable),
+        "{:?}",
+        res.report.issues
+    );
+    // Only the constant is hoisted: h reads another name, so it stays where it is.
+    assert_eq!(lines(&res)[..3], ["#hide", "gg = 4", "#show"]);
+    assert_engine_clean(&res.calcpad);
 }
 
 #[test]
@@ -941,7 +976,9 @@ fn definitions_side_by_side_are_used_in_reading_order() {
     ]
     .concat();
     let res = import_xmcd(&sheet(&regs));
-    assert_eq!(lines(&res), vec!["w = 4", "w"]);
+    // The two regions share a row, so they are also laid out side by side.
+    let text: Vec<String> = lines(&res).into_iter().filter(|l| !l.starts_with('\'')).collect();
+    assert_eq!(text, vec!["w = 4", "w"]);
 }
 
 // ---- report ------------------------------------------------------------------------------------------------------
@@ -1252,4 +1289,60 @@ fn output_is_deterministic() {
     .concat();
     let xml = sheet(&regs);
     assert_eq!(import_xmcd(&xml), import_xmcd(&xml));
+}
+
+// ---- layout of regions that share a row ---------------------------------------------------------------------------
+
+#[test]
+fn math_regions_on_one_row_are_laid_out_side_by_side_in_reading_order() {
+    // Two definitions on a row (left to right), then one alone below.
+    let regs = [
+        math(2, 100.0, 0.0, &eval(&n("a"))),
+        math(1, 0.0, 0.0, &define("a", &r("4"))),
+        math(3, 0.0, 40.0, &eval(&app("plus", &[n("a"), r("1")]))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    let l = lines(&res);
+    let open = l.iter().position(|x| x.contains("imported-row")).expect("a row");
+    assert_eq!(l.iter().filter(|x| x.contains("imported-row")).count(), 1, "{l:?}");
+    // The definition is evaluated before the use, inside the row.
+    assert_eq!(l[open + 1], "'<div>");
+    assert_eq!(l[open + 2], "a = 4");
+    assert_eq!(l[open + 5], "a");
+    // The region below is not wrapped.
+    assert_eq!(l.last().map(String::as_str), Some("a + 1"));
+    assert_engine_clean(&res.calcpad);
+}
+
+#[test]
+fn rows_of_two_text_regions_become_one_table() {
+    let regs = [
+        region(1, 0.0, 0.0, "<text><p style=\"Normal\">alpha</p></text>"),
+        region(2, 100.0, 0.0, "<text><p style=\"Normal\">first letter</p></text>"),
+        region(3, 0.0, 20.0, "<text><p style=\"Normal\">beta</p></text>"),
+        region(4, 100.0, 20.0, "<text><p style=\"Normal\">second letter</p></text>"),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    assert_eq!(res.calcpad.matches("<table").count(), 1, "{}", res.calcpad);
+    assert_eq!(res.calcpad.matches("<tr>").count(), 2, "{}", res.calcpad);
+    assert!(
+        res.calcpad.contains("'alpha\n'</td>\n'<td>\n'first letter"),
+        "{}",
+        res.calcpad
+    );
+    assert_engine_clean(&res.calcpad);
+}
+
+#[test]
+fn regions_that_overlap_across_are_stacked() {
+    // The second region starts inside the first (width 10): not beside it.
+    let regs = [
+        math(1, 0.0, 0.0, &define("a", &r("4"))),
+        math(2, 5.0, 0.0, &eval(&n("a"))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    assert!(!res.calcpad.contains("imported-row"), "{}", res.calcpad);
 }

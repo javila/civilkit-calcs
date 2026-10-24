@@ -187,6 +187,8 @@ pub enum UnOp {
     Sqrt,
     Factorial,
     Transpose,
+    /// The elementwise operator over an expression (`vectorize`).
+    Vectorize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,6 +223,14 @@ pub enum Expr {
         body: Box<Expr>,
         lower: Box<Expr>,
         upper: Box<Expr>,
+    },
+    /// `sum (or product) of body over var`, from `bounds` or, without bounds, over the range
+    /// variable `var` that an earlier region defined.
+    Series {
+        product: bool,
+        var: Name,
+        body: Box<Expr>,
+        bounds: Option<(Box<Expr>, Box<Expr>)>,
     },
     /// First derivative of `body` with respect to `var`, at the current value of `var`.
     Derivative {
@@ -314,6 +324,14 @@ impl Expr {
                 body.for_each_name_mut(f);
                 lower.for_each_name_mut(f);
                 upper.for_each_name_mut(f);
+            }
+            Expr::Series { var, body, bounds, .. } => {
+                f(var);
+                body.for_each_name_mut(f);
+                if let Some((lo, hi)) = bounds {
+                    lo.for_each_name_mut(f);
+                    hi.for_each_name_mut(f);
+                }
             }
             Expr::Derivative { var, body } => {
                 f(var);

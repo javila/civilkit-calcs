@@ -596,7 +596,7 @@ fn unsupported_code(tag: &str) -> Option<Code> {
         "derivative" | "integral" | "nthDerivative" | "partialDerivative" => Code::CalculusOperator,
         "sum" | "product" | "limit" | "iteratedSum" | "iteratedProduct" | "summation" => Code::SummationOperator,
         "vectorize" => Code::VectorizeOperator,
-        "matcol" | "matrow" | "vectorSum" | "magnitude" | "dot" | "cross" => Code::MatrixOperator,
+        "matcol" | "matrow" | "magnitude" | "dot" | "cross" => Code::MatrixOperator,
         _ => return None,
     })
 }
@@ -906,6 +906,48 @@ fn read_calculus(tag: &str, args: &[Node], lim: &Limits, depth: usize) -> Option
     }
 }
 
+/// A sum or product: a lambda over one bound name and, when the operator has them, its bounds.
+/// Without bounds the operator runs over the range variable of that name.
+fn read_series(product: bool, args: &[Node], lim: &Limits, depth: usize) -> Option<Expr> {
+    let lambda = args
+        .first()
+        .copied()
+        .map(unwrap_provenance)
+        .filter(|l| local(*l) == "lambda")?;
+    let parts = ml_kids(lambda);
+    let [bound, body] = parts.as_slice() else { return None };
+    if local(*bound) != "boundVars" {
+        return None;
+    }
+    let vars = ml_kids(*bound);
+    let [v] = vars.as_slice() else { return None };
+    let v = unwrap_provenance(*v);
+    if local(v) != "id" {
+        return None;
+    }
+    let bounds = match args {
+        [_] => None,
+        [_, b] if local(*b) == "bounds" => {
+            let ends = ml_kids(*b);
+            let [lo, hi] = ends.as_slice() else { return None };
+            if local(*lo) == "placeholder" || local(*hi) == "placeholder" {
+                return None;
+            }
+            Some((
+                Box::new(read_expr(*lo, lim, depth + 1)),
+                Box::new(read_expr(*hi, lim, depth + 1)),
+            ))
+        }
+        _ => return None,
+    };
+    Some(Expr::Series {
+        product,
+        var: read_name(v),
+        body: Box::new(read_expr(*body, lim, depth + 1)),
+        bounds,
+    })
+}
+
 /// The statements of a `program` element.
 fn read_program(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
     if depth > lim.max_depth {
@@ -1106,6 +1148,14 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
         "nthRoot" if args.len() == 2 && local(args[0]) == "placeholder" => un(UnOp::Sqrt, &args[1..]),
         "factorial" => un(UnOp::Factorial, &args),
         "transpose" => un(UnOp::Transpose, &args),
+        "vectorize" => un(UnOp::Vectorize, &args),
+        "vectorSum" => Expr::Call(Name::new("vectorSum"), args.iter().map(&rd).collect()),
+        "summation" | "product" => {
+            read_series(tag == "product", &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
+                code: Code::SummationOperator,
+                detail: Some(tag.to_string()),
+            })
+        }
         "integral" | "derivative" => read_calculus(tag, &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
             code: Code::CalculusOperator,
             detail: Some(tag.to_string()),

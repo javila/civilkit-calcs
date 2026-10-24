@@ -179,6 +179,26 @@ fn subst(e: &Expr, env: &HashMap<String, Expr>) -> Option<Expr> {
                 upper: b(upper)?,
             }
         }
+        Expr::Series {
+            product,
+            var,
+            body,
+            bounds,
+        } => {
+            let v = tables::normalise_name(&var.flat());
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Series {
+                product: *product,
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+                bounds: match bounds {
+                    Some((lo, hi)) => Some((b(lo)?, b(hi)?)),
+                    None => None,
+                },
+            }
+        }
         Expr::Derivative { var, body } => {
             let v = tables::normalise_name(&var.flat());
             if env.values().any(|x| mentions(x, &v)) {
@@ -215,6 +235,12 @@ fn mentions(e: &Expr, name: &str) -> bool {
                 || mentions(upper, name)
                 || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
         }
+        Expr::Series { var, body, bounds, .. } => {
+            bounds
+                .as_ref()
+                .is_some_and(|(lo, hi)| mentions(lo, name) || mentions(hi, name))
+                || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
+        }
         Expr::Derivative { var, body } => tables::normalise_name(&var.flat()) != name && mentions(body, name),
         Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => false,
         Expr::Program(_) => true,
@@ -239,6 +265,12 @@ struct Pending {
 /// that row. The baseline (not the top edge) is used because a tall region next to a short one
 /// sits on the same line while their top edges differ.
 pub fn reading_order(regions: &mut Vec<Region>) {
+    let rows = reading_rows(std::mem::take(regions));
+    regions.extend(rows.into_iter().flatten());
+}
+
+/// The same order as [`reading_order`], kept as the rows it was found in (each row left to right).
+pub fn reading_rows(regions: Vec<Region>) -> Vec<Vec<Region>> {
     let key = |r: &Region| r.baseline.unwrap_or(r.top);
     let mut idx: Vec<usize> = (0..regions.len()).collect();
     idx.sort_by(|&a, &b| {
@@ -248,7 +280,7 @@ pub fn reading_order(regions: &mut Vec<Region>) {
             .then(a.cmp(&b))
     });
     // Group into rows, then order each row by left edge.
-    let mut ordered: Vec<usize> = Vec::with_capacity(idx.len());
+    let mut rows_idx: Vec<Vec<usize>> = Vec::new();
     let mut i = 0;
     while i < idx.len() {
         let anchor = key(&regions[idx[i]]);
@@ -264,11 +296,14 @@ pub fn reading_order(regions: &mut Vec<Region>) {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.cmp(&b))
         });
-        ordered.extend(row);
+        rows_idx.push(row);
         i = j;
     }
-    let mut old: Vec<Option<Region>> = std::mem::take(regions).into_iter().map(Some).collect();
-    regions.extend(ordered.iter().filter_map(|&src| old[src].take()));
+    let mut old: Vec<Option<Region>> = regions.into_iter().map(Some).collect();
+    rows_idx
+        .into_iter()
+        .map(|row| row.into_iter().filter_map(|src| old[src].take()).collect())
+        .collect()
 }
 
 /// Calcpad identifiers: a letter, then letters, digits, `_` and primes.
@@ -397,7 +432,7 @@ fn plausible_calcpad(s: &str) -> bool {
 
 /// A range variable `i := a .. z` (no step): its bounds as Calcpad text, and as integers when both
 /// are literals and `a <= z`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RangeInfo {
     a: String,
     z: String,
@@ -456,6 +491,8 @@ struct Tr {
     local_arrays: HashSet<String>,
     /// Output names of local arrays whose elements were set to a unitless 0 literal.
     zero_started: HashSet<String>,
+    /// Arrays made by assigning one element at a literal index (name, engine index of that element).
+    elem_built: HashMap<String, usize>,
     prog_n: usize,
     /// Assignments to temporaries that an expression needs before the line it is on (the engine
     /// cannot index the result of a call: `t = f(x)` then `t.(1; 2)`).
@@ -546,6 +583,12 @@ impl Tr {
                 lower,
                 upper,
             } => self.integral(var, body, lower, upper),
+            Expr::Series {
+                product,
+                var,
+                body,
+                bounds,
+            } => self.series(*product, var, body, bounds.as_ref()),
             Expr::Program(stmts) if self.readable => {
                 let t = self.program_outline(stmts);
                 atom(format!("?program {{ {t} }}?"))
@@ -625,6 +668,51 @@ impl Tr {
         }
     }
 
+    /// True when the expression holds an array: a name known to be one, a matrix literal, or a
+    /// transpose or sum of those.
+    fn holds_array(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Name(n) => {
+                let f = tables::normalise_name(&n.flat());
+                self.arrays.contains(&f) || self.local_arrays.contains(&f)
+            }
+            Expr::Matrix { .. } => true,
+            Expr::Un(_, a) => self.holds_array(a),
+            Expr::Bin(_, a, b) => self.holds_array(a) || self.holds_array(b),
+            _ => false,
+        }
+    }
+
+    /// True when the value of `e` is an array: a matrix literal, a function that makes one, a
+    /// known array, or arithmetic on one.
+    fn yields_array(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Matrix { .. } => true,
+            Expr::Call(f, _) => {
+                matches!(
+                    f.base.as_str(),
+                    "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"
+                )
+            }
+            Expr::Name(_) | Expr::Un(..) | Expr::Bin(..) => self.holds_array(e),
+            _ => false,
+        }
+    }
+
+    /// True when `vectorize(e)` is just `e` in the engine.
+    fn elementwise_ok(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Bin(BinOp::Add | BinOp::Sub, a, b) => self.elementwise_ok(a) && self.elementwise_ok(b),
+            Expr::Bin(BinOp::Mul, a, b) => {
+                self.elementwise_ok(a) && self.elementwise_ok(b) && !(self.holds_array(a) && self.holds_array(b))
+            }
+            Expr::Bin(BinOp::Div, a, b) => self.elementwise_ok(a) && self.elementwise_ok(b) && !self.holds_array(b),
+            Expr::Un(UnOp::Transpose, a) => self.elementwise_ok(a),
+            Expr::Name(_) | Expr::Num(_) | Expr::Str(_) | Expr::Matrix { .. } | Expr::Postfix(..) => true,
+            other => !self.holds_array(other),
+        }
+    }
+
     fn unary(&mut self, op: UnOp, x: &Expr) -> R {
         match op {
             UnOp::Neg => {
@@ -665,6 +753,18 @@ impl Tr {
                 }
                 let inner = self.expr(x).s;
                 atom(format!("transp({})", inner))
+            }
+            UnOp::Vectorize => {
+                // The engine's `+`, `-`, scalar `*` and `/` already work element by element; an
+                // element-by-element product or quotient of two arrays has no operator.
+                if !self.elementwise_ok(x) {
+                    self.issue(
+                        Code::VectorizeOperator,
+                        Some("an element-by-element product, quotient, power or call of arrays".into()),
+                    );
+                    return self.stand_in("vectorize(...)", "?vectorize?");
+                }
+                self.expr(x)
             }
             UnOp::Not => {
                 let _ = self.expr(x);
@@ -964,10 +1064,10 @@ impl Tr {
                     );
                     head.push(format!("{lo} = {a}"));
                     head.push(format!("{hi} = {z}"));
-                    let size = if o == 1 {
-                        format!("max({lo}; {hi})")
-                    } else {
-                        format!("max({lo}; {hi}) - {}", o - 1)
+                    let size = match o {
+                        1 => format!("max({lo}; {hi})"),
+                        o if o > 1 => format!("max({lo}; {hi}) - {}", o - 1),
+                        o => format!("max({lo}; {hi}) + {}", 1 - o),
                     };
                     sizes.push(size);
                     loops.push(format!(
@@ -1002,6 +1102,184 @@ impl Tr {
         }
         out.push("#end val".to_string());
         Ok(out.join("\n"))
+    }
+
+    /// The one range variable an expression reads (not as a function argument or a bound name),
+    /// when it reads exactly one.
+    fn table_range(&self, e: &Expr) -> Option<(String, RangeInfo)> {
+        let mut hit: Vec<(String, RangeInfo)> = self
+            .ranges
+            .iter()
+            .filter(|(k, _)| !self.params.contains(k) && !self.locals.contains_key(*k) && mentions(e, k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        (hit.len() == 1).then(|| hit.remove(0))
+    }
+
+    /// Loops over a range variable, in the range's own order, collecting `rhs` into a new array
+    /// that is then shown (`tail` is a `|unit` conversion).
+    fn table_loops(&mut self, iv: &str, info: &RangeInfo, rhs: &str, pre: &[String], tail: &str) -> String {
+        self.prog_n += 1;
+        let n = self.prog_n;
+        let (a, z) = (&info.a, &info.z);
+        let (lo, hi, k, tbl) = (
+            format!("{iv}_a{n}"),
+            format!("{iv}_z{n}"),
+            format!("{iv}_k{n}"),
+            format!("tbl_{n}"),
+        );
+        let mut out = vec![
+            "#val".to_string(),
+            format!("{lo} = {a}"),
+            format!("{hi} = {z}"),
+            format!("{tbl} = vector(abs({hi} - {lo}) + 1)"),
+            format!("#for {k} = 0 : abs({hi} - {lo})"),
+            format!("{iv} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"),
+        ];
+        out.extend(pre.iter().map(|p| format!("    {p}")));
+        out.push(format!("    {tbl}.({k} + 1) = {rhs}"));
+        out.push("#loop".to_string());
+        out.push("#end val".to_string());
+        out.push(format!("{tbl}{tail}"));
+        out.join("\n")
+    }
+
+    /// A global definition (`x == 5`) holds from the top of the worksheet, wherever it is written.
+    /// Those that are plain constants (numbers and units) are defined first, out of sight; the
+    /// definition itself still appears, and is converted, where it stands.
+    fn hoist_globals(&mut self, rows: &[Vec<Region>]) {
+        fn constant(e: &Expr) -> bool {
+            match e {
+                Expr::Num(_) => true,
+                Expr::Un(UnOp::Neg, a) => constant(a),
+                Expr::Bin(op, a, b) => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow)
+                        && constant(a)
+                        && constant(b)
+                }
+                Expr::Name(n) => n.sub.is_none() && tables::map_unit(&n.base).is_some(),
+                Expr::Postfix(_, a) => constant(a),
+                _ => false,
+            }
+        }
+        let mut lines = Vec::new();
+        for r in rows.iter().flatten() {
+            let RegionKind::Math(m) = &r.kind else { continue };
+            let Stmt::Define {
+                target: Target::Var(n),
+                value,
+                global: true,
+            } = &m.stmt
+            else {
+                continue;
+            };
+            let flat = tables::normalise_name(&n.flat());
+            if m.disabled || !valid_ident(&flat) || flat == "ORIGIN" || !constant(value) {
+                continue;
+            }
+            self.cur.clear();
+            let rhs = self.expr(value);
+            if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                lines.push(format!("{flat} = {}", rhs.s));
+                self.defined.insert(flat);
+            }
+            self.cur.clear();
+        }
+        if !lines.is_empty() {
+            self.lines.push("#hide".to_string());
+            self.lines.extend(lines);
+            self.lines.push("#show".to_string());
+        }
+    }
+
+    /// Translates the regions row by row, in reading order. Regions that share a row are put side
+    /// by side: a run of rows that each hold the same number of text regions (a legend of symbol and
+    /// description) becomes a table, any other row with two or more regions that wrote something
+    /// becomes a wrapping flex row with one block per region. The order the regions are translated
+    /// in, and so the order the engine evaluates them in, is the reading order either way.
+    fn layout_rows(&mut self, rows: &[Vec<Region>]) {
+        self.hoist_globals(rows);
+        struct Cell {
+            text: bool,
+            lines: Vec<String>,
+        }
+        impl Cell {
+            /// Something shows: a cell of comments only does not take part in the layout.
+            fn visible(&self) -> bool {
+                self.lines.iter().any(|l| !l.starts_with("'<!--"))
+            }
+        }
+        let mut done: Vec<Vec<Cell>> = Vec::new();
+        for row in rows {
+            let mut cells = Vec::new();
+            for r in row {
+                let start = self.lines.len();
+                self.region(r);
+                let lines = self.lines.split_off(start);
+                cells.push(Cell {
+                    text: matches!(r.kind, RegionKind::Text(_)),
+                    lines,
+                });
+            }
+            done.push(cells);
+        }
+        // Side by side only when the regions of the row do not overlap across (a region nested in a
+        // text region sits inside it, not beside it).
+        let apart: Vec<bool> = rows
+            .iter()
+            .map(|row| {
+                row.windows(2)
+                    .all(|w| w[0].width > 0.0 && w[1].left >= w[0].left + w[0].width - 1.0)
+            })
+            .collect();
+        let shown = |row: &Vec<Cell>| row.iter().filter(|c| c.visible()).count();
+        let text_pair = |k: usize| {
+            let row = &done[k];
+            let n = shown(row);
+            apart[k] && (2..=4).contains(&n) && row.iter().filter(|c| c.visible()).all(|c| c.text) && n == row.len()
+        };
+        let mut i = 0;
+        while i < done.len() {
+            if text_pair(i) {
+                let n = done[i].len();
+                let mut j = i;
+                while j < done.len() && text_pair(j) && done[j].len() == n {
+                    j += 1;
+                }
+                self.lines.push("'<table class=\"imported-grid\">".to_string());
+                for row in &done[i..j] {
+                    self.lines.push("'<tr>".to_string());
+                    for c in row {
+                        self.lines.push("'<td>".to_string());
+                        self.lines.extend(c.lines.iter().cloned());
+                        self.lines.push("'</td>".to_string());
+                    }
+                    self.lines.push("'</tr>".to_string());
+                }
+                self.lines.push("'</table>".to_string());
+                i = j;
+            } else if apart[i] && shown(&done[i]) >= 2 {
+                for c in done[i].iter().filter(|c| !c.visible()) {
+                    self.lines.extend(c.lines.iter().cloned());
+                }
+                self.lines.push(
+                    "'<div class=\"imported-row\" style=\"display:flex;flex-wrap:wrap;gap:0 2em;align-items:baseline\">"
+                        .to_string(),
+                );
+                for c in done[i].iter().filter(|c| c.visible()) {
+                    self.lines.push("'<div>".to_string());
+                    self.lines.extend(c.lines.iter().cloned());
+                    self.lines.push("'</div>".to_string());
+                }
+                self.lines.push("'</div>".to_string());
+                i += 1;
+            } else {
+                for c in &done[i] {
+                    self.lines.extend(c.lines.iter().cloned());
+                }
+                i += 1;
+            }
+        }
     }
 
     /// Lowers a program that is the value of `name := program` to Calcpad statements and the
@@ -1370,6 +1648,48 @@ impl Tr {
         atom(format!("$Integral{{{b} @ {v} = {lo} : {hi}}}"))
     }
 
+    /// `$Sum{body @ i = lo : hi}` (or `$Product`). Without bounds the operator runs over the range
+    /// variable of the same name, whose bounds are those the earlier region gave it.
+    fn series(&mut self, product: bool, var: &Name, body: &Expr, bounds: Option<&(Box<Expr>, Box<Expr>)>) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        let (lo, hi) = match bounds {
+            Some((lo, hi)) => {
+                if mentions(lo, &v) || mentions(hi, &v) {
+                    self.issue(
+                        Code::SummationOperator,
+                        Some("a bound uses the summation variable's name".into()),
+                    );
+                    if !self.readable {
+                        return atom("?summation?");
+                    }
+                }
+                (self.expr(lo).s, self.expr(hi).s)
+            }
+            None => match self.ranges.get(&v).cloned() {
+                Some(info) if !self.params.contains(&v) => (info.a, info.z),
+                _ => {
+                    self.issue(
+                        Code::SummationOperator,
+                        Some(format!("{v} is not a range variable with bounds")),
+                    );
+                    if !self.readable {
+                        return atom("?summation?");
+                    }
+                    ("?".into(), "?".into())
+                }
+            },
+        };
+        self.params.push(v.clone());
+        let b = self.expr(body).s;
+        self.params.pop();
+        let op = if product { "Product" } else { "Sum" };
+        atom(format!("${op}{{{b} @ {v} = {lo} : {hi}}}"))
+    }
+
     /// `$Slope{body @ x = x}`: the derivative at the value `x` has now. If `x` has no value in the
     /// sheet the source would not have calculated it either, so that is reported as such.
     fn derivative(&mut self, var: &Name, body: &Expr) -> R {
@@ -1489,6 +1809,28 @@ impl Tr {
         }
         let rendered = self.render_args(args);
         let shown_call = format!("{}({})", flat, rendered.join("; "));
+        // `x / SIUnitsOf(x)` is the number of `x` in SI base units. The engine holds SI values but
+        // has no function for their unit, only `getunits` for the unit a value is shown in.
+        if flat == "SIUnitsOf" && n.sub.is_none() && !self.funcs.contains_key(&flat) && args.len() == 1 {
+            self.issue(Code::SiUnitScale, None);
+            return atom(format!("getunits({})", rendered[0]));
+        }
+        // `last(v)` is the index of the last element: the array origin plus the length less one.
+        if flat == "last" && n.sub.is_none() && !self.funcs.contains_key(&flat) && args.len() == 1 {
+            let o = self.origin - 1;
+            let len = format!("len({})", rendered[0]);
+            return match o {
+                0 => atom(len),
+                o if o > 0 => R {
+                    s: format!("{len} + {o}"),
+                    prec: P_ADD,
+                },
+                o => R {
+                    s: format!("{len} - {}", -o),
+                    prec: P_ADD,
+                },
+            };
+        }
         if let Some(&arity) = self.funcs.get(&flat) {
             if arity != args.len() {
                 self.issue(Code::ArityMismatch, Some(flat.clone()));
@@ -1938,6 +2280,7 @@ impl Tr {
         let mut poison: Vec<String> = Vec::new();
         let mut origin_assign: Option<i64> = None;
         let mut range_def: Option<(String, RangeInfo)> = None;
+        let mut multi_names: Vec<String> = Vec::new();
         let shape: &str;
 
         match &m.stmt {
@@ -2040,8 +2383,7 @@ impl Tr {
                         } else {
                             self.expr(value)
                         };
-                        let is_array = matches!(value, Expr::Matrix { .. })
-                            || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
+                        let is_array = self.yields_array(value);
                         if let Some((_, info)) = &range_def {
                             let (a, z) = (&info.a, &info.z);
                             self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
@@ -2053,6 +2395,7 @@ impl Tr {
                         } else {
                             attempt = Some(format!("{} = {}", flat, rhs.s));
                         }
+                        self.elem_built.remove(&flat);
                         define_name = Some((flat, None, is_array));
                         if *global {
                             self.issue(Code::GlobalDefinition, None);
@@ -2086,10 +2429,31 @@ impl Tr {
                         }
                     }
                     Target::Multi(names) => {
-                        self.issue(
-                            Code::BadStructure,
-                            Some("matrix of names as a definition target".into()),
-                        );
+                        let flats: Vec<String> = names.iter().map(|b| tables::normalise_name(&b.flat())).collect();
+                        let distinct = flats.iter().enumerate().all(|(k, f)| !flats[..k].contains(f));
+                        match value {
+                            // `[A, B] := [1, 2]` defines each name from the item in its place.
+                            Expr::Matrix { items, .. }
+                                if items.len() == flats.len() && distinct && flats.iter().all(|f| valid_ident(f)) =>
+                            {
+                                let mut out = Vec::new();
+                                for (f, it) in flats.iter().zip(items) {
+                                    let rhs = self.expr(it);
+                                    out.push(format!("{f} = {}", rhs.s));
+                                }
+                                let text = out.join("\n");
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    emitted = Some(text);
+                                    multi_names = flats.clone();
+                                } else {
+                                    attempt = Some(text);
+                                }
+                            }
+                            _ => self.issue(
+                                Code::BadStructure,
+                                Some("matrix of names as a definition target".into()),
+                            ),
+                        }
                         poison.extend(
                             names
                                 .iter()
@@ -2133,43 +2497,147 @@ impl Tr {
                             (Some(_), Some(r)) if r.is_empty() || r.len() > 2 || !distinct => {
                                 Some("the index is not one or two different range variables")
                             }
-                            (Some(f), Some(_))
-                                if self.defined.contains(f)
+                            (Some(f), Some(r))
+                                if (self.defined.contains(f)
                                     || self.funcs.contains_key(f)
-                                    || self.gap_names.contains_key(f) =>
+                                    || self.gap_names.contains_key(f))
+                                    && !(self.elem_built.get(f) == Some(&1)
+                                        && r.len() == 1
+                                        && !self.funcs.contains_key(f)
+                                        && !self.gap_names.contains_key(f)
+                                        && r[0].1.a == self.origin.to_string()) =>
                             {
                                 Some("the array already has a value, so growing or overwriting it element by element is not read")
                             }
                             (Some(f), Some(_)) if mentions(value, f) => Some("the value reads the array it is filling"),
                             _ => None,
                         };
-                        match (why, flat, ranges) {
-                            (None, Some(f), Some(rs)) => {
-                                for (iv, _) in &rs {
-                                    self.params.push(iv.clone());
+                        let lits: Option<Vec<i64>> = index
+                            .iter()
+                            .map(|e| match e {
+                                Expr::Num(s) => is_int_literal(s),
+                                _ => None,
+                            })
+                            .collect();
+                        let fresh = flat.as_ref().is_some_and(|f| {
+                            !self.defined.contains(f) && !self.funcs.contains_key(f) && !self.gap_names.contains_key(f)
+                        });
+                        // One element of a vector that has a value, at an index that is not a loop: the
+                        // vector grows (zeros) when the index is past its end, then the element is set.
+                        let grow = match (&flat, &ranges) {
+                            (Some(f), None) if index.len() == 1 && self.arrays.contains(f) => Some(f.clone()),
+                            _ => None,
+                        };
+                        if let Some(f) = grow {
+                            let idx = self.index_expr(&index[0]);
+                            let rhs = self.expr(value);
+                            let pre = std::mem::take(&mut self.hoisted);
+                            if !pre.is_empty() {
+                                self.issue(
+                                    Code::ElementAssignment,
+                                    Some("the value indexes the result of a call".to_string()),
+                                );
+                            } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                emitted = Some(format!(
+                                    "#hide\n{f} = resize({f}; max(len({f}); {idx}))\n#show\n{f}.({idx}) = {}",
+                                    rhs.s
+                                ));
+                                self.elem_built.remove(&f);
+                            } else {
+                                attempt = Some(format!("{f}.({idx}) = {}", rhs.s));
+                            }
+                        } else {
+                            let literal = match (&flat, &lits) {
+                                (Some(f), Some(l))
+                                    if fresh && (l.len() == 1 || l.len() == 2) && !mentions(value, f) =>
+                                {
+                                    Some((f.clone(), l.clone()))
                                 }
+                                _ => None,
+                            };
+                            if let Some((f, l)) = literal {
+                                // One element of an array that has no value yet: the array is created
+                                // (zeros) just large enough, without being shown, and the element set.
+                                let idx: Vec<String> = index.iter().map(|e| self.index_expr(e)).collect();
                                 let rhs = self.expr(value);
-                                let idx: Vec<String> = rs
-                                    .iter()
-                                    .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
-                                    .collect();
-                                for _ in &rs {
-                                    self.params.pop();
-                                }
                                 let pre = std::mem::take(&mut self.hoisted);
-                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
-                                    match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
-                                        Ok(t) => emitted = Some(t),
-                                        Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                let ok = idx.iter().all(|s| s.parse::<i64>().is_ok_and(|v| v >= 1));
+                                if !ok || !pre.is_empty() {
+                                    self.issue(
+                                        Code::ElementAssignment,
+                                        Some("the index is below the array origin".to_string()),
+                                    );
+                                } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    let alloc = if idx.len() == 1 {
+                                        format!("{f} = vector({})", idx[0])
+                                    } else {
+                                        format!("{f} = matrix({}; {})", idx[0], idx[1])
+                                    };
+                                    emitted =
+                                        Some(format!("#hide\n{alloc}\n#show\n{f}.({}) = {}", idx.join("; "), rhs.s));
+                                    if idx.len() == 1 {
+                                        self.elem_built.insert(f.clone(), idx[0].parse().unwrap_or(0));
                                     }
                                 } else {
                                     attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
                                 }
+                                let _ = l;
+                            } else {
+                                match (why, flat, ranges) {
+                                    (None, Some(f), Some(rs)) => {
+                                        for (iv, _) in &rs {
+                                            self.params.push(iv.clone());
+                                        }
+                                        let rhs = self.expr(value);
+                                        let idx: Vec<String> = rs
+                                            .iter()
+                                            .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
+                                            .collect();
+                                        for _ in &rs {
+                                            self.params.pop();
+                                        }
+                                        let pre = std::mem::take(&mut self.hoisted);
+                                        if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                            match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
+                                                Ok(t) => {
+                                                    self.elem_built.remove(&f);
+                                                    emitted = Some(t)
+                                                }
+                                                Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                            }
+                                        } else {
+                                            attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
+                                        }
+                                    }
+                                    (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
+                                    (None, ..) => {}
+                                }
                             }
-                            (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
-                            (None, ..) => {}
                         }
                     }
+                }
+            }
+            Stmt::Eval { expr, unit } if self.table_range(expr).is_some() => {
+                // An expression of a range variable shows one value per step of the range: the
+                // values are collected in an array by a loop and the array is shown.
+                shape = "evaluation";
+                let (iv, info) = self.table_range(expr).unwrap_or_default();
+                self.params.push(iv.clone());
+                let e = self.expr(expr);
+                self.params.pop();
+                let pre = std::mem::take(&mut self.hoisted);
+                let mut tail = String::new();
+                if let Some(u) = unit {
+                    let ur = self.expr(u);
+                    tail = format!("|{}", ur.s);
+                    self.issue(Code::UnitOverride, None);
+                }
+                self.issue(
+                    Code::RangeLoop,
+                    Some(format!("{iv} = {} .. {}: shown as a table", info.a, info.z)),
+                );
+                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                    emitted = Some(self.table_loops(&iv, &info, &e.s, &pre, &tail));
                 }
             }
             Stmt::Eval { expr, unit } => {
@@ -2299,6 +2767,14 @@ impl Tr {
                     .push(format!("'<!-- ORIGIN assigned {} in the source -->", v));
             } else if let Some(line) = emitted.take() {
                 self.lines.push(line);
+            }
+            for name in &multi_names {
+                self.ranges.remove(name);
+                self.gap_names.remove(name);
+                self.funcs.remove(name);
+                self.arrays.remove(name);
+                self.elem_built.remove(name);
+                self.defined.insert(name.clone());
             }
             if let Some((name, info)) = &range_def {
                 self.defined.remove(name);
@@ -2502,6 +2978,15 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
             if n.unit && n.sub.is_none() && tables::map_unit(&n.base).is_some() {
                 units.insert(n.base.clone());
             }
+            // A unit the engine spells differently (`sec` is `s`) takes that spelling from any
+            // variable of the same name, labelled or not.
+            if n.sub.is_none() {
+                if let Some(m) = tables::map_unit(&n.base) {
+                    if m != n.base {
+                        units.insert(m);
+                    }
+                }
+            }
         });
         if let Stmt::Define { target, .. } = stmt {
             match target {
@@ -2542,8 +3027,8 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
 
 pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
     rename_unit_clashes(&mut sheet);
-    reading_order(&mut sheet.regions);
-    let has_references = sheet.regions.iter().any(|r| matches!(r.kind, RegionKind::Reference));
+    let rows = reading_rows(std::mem::take(&mut sheet.regions));
+    let has_references = rows.iter().flatten().any(|r| matches!(r.kind, RegionKind::Reference));
     let mut tr = Tr {
         origin: sheet.origin,
         defined: HashSet::new(),
@@ -2560,6 +3045,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
         zero_started: HashSet::new(),
+        elem_built: HashMap::new(),
         prog_n: 0,
         hoisted: Vec::new(),
         loop_stack: Vec::new(),
@@ -2581,9 +3067,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         asset_total: 0,
         has_references,
     };
-    for r in &sheet.regions {
-        tr.region(r);
-    }
+    tr.layout_rows(&rows);
     let mut out = String::new();
     out.push_str(&format!(
         "'<!-- Imported from a foreign worksheet: {} of {} regions need attention. Lines that start with {} mark what did not convert. -->\n",

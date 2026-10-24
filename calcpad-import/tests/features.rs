@@ -294,7 +294,10 @@ fn range_with_element_assignment_origin_one_and_units() {
 #[test]
 fn a_range_variable_used_anywhere_else_is_reported() {
     let res = convert_origin(
-        &[define("i", &range("0", "4")), eval(&app("mult", &[n("i"), r("2")]))],
+        &[
+            define("i", &range("0", "4")),
+            define("z", &app("mult", &[n("i"), r("2")])),
+        ],
         0,
     );
     let g = res.report.gaps().find(|i| i.code == Code::RangeVariable).expect("gap");
@@ -344,8 +347,11 @@ fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
         .find(|i| i.code == Code::ElementAssignment)
         .expect("gap");
     assert!(g.detail.as_deref().unwrap_or("").contains("reads the array"), "{g:?}");
-    // A literal index is not a loop.
-    let res = convert(&[set_element("x", &r("2"), &r("5"))]);
+    // A literal index into an array that already has a value is not a loop.
+    let res = convert(&[
+        define("x", &app("mult", &[r("2"), r("3")])),
+        set_element("x", &r("2"), &r("5")),
+    ]);
     let g = res
         .report
         .gaps()
@@ -1210,4 +1216,173 @@ fn a_transposed_row_is_a_vector_the_engine_can_count() {
     let nums = numbers(&res.calcpad);
     assert_close(nums[nums.len() - 2], 3.0);
     assert_close(nums[nums.len() - 1], 9.0);
+}
+
+// ---- sums, products, range tables, vectors made element by element ----------------------------------
+
+fn series(op: &str, var: &str, body: &str, bounds: Option<(&str, &str)>) -> String {
+    let b = bounds
+        .map(|(lo, hi)| format!("<ml:bounds>{lo}{hi}</ml:bounds>"))
+        .unwrap_or_default();
+    format!(
+        "<ml:apply><ml:{op}/><ml:lambda><ml:boundVars>{}</ml:boundVars>{body}</ml:lambda>{b}</ml:apply>",
+        n(var)
+    )
+}
+
+#[test]
+fn sum_and_product_with_bounds() {
+    // sum k^2 for k = 1..4 is 30; product of k for k = 1..4 is 24.
+    let sq = app("pow", &[n("k"), r("2")]);
+    let res = convert(&[
+        eval(&series("summation", "k", &sq, Some((&r("1"), &r("4"))))),
+        eval(&series("product", "k", &n("k"), Some((&r("1"), &r("4"))))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("$Sum{k^2 @ k = 1 : 4}"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("$Product{k @ k = 1 : 4}"), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 30.0);
+    assert_close(nums[nums.len() - 1], 24.0);
+}
+
+#[test]
+fn sum_over_a_range_variable_uses_its_bounds_and_the_array_origin() {
+    // Origin 0: i = 0..2, v[i = 10 (i + 1) gives 10, 20, 30; the sum over i of v[i is 60.
+    let res = convert_origin(
+        &[
+            define("i", &range("0", "2")),
+            set_element("v", &n("i"), &app("mult", &[r("10"), app("plus", &[n("i"), r("1")])])),
+            eval(&series("summation", "i", &index1("v", &n("i")), None)),
+        ],
+        0,
+    );
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("$Sum{v.(i + 1) @ i = 0 : 2}"), "{}", res.calcpad);
+    assert_close(last(&res.calcpad), 60.0);
+    // A bare sum over a name that is not a range variable is a gap with the reason.
+    let res = convert(&[eval(&series("summation", "q", &n("q"), None))]);
+    assert!(res.report.gaps().any(|i| i.code == Code::SummationOperator));
+}
+
+#[test]
+fn an_expression_of_a_range_variable_is_shown_as_a_table() {
+    // i = 1..3; 2 i shown for every step: the table is an array of 2, 4, 6.
+    let res = convert(&[
+        define("i", &range("1", "3")),
+        eval(&app("mult", &[r("2"), n("i")])),
+        define("t", &app("plus", &[r("1"), r("1")])),
+        eval(&n("t")),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(
+        res.calcpad.contains("#for i_k1 = 0 : abs(i_z1 - i_a1)"),
+        "{}",
+        res.calcpad
+    );
+    let out = engine_lines(&res.calcpad).join("\n");
+    let table = out.lines().find(|l| l.contains("tbl")).expect("the table is shown");
+    let shown: String = table
+        .rsplit('=')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    assert_eq!(shown, "246", "{out}");
+    assert_close(last(&res.calcpad), 2.0);
+}
+
+#[test]
+fn one_element_creates_the_array_and_a_later_fill_replaces_it() {
+    // v[1] := 5, shown; then i = 1..3, v[i] := i * 2 replaces the vector: v[3] = 6.
+    let res = convert(&[
+        set_element("v", &r("1"), &r("5")),
+        eval(&index1("v", &r("1"))),
+        define("i", &range("1", "3")),
+        set_element("v", &n("i"), &app("mult", &[n("i"), r("2")])),
+        eval(&index1("v", &r("3"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 5.0);
+    assert_close(nums[nums.len() - 1], 6.0);
+    // Element 2 first: the array is zeros up to it.
+    let res = convert(&[set_element("w", &r("2"), &r("5")), eval(&index1("w", &r("1")))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 0.0);
+}
+
+#[test]
+fn vector_sum_and_vectorize() {
+    let v = "<ml:matrix rows=\"3\" cols=\"1\"><ml:real>1</ml:real><ml:real>2</ml:real><ml:real>3</ml:real></ml:matrix>";
+    let vec_op = |x: &str| format!("<ml:apply><ml:vectorize/>{x}</ml:apply>");
+    let res = convert(&[
+        define("v", v),
+        eval(&format!("<ml:apply><ml:vectorSum/>{}</ml:apply>", n("v"))),
+        define("u", &vec_op(&app("mult", &[n("v"), r("2")]))),
+        eval(&format!("<ml:apply><ml:vectorSum/>{}</ml:apply>", n("u"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 6.0);
+    assert_close(nums[nums.len() - 1], 12.0);
+    // Two arrays multiplied element by element have no operator: reported, not guessed.
+    let res = convert(&[define("v", v), define("u", &vec_op(&app("mult", &[n("v"), n("v")])))]);
+    assert!(res.report.gaps().any(|i| i.code == Code::VectorizeOperator));
+}
+
+#[test]
+fn the_si_unit_of_a_quantity_is_read_with_a_note() {
+    // 3 ft / SIUnitsOf(3 ft) is a number; the engine has no SI-unit function, so the note says how.
+    let res = convert(&[
+        define("x", &app("mult", &[r("3"), n("ft")])),
+        eval(&app("div", &[n("x"), call("SIUnitsOf", &[n("x")])])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.report.notes().any(|i| i.code == Code::SiUnitScale));
+    assert_close(last(&res.calcpad), 3.0);
+}
+
+#[test]
+fn a_variable_named_like_a_unit_the_engine_spells_differently_is_renamed() {
+    // s := 4 ft and a time written `sec`: the variable must not hide the unit `s`.
+    let res = convert(&[
+        define("s", &app("mult", &[r("4"), n("ft")])),
+        define("t", &app("mult", &[r("2"), n("sec")])),
+        eval_in(&n("t"), "sec"),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("s_v = 4*ft"), "{}", res.calcpad);
+    assert_close(last(&res.calcpad), 2.0);
+}
+
+#[test]
+fn primes_in_a_name_are_the_engine_primes() {
+    let res = convert(&[define("T'", &r("3")), eval(&app("plus", &[n("T'"), r("1")]))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 4.0);
+}
+
+#[test]
+fn a_matrix_of_names_takes_its_values_item_by_item() {
+    // [p; q] := [3; 4] defines p = 3 and q = 4.
+    let names = format!(r#"<ml:matrix rows="2" cols="1">{}{}</ml:matrix>"#, n("pp"), n("qq"));
+    let res = convert(&[
+        define("unused", &r("0")),
+        format!("<ml:define>{names}{}</ml:define>", mat(2, 1, &["3", "4"])),
+        eval(&app("plus", &[n("pp"), n("qq")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 7.0);
+}
+
+#[test]
+fn last_is_the_index_of_the_final_element() {
+    let v = || define("v", &mat(3, 1, &["1", "2", "3"]));
+    let res = convert_origin(&[v(), eval(&call("last", &[n("v")]))], 0);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 2.0);
+    let res = convert(&[v(), eval(&call("last", &[n("v")]))]);
+    assert_close(last(&res.calcpad), 3.0);
 }
