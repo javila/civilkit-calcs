@@ -129,3 +129,103 @@ fn a_dotted_name_with_a_non_unit_part_stays_undefined() {
     let res = convert(&[eval(&n("kN\u{00B7}zz"))]);
     assert!(res.report.gaps().any(|i| i.code == Code::UndefinedVariable));
 }
+
+// ---- 2. integrals and derivatives -------------------------------------------------------------------
+
+fn lambda(var: &str, body: &str) -> String {
+    format!("<ml:lambda><ml:boundVars>{}</ml:boundVars>{body}</ml:lambda>", n(var))
+}
+fn integral(var: &str, body: &str, lo: &str, hi: &str) -> String {
+    format!(
+        "<ml:apply><ml:integral/>{}<ml:lowerBound>{lo}</ml:lowerBound><ml:upperBound>{hi}</ml:upperBound></ml:apply>",
+        lambda(var, body)
+    )
+}
+fn derivative(var: &str, body: &str) -> String {
+    format!(
+        "<ml:apply><ml:derivative/>{}<ml:degree><ml:placeholder/></ml:degree></ml:apply>",
+        lambda(var, body)
+    )
+}
+fn func(name: &str, params: &[&str], body: &str) -> String {
+    let p: String = params.iter().map(|x| n(x)).collect();
+    format!(
+        "<ml:define><ml:function>{}<ml:boundVars>{p}</ml:boundVars></ml:function>{body}</ml:define>",
+        n(name)
+    )
+}
+
+#[test]
+fn integral_of_a_constant_load_keeps_its_units() {
+    // w = 3 kN/m over 0..6 m is 18 kN.
+    let res = convert(&[
+        define("w", &app("div", &[app("mult", &[r("3"), n("kN")]), n("m")])),
+        define("L", &app("mult", &[r("6"), n("m")])),
+        define("F", &integral("x", &n("w"), &r("0"), &n("L"))),
+        eval_in(&n("F"), "kN"),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("$Integral{w @ x = 0*(L) : L}"), "{}", res.calcpad);
+    let nums: Vec<f64> = engine_lines(&res.calcpad)
+        .iter()
+        .filter(|l| l.contains('='))
+        .map(|l| last_number(l))
+        .collect();
+    assert_close(*nums.last().unwrap(), 18.0);
+}
+
+#[test]
+fn integral_of_a_function_of_the_bound_variable() {
+    // q(x) = 2 x, from 1 to 4: 16 - 1 = 15.
+    let res = convert(&[
+        func("q", &["t"], &app("mult", &[r("2"), n("t")])),
+        eval(&integral("x", &call("q", &[n("x")]), &r("1"), &r("4"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums: Vec<f64> = engine_lines(&res.calcpad)
+        .iter()
+        .filter(|l| l.contains('='))
+        .map(|l| last_number(l))
+        .collect();
+    assert_close(*nums.last().unwrap(), 15.0);
+}
+
+#[test]
+fn derivative_is_taken_at_the_current_value() {
+    // d/dx x^3 at x = 3 is 27.
+    let res = convert(&[
+        define("x", &r("3")),
+        eval(&derivative("x", &app("pow", &[n("x"), r("3")]))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums: Vec<f64> = engine_lines(&res.calcpad)
+        .iter()
+        .filter(|l| l.contains('='))
+        .map(|l| last_number(l))
+        .collect();
+    assert_close(*nums.last().unwrap(), 27.0);
+}
+
+#[test]
+fn calculus_that_cannot_be_read_faithfully_is_a_precise_gap() {
+    // No value for x: the source could not calculate it either.
+    let res = convert(&[eval(&derivative("x", &app("pow", &[n("x"), r("3")])))]);
+    let g = res
+        .report
+        .gaps()
+        .find(|i| i.code == Code::CalculusOperator)
+        .expect("gap");
+    assert!(g.detail.as_deref().unwrap_or("").contains("no value"), "{:?}", g);
+    // A bound that uses the integration variable's name is ambiguous.
+    let res = convert(&[define("x", &r("2")), eval(&integral("x", &n("x"), &r("0"), &n("x")))]);
+    let g = res
+        .report
+        .gaps()
+        .find(|i| i.code == Code::CalculusOperator)
+        .expect("gap");
+    assert!(g.detail.as_deref().unwrap_or("").contains("bound"), "{:?}", g);
+    // A second derivative has a degree other than 1: not read.
+    let second = "<ml:apply><ml:derivative/><ml:lambda><ml:boundVars><ml:id>x</ml:id></ml:boundVars><ml:id>x</ml:id></ml:lambda><ml:degree><ml:real>2</ml:real></ml:degree></ml:apply>";
+    let res = convert(&[define("x", &r("2")), eval(second)]);
+    assert!(res.report.gaps().any(|i| i.code == Code::CalculusOperator));
+}

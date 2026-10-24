@@ -95,7 +95,9 @@ unconverted region and checks that it only ever appears inside a placeholder lin
 | Vector, matrix literal | `[a; b; c]`, `[a; b\|c; d]`, a row vector as `transp([a\|b\|c])`. The file stores matrices column by column; the importer reads them that way. |
 | `v[i]`, `M[i, j]` | `v.(i + 1)`, `M.(i + 1; j + 1)` for an array origin of 0; unchanged for 1; a literal index is folded. Note `array-origin`. |
 | `ORIGIN := n` (integer literal) | Later indexes use `n`. Note `origin-assigned`. |
-| Units | See below. |
+| Units | See below. A product written with a middle dot (`kN·m`, `N·m`) is a unit when every factor is: `(kN*m)`. |
+| Integral `∫ f dx` from a to b | `$Integral{f @ x = a : b}`. A bound written as a bare 0 becomes `0*(other bound)` so both bounds carry the same units. The bound variable is local to the body. A bound that uses the variable's own name, or an operand layout that is not `lambda`, `lowerBound`, `upperBound`, stays a `calculus-operator` gap with the reason. |
+| First derivative `d/dx f` | `$Slope{f @ x = x}`, taken at the current value of `x`. If `x` has no value in the sheet the source could not calculate it either: `calculus-operator` gap with that reason. Higher derivatives are not read. |
 | Trigonometric functions | The output starts with `#rad` (the source default is radians); note `angle-mode`. |
 | Numbers with an exponent (`1.5e-3`) | Plain digits (`0.0015`), by moving the decimal point; `(m*10^(e))` beyond 20 places. Calcpad does not read `e` notation. |
 | A variable applied like a function (`k(2)` where `k` is a variable) | `k*2`, note `call-as-multiplication` |
@@ -224,7 +226,7 @@ summary key on them.
 | `program-block` | Multi-line programs (local definitions, loops, conditions) |
 | `solve-block` | Given/Find and relatives |
 | `symbolic-evaluation` | Symbolic evaluation |
-| `calculus-operator` | Derivative and integral operators (the engine has `$Derivative` and `$Integral`; a mapping needs a verified sample of the operand layout) |
+| `calculus-operator` | Derivative and integral operators that do not meet the conditions under What converts (the detail names which); other derivative forms |
 | `summation-operator`, `vectorize-operator`, `matrix-operator` | Sum/product/limit, vectorize, column/row/vector-sum operators |
 | `string-value` | Strings; Calcpad has no string variables |
 | `bare-expression` | An expression with no definition or evaluation operator (documentation, or a solve-block constraint) |

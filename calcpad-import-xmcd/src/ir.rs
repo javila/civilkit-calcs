@@ -198,6 +198,18 @@ pub enum Expr {
         second: Option<Box<Expr>>,
         last: Box<Expr>,
     },
+    /// `integral of body d var from lower to upper`.
+    Integral {
+        var: Name,
+        body: Box<Expr>,
+        lower: Box<Expr>,
+        upper: Box<Expr>,
+    },
+    /// First derivative of `body` with respect to `var`, at the current value of `var`.
+    Derivative {
+        var: Name,
+        body: Box<Expr>,
+    },
     /// A construct the reader recognises by name but does not read further.
     Unsupported {
         code: Code,

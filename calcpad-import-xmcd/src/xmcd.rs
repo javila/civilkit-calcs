@@ -758,6 +758,65 @@ fn read_expr(n: Node, lim: &Limits, depth: usize) -> Expr {
     }
 }
 
+fn single<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    let k = ml_kids(n);
+    (k.len() == 1).then(|| k[0])
+}
+
+/// `integral(lambda(boundVars x, body), lowerBound a, upperBound b)` and
+/// `derivative(lambda(boundVars x, body), degree 1)`. Any other layout is left unread (`None`).
+fn read_calculus(tag: &str, args: &[Node], lim: &Limits, depth: usize) -> Option<Expr> {
+    let lambda = args
+        .first()
+        .copied()
+        .map(unwrap_provenance)
+        .filter(|l| local(*l) == "lambda")?;
+    let parts = ml_kids(lambda);
+    let [bound, body] = parts.as_slice() else { return None };
+    if local(*bound) != "boundVars" {
+        return None;
+    }
+    let vars = ml_kids(*bound);
+    let [v] = vars.as_slice() else { return None };
+    let v = unwrap_provenance(*v);
+    if local(v) != "id" {
+        return None;
+    }
+    let var = read_name(v);
+    let body = Box::new(read_expr(*body, lim, depth + 1));
+    match tag {
+        "integral" => {
+            let [_, lo, hi] = args else { return None };
+            if local(*lo) != "lowerBound" || local(*hi) != "upperBound" {
+                return None;
+            }
+            let (lo, hi) = (single(*lo)?, single(*hi)?);
+            if matches!(local(lo), "placeholder") || matches!(local(hi), "placeholder") {
+                return None;
+            }
+            Some(Expr::Integral {
+                var,
+                body,
+                lower: Box::new(read_expr(lo, lim, depth + 1)),
+                upper: Box::new(read_expr(hi, lim, depth + 1)),
+            })
+        }
+        _ => {
+            // The degree is an empty slot (first order) or the literal 1.
+            let [_, deg] = args else { return None };
+            if local(*deg) != "degree" {
+                return None;
+            }
+            match single(*deg) {
+                Some(d) if local(d) == "placeholder" => {}
+                Some(d) if local(d) == "real" && d.text().map(str::trim) == Some("1") => {}
+                _ => return None,
+            }
+            Some(Expr::Derivative { var, body })
+        }
+    }
+}
+
 /// The operands of an `apply` after the operator; a single `sequence` operand is the argument list.
 fn operands<'a, 'i>(kids: &[Node<'a, 'i>]) -> Vec<Node<'a, 'i>> {
     let rest = &kids[1..];
@@ -839,6 +898,10 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
         "sqrt" => un(UnOp::Sqrt, &args),
         "factorial" => un(UnOp::Factorial, &args),
         "transpose" => un(UnOp::Transpose, &args),
+        "integral" | "derivative" => read_calculus(tag, &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
+            code: Code::CalculusOperator,
+            detail: Some(tag.to_string()),
+        }),
         "indexer" => {
             if args.len() < 2 {
                 return unsupported(Code::BadStructure, "indexer");

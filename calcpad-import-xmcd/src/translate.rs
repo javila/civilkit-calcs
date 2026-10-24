@@ -34,6 +34,33 @@ struct R {
     prec: u8,
 }
 
+/// True when `name` (already normalised) occurs as a name anywhere in `e`.
+fn mentions(e: &Expr, name: &str) -> bool {
+    match e {
+        Expr::Name(n) => tables::normalise_name(&n.flat()) == name,
+        Expr::Un(_, a) | Expr::Postfix(_, a) => mentions(a, name),
+        Expr::Bin(_, a, b) => mentions(a, name) || mentions(b, name),
+        Expr::Call(f, args) => tables::normalise_name(&f.flat()) == name || args.iter().any(|a| mentions(a, name)),
+        Expr::Index(b, idx) => mentions(b, name) || idx.iter().any(|a| mentions(a, name)),
+        Expr::Matrix { items, .. } => items.iter().any(|a| mentions(a, name)),
+        Expr::Range { first, second, last } => {
+            mentions(first, name) || second.as_ref().is_some_and(|s| mentions(s, name)) || mentions(last, name)
+        }
+        Expr::Integral {
+            var,
+            body,
+            lower,
+            upper,
+        } => {
+            mentions(lower, name)
+                || mentions(upper, name)
+                || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
+        }
+        Expr::Derivative { var, body } => tables::normalise_name(&var.flat()) != name && mentions(body, name),
+        Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => false,
+    }
+}
+
 fn atom(s: impl Into<String>) -> R {
     R {
         s: s.into(),
@@ -253,6 +280,13 @@ impl Tr {
                     prec: P_MUL,
                 }
             }
+            Expr::Integral {
+                var,
+                body,
+                lower,
+                upper,
+            } => self.integral(var, body, lower, upper),
+            Expr::Derivative { var, body } => self.derivative(var, body),
             Expr::Index(base, idx) => self.index(base, idx),
             Expr::Matrix { rows, cols, items } => self.matrix(*rows, *cols, items),
             Expr::Range { first, second, last } => {
@@ -364,6 +398,56 @@ impl Tr {
 
     fn render_args(&mut self, args: &[Expr]) -> Vec<String> {
         args.iter().map(|a| self.expr(a).s).collect()
+    }
+
+    /// `$Integral{body @ x = a : b}`. The bound variable is local to the body; if the bounds
+    /// mention the same name the reading is ambiguous and the region is a gap.
+    fn integral(&mut self, var: &Name, body: &Expr, lower: &Expr, upper: &Expr) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        if mentions(lower, &v) || mentions(upper, &v) {
+            self.issue(
+                Code::CalculusOperator,
+                Some("a bound uses the integration variable's name".into()),
+            );
+            return atom("?calculus?");
+        }
+        let mut lo = self.expr(lower).s;
+        let mut hi = self.expr(upper).s;
+        // A bare 0 is a zero of any dimension in the source; the engine wants both bounds in
+        // the same units, so it is written as a zero of the other bound's dimension.
+        let is_zero = |e: &Expr| matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+        if is_zero(lower) && !is_zero(upper) {
+            lo = format!("0*({hi})");
+        } else if is_zero(upper) && !is_zero(lower) {
+            hi = format!("0*({lo})");
+        }
+        self.params.push(v.clone());
+        let b = self.expr(body).s;
+        self.params.pop();
+        atom(format!("$Integral{{{b} @ {v} = {lo} : {hi}}}"))
+    }
+
+    /// `$Slope{body @ x = x}`: the derivative at the value `x` has now. If `x` has no value in the
+    /// sheet the source would not have calculated it either, so that is reported as such.
+    fn derivative(&mut self, var: &Name, body: &Expr) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        if !self.defined.contains(&v) || self.params.contains(&v) {
+            self.issue(
+                Code::CalculusOperator,
+                Some("derivative at a variable that has no value to evaluate it at".into()),
+            );
+            return atom("?calculus?");
+        }
+        let b = self.expr(body).s;
+        atom(format!("$Slope{{{b} @ {v} = {v}}}"))
     }
 
     fn unit_only(&mut self, n: &Name) -> String {
