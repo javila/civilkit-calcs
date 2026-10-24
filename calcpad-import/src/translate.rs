@@ -365,6 +365,36 @@ fn escape_text(s: &str) -> String {
     o
 }
 
+/// One line of an unconverted region as shown to the reader: `true` when it is Calcpad maths that
+/// goes in a `#noc` block (typeset, never evaluated), `false` for plain text.
+type GapLine = (bool, String);
+
+/// A conservative check that a rendered expression is Calcpad the engine parses, so that a `#noc`
+/// block never shows an error: only the characters and shapes the renderer produces for maths,
+/// balanced brackets, no stand-in, no string, no `..`, no indexing of a call result.
+fn plausible_calcpad(s: &str) -> bool {
+    if s.trim().is_empty() || s.len() > 3000 || s.contains("..") || s.contains(").") || s.contains("].") {
+        return false;
+    }
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            c if c.is_alphanumeric() => {}
+            ' ' | '_' | '.' | ',' | ';' | '+' | '-' | '*' | '/' | '^' | '|' | '=' | '<' | '>' | '≡' | '≠' | '≤'
+            | '≥' | '∧' | '∨' | '⊕' | '!' | '$' | '@' | ':' | '%' | '′' | '°' => {}
+            _ => return false,
+        }
+    }
+    depth == 0
+}
+
 /// A range variable `i := a .. z` (no step): its bounds as Calcpad text, and as integers when both
 /// are literals and `a <= z`.
 #[derive(Debug, Clone)]
@@ -431,6 +461,8 @@ struct Tr {
     /// Rendering a gap region for the reader: pieces that cannot be converted keep their real
     /// names instead of a `?stand-in?`, and no issue is recorded.
     readable: bool,
+    /// Set while rendering for the reader when something written cannot be Calcpad maths.
+    readable_bad: bool,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -509,7 +541,7 @@ impl Tr {
             } => self.integral(var, body, lower, upper),
             Expr::Program(stmts) if self.readable => {
                 let t = self.program_outline(stmts);
-                atom(format!("program {{ {t} }}"))
+                atom(format!("?program {{ {t} }}?"))
             }
             Expr::Program(_) => {
                 self.issue(
@@ -530,9 +562,11 @@ impl Tr {
                 let b = second.as_ref().map(|s| self.expr(s).s);
                 let c = self.expr(last).s;
                 self.issue(Code::RangeVariable, None);
-                let s = match b {
-                    Some(b) => format!("{}, {} .. {}", a, b, c),
-                    None => format!("{} .. {}", a, c),
+                let s = match (b, self.readable) {
+                    (Some(b), true) => format!("range({a}; {c}; ({b}) - ({a}))"),
+                    (None, true) => format!("range({a}; {c}; 1)"),
+                    (Some(b), false) => format!("{}, {} .. {}", a, b, c),
+                    (None, false) => format!("{} .. {}", a, c),
                 };
                 atom(s)
             }
@@ -542,7 +576,7 @@ impl Tr {
                     // The element's own name is the best a reader gets (`imag` is the imaginary unit).
                     return match detail.as_deref() {
                         Some("imag") => atom("i"),
-                        Some(d) => atom(d.to_string()),
+                        Some(d) => atom(format!("?{d}?")),
                         None => atom(format!("?{}?", code.as_str())),
                     };
                 }
@@ -553,8 +587,13 @@ impl Tr {
 
     /// The text for something that cannot be converted: its real name or call when rendering a
     /// gap for the reader, else the `?stand-in?`.
-    fn stand_in(&self, readable: &str, placeholder: &str) -> R {
+    fn stand_in(&mut self, readable: &str, placeholder: &str) -> R {
         if self.readable {
+            // A name Calcpad cannot spell cannot be shown as maths.
+            let head = readable.split('(').next().unwrap_or(readable);
+            if !valid_ident(head) {
+                self.readable_bad = true;
+            }
             atom(readable.to_string())
         } else {
             atom(placeholder.to_string())
@@ -655,12 +694,22 @@ impl Tr {
 
     /// The statement of an unconverted region as the reader should see it: Calcpad-style maths
     /// with the real names. Nothing here is recorded in the report.
-    fn readable_stmt(&mut self, stmt: &Stmt) -> Option<String> {
+    fn readable_stmt(&mut self, stmt: &Stmt) -> Option<Vec<GapLine>> {
         let saved_cur = std::mem::take(&mut self.cur);
         let saved_params = std::mem::take(&mut self.params);
         self.readable = true;
-        let text = match stmt {
+        self.readable_bad = false;
+        let as_line = |t: String, bad: bool| -> GapLine { (!bad && plausible_calcpad(&t), t) };
+        let lines: Option<Vec<GapLine>> = match stmt {
             Stmt::Define { target, value, .. } => {
+                let names: Vec<String> = match target {
+                    Target::Var(n) | Target::Func(n, _) => vec![tables::normalise_name(&n.flat())],
+                    Target::Element { base, .. } => base.iter().map(|b| tables::normalise_name(&b.flat())).collect(),
+                    Target::Multi(ns) => ns.iter().map(|n| tables::normalise_name(&n.flat())).collect(),
+                };
+                // An element assignment is only valid for an array the engine holds; a function that
+                // mentions itself is a circular reference to it.
+                let head_bad = names.iter().any(|n| !valid_ident(n)) || matches!(target, Target::Element { .. });
                 let head = match target {
                     Target::Var(n) => tables::normalise_name(&n.flat()),
                     Target::Func(n, ps) => {
@@ -681,23 +730,128 @@ impl Tr {
                         format!("[{}]", l.join("; "))
                     }
                 };
-                Some(format!("{} = {}", head, self.expr(value).s))
+                if let Expr::Program(stmts) = value {
+                    let mut out = vec![(false, format!("{head} = program:"))];
+                    self.program_lines(stmts, 1, &mut out);
+                    Some(out)
+                } else {
+                    let rhs = self.expr(value).s;
+                    let own_name = names.first().map(|n| format!("{n}(")).unwrap_or_default();
+                    let unknown_fn = matches!(target, Target::Func(..))
+                        && self.cur.iter().any(|p| {
+                            matches!(
+                                p.code,
+                                Code::AddinFunction
+                                    | Code::ReferenceFunction
+                                    | Code::BuiltinMissing
+                                    | Code::SolveBlock
+                                    | Code::DependsOnGap
+                                    | Code::UndefinedVariable
+                            )
+                        });
+                    let recursive = unknown_fn || (matches!(target, Target::Func(..)) && rhs.contains(&own_name));
+                    let bad = self.readable_bad || head_bad || recursive;
+                    Some(vec![as_line(format!("{head} = {rhs}"), bad)])
+                }
             }
             Stmt::Eval { expr, unit } => {
                 let mut t = self.expr(expr).s;
                 if let Some(u) = unit {
                     t = format!("{}|{}", t, self.expr(u).s);
                 }
-                Some(t)
+                let bad = self.readable_bad;
+                Some(vec![as_line(t, bad)])
             }
-            Stmt::Bare(e) if matches!(e, Expr::Bin(BinOp::Eq, ..)) => Some(self.expr(e).s.replace(" ≡ ", " = ")),
-            Stmt::Bare(e) => Some(self.expr(e).s),
+            Stmt::Bare(e) => {
+                let mut t = self.expr(e).s;
+                let mut bad = self.readable_bad;
+                if matches!(e, Expr::Bin(BinOp::Eq, ..)) {
+                    t = t.replace(" ≡ ", " = ");
+                    // `f(x) = ...` on its own would be read as a definition of f.
+                    if let Some((lhs, _)) = t.split_once(" = ") {
+                        bad |= lhs.contains('(');
+                    }
+                }
+                Some(vec![as_line(t, bad)])
+            }
             Stmt::Unsupported { .. } => None,
         };
         self.readable = false;
+        self.readable_bad = false;
         self.params = saved_params;
         self.cur = saved_cur;
-        text
+        lines
+    }
+
+    /// The statements of an unconverted program as lines for the reader: assignments and the final
+    /// value are equations, `for`, `while` and `if` are indented text.
+    fn program_lines(&mut self, stmts: &[PStmt], depth: usize, out: &mut Vec<GapLine>) {
+        let pad = "&emsp;".repeat(depth);
+        for st in stmts {
+            match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    self.readable_bad = false;
+                    let name = tables::normalise_name(&n.flat());
+                    let t = format!("{} = {}", name, self.expr(e).s);
+                    out.push((!self.readable_bad && valid_ident(&name) && plausible_calcpad(&t), t));
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                    let t = format!(
+                        "{}.({}) = {}",
+                        tables::normalise_name(&base.flat()),
+                        idx.join("; "),
+                        self.expr(e).s
+                    );
+                    out.push((false, t));
+                }
+                PStmt::For { var, range, body } => {
+                    let v = tables::normalise_name(&var.flat());
+                    let r = match range {
+                        Expr::Range {
+                            first,
+                            second: None,
+                            last,
+                        } => {
+                            format!("{} to {}", self.expr(first).s, self.expr(last).s)
+                        }
+                        other => self.expr(other).s,
+                    };
+                    out.push((false, format!("{pad}for {v} = {r}:")));
+                    self.params.push(v);
+                    self.program_lines(body, depth + 1, out);
+                    self.params.pop();
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    out.push((false, format!("{pad}while {c}:")));
+                    self.program_lines(body, depth + 1, out);
+                }
+                PStmt::If { branches, otherwise } => {
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        out.push((false, format!("{pad}{} {cs}:", if i == 0 { "if" } else { "else if" })));
+                        self.program_lines(b, depth + 1, out);
+                    }
+                    if let Some(o) = otherwise {
+                        out.push((false, format!("{pad}else:")));
+                        self.program_lines(o, depth + 1, out);
+                    }
+                }
+                PStmt::Return(e) => {
+                    let t = self.expr(e).s;
+                    out.push((false, format!("{pad}return {t}")));
+                }
+                PStmt::Break => out.push((false, format!("{pad}break"))),
+                PStmt::Continue => out.push((false, format!("{pad}continue"))),
+                PStmt::Expr(e) => {
+                    self.readable_bad = false;
+                    let t = self.expr(e).s;
+                    out.push((!self.readable_bad && plausible_calcpad(&t), t));
+                }
+                PStmt::Unsupported(w) => out.push((false, format!("{pad}{w}"))),
+            }
+        }
     }
 
     /// A compact one-line outline of a program, for the reader of an unconverted region.
@@ -1274,6 +1428,9 @@ impl Tr {
         if let Some(&arity) = self.funcs.get(&flat) {
             if arity != args.len() {
                 self.issue(Code::ArityMismatch, Some(flat.clone()));
+                if self.readable {
+                    self.readable_bad = true;
+                }
             }
             return atom(format!("{}({})", flat, rendered.join("; ")));
         }
@@ -1362,6 +1519,19 @@ impl Tr {
     }
 
     fn index(&mut self, base: &Expr, idx: &[Expr]) -> R {
+        if self.readable {
+            // The engine checks a typeset line against what it knows: indexing a name it holds as
+            // a number, or the result of a call, is an error even in a `#noc` block.
+            match base {
+                Expr::Name(n) => {
+                    let f = tables::normalise_name(&n.flat());
+                    if self.defined.contains(&f) && !self.arrays.contains(&f) {
+                        self.readable_bad = true;
+                    }
+                }
+                _ => self.readable_bad = true,
+            }
+        }
         let b = self.operand(base, P_ATOM, true);
         if idx.is_empty() || idx.len() > 2 {
             self.issue(Code::BadStructure, Some("index list".into()));
@@ -1444,26 +1614,55 @@ impl Tr {
         }
     }
 
-    fn placeholder(&mut self, id: &str, codes: &[Code], attempt: Option<&str>) {
+    /// The output for a region that did not convert. The machine-readable marker is an HTML
+    /// comment (with the full reason) followed by a small muted note; the original maths, when it
+    /// can be written, follows in a `#noc` block, so it shows as a typeset equation and is never
+    /// evaluated. Lines that cannot be Calcpad maths are shown as code text.
+    fn placeholder(&mut self, id: &str, codes: &[Code], body: Option<&[GapLine]>) {
         let mut names: Vec<&str> = Vec::new();
         for c in codes {
             if !names.contains(&c.as_str()) {
                 names.push(c.as_str());
             }
         }
-        let mut line = format!(
-            "'{} R{} {}] {}",
+        let reason = escape_text(codes[0].reason()).replace("--", "- -");
+        let note = match body {
+            Some(_) => format!("not calculated: {}", names.join(", ")),
+            None => format!("{} (not converted)", escape_text(codes[0].reason())),
+        };
+        self.lines.push(format!(
+            "'<!-- {} R{} {}] {} --><small>{}</small>",
             GAP_MARKER,
             sanitize_id(id),
             names.join(","),
-            escape_text(codes[0].reason())
-        );
-        if let Some(a) = attempt {
-            let a: String = a.chars().take(600).collect();
-            line.push_str(" | ");
-            line.push_str(&escape_text(&a));
+            reason,
+            note
+        ));
+        let Some(lines) = body else { return };
+        let mut in_noc = false;
+        for (eq, text) in lines {
+            let one_line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            if *eq {
+                if !in_noc {
+                    self.lines.push("#noc".to_string());
+                    in_noc = true;
+                }
+                self.lines.push(one_line);
+            } else {
+                if in_noc {
+                    self.lines.push("#end noc".to_string());
+                    in_noc = false;
+                }
+                // Leading `&emsp;` indents are markup already; the rest is text.
+                let indent_len = one_line.len() - one_line.trim_start_matches("&emsp;").len();
+                let (indent, rest) = one_line.split_at(indent_len);
+                let rest: String = rest.chars().take(600).collect();
+                self.lines.push(format!("'{indent}<code>{}</code>", escape_text(&rest)));
+            }
         }
-        self.lines.push(line);
+        if in_noc {
+            self.lines.push("#end noc".to_string());
+        }
     }
 
     /// Registers a binary asset and returns its library path, or `None` over the size budget.
@@ -1505,7 +1704,7 @@ impl Tr {
     /// Output for a region that did not convert: a static picture of the original when the option is
     /// on and the file has one, otherwise the placeholder line (plus a labelled saved result when
     /// that option is on). Returns true when a picture was written.
-    fn show_gap(&mut self, r: &Region, codes: &[Code], attempt: Option<&str>, saved: Option<&SavedResult>) -> bool {
+    fn show_gap(&mut self, r: &Region, codes: &[Code], body: Option<&[GapLine]>, saved: Option<&SavedResult>) -> bool {
         if saved.is_some() {
             self.report.pictures.saved_result_available += 1;
         }
@@ -1528,7 +1727,7 @@ impl Tr {
                 }
             }
         }
-        self.placeholder(&r.id, codes, attempt);
+        self.placeholder(&r.id, codes, body);
         if self.opts.saved_results {
             if let Some(sr) = saved {
                 let unit = sr.unit.as_ref().map(|u| format!(" {}", u)).unwrap_or_default();
@@ -2007,7 +2206,9 @@ impl Tr {
                 let _ = arity;
                 self.gap_names.insert(name, root);
             }
-            let shown = self.readable_stmt(&m.stmt).or(attempt);
+            let shown: Option<Vec<GapLine>> = self
+                .readable_stmt(&m.stmt)
+                .or_else(|| attempt.map(|a| vec![(false, a)]));
             pictured = self.show_gap(r, &gap_codes, shown.as_deref(), m.saved_result.as_ref());
         }
         self.flush_issues(&r.id, r.line, None);
@@ -2163,6 +2364,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         cond_depth: 0,
         ret: None,
         readable: false,
+        readable_bad: false,
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),

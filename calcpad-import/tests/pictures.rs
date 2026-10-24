@@ -201,7 +201,7 @@ fn a_picture_with_nothing_usable_keeps_the_placeholder() {
     assert!(res
         .calcpad
         .lines()
-        .any(|l| l.starts_with(&format!("'{GAP_MARKER} R5 image]"))));
+        .any(|l| l.starts_with(&format!("'<!-- {GAP_MARKER} R5 image]"))));
     assert_eq!(res.report.regions_needing_attention(), 1);
     // A picture with no items at all, or a dangling reference, is the same.
     let res = run(&sheet(
@@ -331,7 +331,7 @@ fn unconverted_regions_show_their_saved_picture_with_a_caption() {
 #[test]
 fn without_a_rendering_the_placeholder_stays() {
     let res = run(&sheet(&ole_region(4, 0, None), ""));
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R4 ole-object]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R4 ole-object]")));
     assert!(res.assets.is_empty());
     assert_eq!(res.report.regions_showing(), 0);
 }
@@ -356,7 +356,7 @@ fn picture_switch_off_restores_placeholders() {
             ..ImportOptions::default()
         },
     );
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R4 ole-object]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R4 ole-object]")));
     assert!(res.assets.is_empty());
     assert!(!res.calcpad.contains("<img"));
 }
@@ -534,7 +534,7 @@ fn saved_results_are_counted_and_written_only_on_request() {
         "'<i>saved result from the original, not live (R12): 571.9381 International_BTU/(pound)</i>"
     );
     // The placeholder is still there: the saved result is an addition, not a conversion.
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R12 addin-function]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R12 addin-function]")));
     assert_eq!(res.report.regions_needing_attention(), 1);
 }
 

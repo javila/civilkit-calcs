@@ -225,12 +225,39 @@ fn mcdx_of(inners: &[&str]) -> ImportResult {
     Pkg::new(&regions).import()
 }
 
+/// The output lines without the banner. A gap is one line again: its marker comment (as
+/// `'[import-gap Rn codes] reason`) and, after ` | `, the lines of its equation block.
 fn lines(res: &ImportResult) -> Vec<String> {
-    res.calcpad
-        .lines()
-        .filter(|l| !l.starts_with("'<!-- Imported"))
-        .map(|l| l.to_string())
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut in_noc = false;
+    let mut in_gap = false;
+    for l in res.calcpad.lines().filter(|l| !l.starts_with("'<!-- Imported")) {
+        if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
+            let head = rest.split(" --><small>").next().unwrap_or(rest);
+            out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
+            in_gap = true;
+            continue;
+        }
+        if in_gap {
+            if l == "#noc" {
+                in_noc = true;
+                continue;
+            }
+            if l == "#end noc" {
+                in_noc = false;
+                continue;
+            }
+            if in_noc || l.starts_with("'<code>") || l.starts_with("'&emsp;") {
+                let last = out.last_mut().unwrap();
+                last.push_str(if last.contains(" | ") { " ; " } else { " | " });
+                last.push_str(l.trim_start_matches('\''));
+                continue;
+            }
+            in_gap = false;
+        }
+        out.push(l.to_string());
+    }
+    out
 }
 
 /// Imports the same math through both front doors and checks that they agree on the text and on
@@ -490,7 +517,9 @@ fn xaml_elements_that_would_hide_content_are_reported() {
     let details: Vec<_> = gaps.iter().filter_map(|i| i.detail.clone()).collect();
     assert!(details.contains(&"InlineUIContainer".to_string()), "{details:?}");
     assert!(details.contains(&"Table".to_string()), "{details:?}");
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R1 rich-text-element]")));
+    assert!(res
+        .calcpad
+        .contains(&format!("'<!-- {GAP_MARKER} R1 rich-text-element]")));
     // The prose around them still converts.
     assert!(res.calcpad.contains("'before"));
 }

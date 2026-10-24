@@ -65,13 +65,39 @@ fn func(name: &str, params: &[&str], body: &str) -> String {
     )
 }
 
-/// The output lines without the banner.
+/// The output lines without the banner. A gap is one line again: its marker comment (as
+/// `'[import-gap Rn codes] reason`) and, after ` | `, the lines of its equation block.
 fn lines(res: &ImportResult) -> Vec<String> {
-    res.calcpad
-        .lines()
-        .filter(|l| !l.starts_with("'<!-- Imported"))
-        .map(|l| l.to_string())
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut in_noc = false;
+    let mut in_gap = false;
+    for l in res.calcpad.lines().filter(|l| !l.starts_with("'<!-- Imported")) {
+        if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
+            let head = rest.split(" --><small>").next().unwrap_or(rest);
+            out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
+            in_gap = true;
+            continue;
+        }
+        if in_gap {
+            if l == "#noc" {
+                in_noc = true;
+                continue;
+            }
+            if l == "#end noc" {
+                in_noc = false;
+                continue;
+            }
+            if in_noc || l.starts_with("'<code>") || l.starts_with("'&emsp;") {
+                let last = out.last_mut().unwrap();
+                last.push_str(if last.contains(" | ") { " ; " } else { " | " });
+                last.push_str(l.trim_start_matches('\''));
+                continue;
+            }
+            in_gap = false;
+        }
+        out.push(l.to_string());
+    }
+    out
 }
 
 fn one(inner: &str) -> ImportResult {
@@ -1165,7 +1191,7 @@ fn unconverted_regions_never_leak_text_without_the_marker() {
     .concat();
     let res = import_xmcd(&sheet(&regs));
     assert_eq!(res.report.regions_needing_attention(), 8);
-    for l in res.calcpad.lines() {
+    for l in lines(&res) {
         if l.contains(payload) {
             // Allowed only inside a marked placeholder, as a bounded, escaped attempt.
             assert!(
@@ -1177,9 +1203,9 @@ fn unconverted_regions_never_leak_text_without_the_marker() {
         assert!(!l.contains("#include"), "{l}");
     }
     // Exactly one placeholder per unconverted region, each carrying its (sanitised) region id.
-    let ph: Vec<&str> = res
-        .calcpad
-        .lines()
+    let all = lines(&res);
+    let ph: Vec<&String> = all
+        .iter()
         .filter(|l| l.starts_with(&format!("'{GAP_MARKER}")))
         .collect();
     assert_eq!(ph.len(), 8);
@@ -1201,13 +1227,13 @@ fn every_gap_in_the_report_has_a_placeholder_line() {
     for id in &gap_regions {
         let tag = format!("'{GAP_MARKER} R{id} ");
         assert!(
-            res.calcpad.lines().any(|l| l.starts_with(&tag)),
+            lines(&res).iter().any(|l| l.starts_with(&tag)),
             "no placeholder for region {id}"
         );
     }
     assert_eq!(
-        res.calcpad
-            .lines()
+        lines(&res)
+            .iter()
             .filter(|l| l.starts_with(&format!("'{GAP_MARKER}")))
             .count(),
         gap_regions.len()

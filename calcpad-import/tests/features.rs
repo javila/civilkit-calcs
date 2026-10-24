@@ -715,25 +715,85 @@ fn an_unconverted_region_is_shown_with_its_real_names() {
         define("s", "<ml:str>abc</ml:str>"),
         eval(&app("mult", &[call("rows", &[n("Input_N")]), n("kN")])),
     ]);
-    let l1 = gap_line(&res, "1");
-    assert!(l1.contains("| y = vendor_fn(a; 2)"), "{l1}");
-    assert!(gap_line(&res, "2").contains("| z = y + 1"), "{}", gap_line(&res, "2"));
+    // Maths goes in a #noc block (typeset, never evaluated), one block per region.
     assert!(
-        gap_line(&res, "3").contains("| s = ") && gap_line(&res, "3").contains("abc"),
+        res.calcpad.contains("#noc\ny = vendor_fn(a; 2)\n#end noc"),
         "{}",
-        gap_line(&res, "3")
+        res.calcpad
+    );
+    assert!(res.calcpad.contains("#noc\nz = y + 1\n#end noc"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("n_rows(Input_N)*kN\n#end noc"), "{}", res.calcpad);
+    // A string is not Calcpad maths: it is code text, not an equation.
+    assert!(res.calcpad.contains("<code>s = \"\"abc\"\"</code>"), "{}", res.calcpad);
+    // The marker and the codes are in an HTML comment, with a small muted note.
+    assert!(
+        gap_line(&res, "1").starts_with("'<!-- [import-gap R1 "),
+        "{}",
+        gap_line(&res, "1")
     );
     assert!(
-        gap_line(&res, "4").contains("rows(Input_N)*kN"),
+        gap_line(&res, "1").contains("<small>not calculated:"),
         "{}",
-        gap_line(&res, "4")
+        gap_line(&res, "1")
     );
-    for l in res.calcpad.lines().filter(|l| l.contains("import-gap")) {
-        let shown = l.rsplit(" | ").next().unwrap();
-        assert!(!shown.contains('?'), "stand-in left in {l}");
+    // No stand-in inside any equation block.
+    let mut in_noc = false;
+    for l in res.calcpad.lines() {
+        match l {
+            "#noc" => in_noc = true,
+            "#end noc" => in_noc = false,
+            _ if in_noc => assert!(!l.contains('?'), "stand-in in {l}"),
+            _ => {}
+        }
     }
-    // The marker and the code are still there for tools.
-    assert!(l1.contains("[import-gap R1 "), "{l1}");
+}
+
+/// The page's HTML for some Calcpad text, to look at what is rendered, not only the text.
+fn html_of(code: &str) -> String {
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.parse(code, true);
+    parser.html_result.clone()
+}
+
+#[test]
+fn gap_regions_render_as_equations_without_errors() {
+    let res = convert(&[
+        define(
+            "N",
+            &app(
+                "mult",
+                &[
+                    call("submatrix", &[n("Input_N"), r("1"), n("n_n"), r("3"), r("3")]),
+                    n("cm"),
+                ],
+            ),
+        ),
+        define("y", &call("vendor_fn", &[n("a"), r("2")])),
+        define("k", &app("plus", &[n("c"), n("d")])),
+        app("equal", &[n("fB"), plus(&times(&n("c"), &n("L")), &n("d"))]),
+        define("s", "<ml:str>abc</ml:str>"),
+        define("a", &r("2")),
+        eval(&app("plus", &[n("a"), r("1")])),
+    ]);
+    let html = html_of(&res.calcpad);
+    assert!(
+        !html.contains("class=\"err\""),
+        "engine error in\n{}\n---\n{html}",
+        res.calcpad
+    );
+    // The gap equations are typeset (class eq, names in <var>), not prose.
+    assert!(html.contains("<b>submatrix</b>"), "{html}");
+    assert!(html.contains("<var>vendor</var><sub>fn</sub>"), "{html}");
+    assert!(
+        html.contains("<var>f</var><sub>B</sub>") || html.contains("<var>fB</var>"),
+        "{html}"
+    );
+    assert!(
+        !html.contains("?name?") && !html.contains("?gap?") && !html.contains("?call?"),
+        "{html}"
+    );
+    // They are not evaluated: nothing is defined by them, the later regions still calculate.
+    assert!(html.contains("<var>a</var> + 1 = 2 + 1 = 3"), "{html}");
 }
 
 #[test]
@@ -1087,8 +1147,10 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
         "{d}"
     );
     // And the readable line still shows the function.
+    assert!(res.calcpad.contains("<code>h(x) = program:</code>"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("#noc\nt = 0\n#end noc"), "{}", res.calcpad);
     assert!(
-        res.calcpad.contains("| h(x) = program { t = 0; for k in 1 .. x"),
+        res.calcpad.contains("'&emsp;<code>for k = 1 to x:</code>"),
         "{}",
         res.calcpad
     );
@@ -1109,11 +1171,26 @@ fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
     assert_eq!(codes, vec![Code::ConstraintEquation], "{:?}", res.report.issues);
     let l = gap_line(&res, "2");
     assert!(l.contains("constraint-equation"), "{l}");
-    assert!(l.contains("| fB = c*L + d"), "{l}");
+    assert!(res.calcpad.contains("#noc\nfB = c*L + d\n#end noc"), "{}", res.calcpad);
     // The constraint does not stop the sheet: the later region converted.
     let nums = numbers(&res.calcpad);
     assert_close(*nums.last().unwrap(), 6.0);
     // Any other bare expression is still a bare expression.
     let res = convert(&[eval(&n("zz"))]);
     assert!(!res.report.gaps().any(|i| i.code == Code::ConstraintEquation));
+}
+
+#[test]
+fn nth_root_with_an_empty_degree_is_the_square_root() {
+    // sqrt(16 + 9) = 5.
+    let res = convert(&[eval(
+        "<ml:apply><ml:nthRoot/><ml:placeholder/><ml:apply><ml:plus/><ml:real>16</ml:real><ml:real>9</ml:real></ml:apply></ml:apply>",
+    )]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 5.0);
+    // A degree that is given is not read.
+    let res = convert(&[eval(
+        "<ml:apply><ml:nthRoot/><ml:real>3</ml:real><ml:real>8</ml:real></ml:apply>",
+    )]);
+    assert!(res.report.gaps().any(|i| i.code == Code::UnknownElement));
 }

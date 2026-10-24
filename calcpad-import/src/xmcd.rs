@@ -1020,6 +1020,9 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
         "not" => un(UnOp::Not, &args),
         "absval" => un(UnOp::Abs, &args),
         "sqrt" => un(UnOp::Sqrt, &args),
+        // `nthRoot` with an empty degree slot is the square root; any other degree is not read
+        // (its operand order is unverified).
+        "nthRoot" if args.len() == 2 && local(args[0]) == "placeholder" => un(UnOp::Sqrt, &args[1..]),
         "factorial" => un(UnOp::Factorial, &args),
         "transpose" => un(UnOp::Transpose, &args),
         "integral" | "derivative" => read_calculus(tag, &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
