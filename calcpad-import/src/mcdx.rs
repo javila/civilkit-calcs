@@ -211,6 +211,7 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         rels,
         results,
         lim: &limits,
+        component_names: std::cell::RefCell::new(Vec::new()),
     };
 
     let mut regions = Vec::new();
@@ -242,7 +243,12 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
             }
         }
     }
-    Ok(Sheet { origin, regions })
+    let component_names = ctx.component_names.take();
+    Ok(Sheet {
+        origin,
+        regions,
+        component_names,
+    })
 }
 
 struct Ctx<'a, 'd> {
@@ -251,6 +257,8 @@ struct Ctx<'a, 'd> {
     rels: HashMap<String, (String, String)>,
     results: HashMap<&'d str, Node<'d, 'd>>,
     lim: &'a Limits,
+    /// Names defined inside components that are skipped.
+    component_names: std::cell::RefCell<Vec<Name>>,
 }
 
 fn num_attr(n: Node, names: &[&str]) -> Option<f64> {
@@ -306,6 +314,11 @@ impl Ctx<'_, '_> {
                     .and_then(|id| self.results.get(id))
                     .and_then(|rd| rd.children().find(|k| is_ml(*k) && local(*k) == "result"))
                     .and_then(xmcd::read_saved_result);
+                m.saved_expr = c
+                    .attribute("resultRef")
+                    .and_then(|id| self.results.get(id))
+                    .and_then(|rd| rd.children().find(|k| is_ml(*k) && local(*k) == "result"))
+                    .and_then(xmcd::read_saved_expr);
                 out.push(mk(RegionKind::Math(m)));
             }
             "text" => {
@@ -380,9 +393,80 @@ impl Ctx<'_, '_> {
             "oleObject" | "ole" => out.push(mk(RegionKind::Ole)),
             "reference" => out.push(mk(RegionKind::Reference)),
             "pageBreak" => out.push(mk(RegionKind::PageBreak)),
-            t if t.ends_with("Component") || t == "component" => out.push(mk(RegionKind::Component)),
+            t if t.ends_with("Component") || t == "component" => {
+                // What the component defines is not run here; note the names so that regions
+                // that depend on them can be told apart from regions that depend on nothing.
+                for d in c.descendants().filter(|d| is_ml(*d) && local(*d) == "define") {
+                    if let Some(id) = d.children().find(|k| is_ml(*k)).filter(|k| local(*k) == "id") {
+                        self.component_names.borrow_mut().push(xmcd::read_name_pub(id));
+                    }
+                }
+                // A spreadsheet component reads ranges of its embedded workbook into names
+                // (`Name := excel["Sheet1!A1:C5"]`). The workbook is saved in the file, so the
+                // numbers in a range can be read and the name defined from them.
+                let ole = c
+                    .descendants()
+                    .find(|d| d.is_element() && local(*d) == "excelTable")
+                    .and_then(|t| t.attribute("item-idref"))
+                    .and_then(|i| self.part(i));
+                if let Some(ole) = ole {
+                    for reg in c.descendants().filter(|d| is_ws(*d, "region")) {
+                        let Some(m) = reg.children().find(|k| is_ws(*k, "math")) else {
+                            continue;
+                        };
+                        if let Some(region) = self.excel_definition(reg, m, &ole, (left, top)) {
+                            out.push(region);
+                        }
+                    }
+                }
+                out.push(mk(RegionKind::Component))
+            }
             other => out.push(mk(RegionKind::Other(other.to_string()))),
         }
+    }
+
+    /// `Name := excel["Sheet!A1:B2"]` with the numbers of that range from the workbook, as a
+    /// definition of `Name` as a literal matrix (a number for a single cell).
+    fn excel_definition(&self, reg: Node, math: Node, ole: &[u8], parent: (f64, f64)) -> Option<Region> {
+        let define = math.children().find(|k| is_ml(*k) && local(*k) == "define")?;
+        let kids: Vec<Node> = define.children().filter(|k| is_ml(*k)).collect();
+        let [target, value] = kids.as_slice() else { return None };
+        if local(*target) != "id" || local(*value) != "apply" {
+            return None;
+        }
+        let v: Vec<Node> = value.children().filter(|k| is_ml(*k)).collect();
+        let [op, book, range] = v.as_slice() else { return None };
+        if local(*op) != "indexer" || local(*book) != "id" || book.text()?.trim() != "excel" || local(*range) != "str" {
+            return None;
+        }
+        let (rows, cols, values) = crate::xls::read_range(ole, range.text()?.trim())?;
+        let items: Vec<Expr> = values.iter().map(|x| Expr::Num(format!("{x}"))).collect();
+        let expr = if rows == 1 && cols == 1 {
+            items.into_iter().next()?
+        } else {
+            Expr::Matrix { rows, cols, items }
+        };
+        Some(Region {
+            id: reg.attribute("region-id").unwrap_or("?").to_string(),
+            left: parent.0 + num_attr(reg, &["left"]).unwrap_or(0.0),
+            top: parent.1 + num_attr(reg, &["top"]).unwrap_or(0.0),
+            baseline: None,
+            line: 0,
+            width: 0.0,
+            height: 0.0,
+            rendering: None,
+            kind: RegionKind::Math(MathRegion {
+                stmt: Stmt::Define {
+                    target: Target::Var(xmcd::read_name_pub(*target)),
+                    value: expr,
+                    global: false,
+                },
+                disabled: false,
+                saved_result: None,
+                saved_expr: None,
+                frozen: true,
+            }),
+        })
     }
 
     /// The XAML text of a flow document part: a nested zip (`Xaml/Document.xaml`) or plain XML.

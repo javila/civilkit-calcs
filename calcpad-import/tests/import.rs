@@ -882,6 +882,8 @@ fn mk(id: &str, left: f64, top: f64, baseline: Option<f64>) -> Region {
             stmt: Stmt::Bare(calcpad_import::ir::Expr::Num("1".into())),
             disabled: false,
             saved_result: None,
+            saved_expr: None,
+            frozen: false,
         }),
     }
 }

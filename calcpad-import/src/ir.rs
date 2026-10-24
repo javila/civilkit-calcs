@@ -14,6 +14,9 @@ pub struct Sheet {
     /// Regions, nested ones (math inside a text region) already flattened out. Not yet in
     /// reading order: the translator sorts them.
     pub regions: Vec<Region>,
+    /// Names that components the reader does not run (spreadsheet and similar input components)
+    /// define in the file.
+    pub component_names: Vec<Name>,
 }
 
 /// A picture region: a vector metafile (WMF or EMF bytes) and/or a PNG.
@@ -42,6 +45,7 @@ pub struct Region {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum RegionKind {
     Text(Vec<Paragraph>),
     Math(MathRegion),
@@ -89,6 +93,12 @@ pub struct MathRegion {
     pub disabled: bool,
     /// The last calculated result the file stored for the region, when it is a single value.
     pub saved_result: Option<SavedResult>,
+    /// The stored result when it is a complete value: a number, or a matrix of numbers, with its
+    /// unit as a product of unit names (as an expression the translator renders).
+    pub saved_expr: Option<Expr>,
+    /// The value is data the reader took from an input component's saved workbook: a definition
+    /// that is live from here on, but frozen at what the file held.
+    pub frozen: bool,
 }
 
 /// A stored scalar result: the number (or string) as written, and its unit in the source's spelling.
@@ -129,6 +139,9 @@ pub enum Target {
 pub struct Name {
     pub base: String,
     pub sub: Option<String>,
+    /// The file labels the identifier as a unit (so `N` is the newton even when a variable `N`
+    /// exists).
+    pub unit: bool,
 }
 
 impl Name {
@@ -136,6 +149,7 @@ impl Name {
         Name {
             base: base.to_string(),
             sub: None,
+            unit: false,
         }
     }
     /// The Calcpad spelling: `base_sub`.
@@ -260,4 +274,128 @@ pub enum PStmt {
     Expr(Expr),
     /// A statement the reader recognises but does not read (the element name is the detail).
     Unsupported(String),
+}
+
+// ---------------------------------------------------------------------------------------------
+// Walking the tree
+
+impl Expr {
+    /// Calls `f` on every identifier that is read or bound in this expression (not on the name of
+    /// a function being called, nor on the unit of a postfix application).
+    pub fn for_each_name_mut(&mut self, f: &mut dyn FnMut(&mut Name)) {
+        match self {
+            Expr::Name(n) => f(n),
+            Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => {}
+            Expr::Un(_, a) | Expr::Postfix(_, a) => a.for_each_name_mut(f),
+            Expr::Bin(_, a, b) => {
+                a.for_each_name_mut(f);
+                b.for_each_name_mut(f);
+            }
+            Expr::Call(_, args) => args.iter_mut().for_each(|a| a.for_each_name_mut(f)),
+            Expr::Index(b, idx) => {
+                b.for_each_name_mut(f);
+                idx.iter_mut().for_each(|a| a.for_each_name_mut(f));
+            }
+            Expr::Matrix { items, .. } => items.iter_mut().for_each(|a| a.for_each_name_mut(f)),
+            Expr::Range { first, second, last } => {
+                first.for_each_name_mut(f);
+                if let Some(s) = second {
+                    s.for_each_name_mut(f);
+                }
+                last.for_each_name_mut(f);
+            }
+            Expr::Integral {
+                var,
+                body,
+                lower,
+                upper,
+            } => {
+                f(var);
+                body.for_each_name_mut(f);
+                lower.for_each_name_mut(f);
+                upper.for_each_name_mut(f);
+            }
+            Expr::Derivative { var, body } => {
+                f(var);
+                body.for_each_name_mut(f);
+            }
+            Expr::Program(stmts) => stmts.iter_mut().for_each(|s| s.for_each_name_mut(f)),
+        }
+    }
+}
+
+impl PStmt {
+    /// Calls `f` on every identifier read, assigned or bound in this statement.
+    pub fn for_each_name_mut(&mut self, f: &mut dyn FnMut(&mut Name)) {
+        match self {
+            PStmt::Local(t, e) => {
+                match t {
+                    PTarget::Var(n) => f(n),
+                    PTarget::Element { base, index } => {
+                        f(base);
+                        index.iter_mut().for_each(|a| a.for_each_name_mut(f));
+                    }
+                }
+                e.for_each_name_mut(f);
+            }
+            PStmt::For { var, range, body } => {
+                f(var);
+                range.for_each_name_mut(f);
+                body.iter_mut().for_each(|s| s.for_each_name_mut(f));
+            }
+            PStmt::While { cond, body } => {
+                cond.for_each_name_mut(f);
+                body.iter_mut().for_each(|s| s.for_each_name_mut(f));
+            }
+            PStmt::If { branches, otherwise } => {
+                for (c, b) in branches.iter_mut() {
+                    c.for_each_name_mut(f);
+                    b.iter_mut().for_each(|s| s.for_each_name_mut(f));
+                }
+                if let Some(o) = otherwise {
+                    o.iter_mut().for_each(|s| s.for_each_name_mut(f));
+                }
+            }
+            PStmt::Return(e) | PStmt::Expr(e) => e.for_each_name_mut(f),
+            PStmt::Break | PStmt::Continue | PStmt::Unsupported(_) => {}
+        }
+    }
+}
+
+impl Stmt {
+    /// Calls `f` on every identifier read, assigned or bound in this statement.
+    pub fn for_each_name_mut(&mut self, f: &mut dyn FnMut(&mut Name)) {
+        match self {
+            Stmt::Define { target, value, .. } => {
+                match target {
+                    Target::Var(n) => f(n),
+                    Target::Func(_, params) => {
+                        for p in params.iter_mut() {
+                            f(p);
+                        }
+                    }
+                    Target::Element { base, index } => {
+                        if let Some(b) = base {
+                            f(b);
+                        }
+                        index.iter_mut().for_each(|a| a.for_each_name_mut(f));
+                    }
+                    Target::Multi(names) => {
+                        for n in names.iter_mut() {
+                            f(n);
+                        }
+                    }
+                }
+                value.for_each_name_mut(f);
+            }
+            Stmt::Eval { expr, unit } => {
+                expr.for_each_name_mut(f);
+                if let Some(u) = unit {
+                    u.for_each_name_mut(f);
+                }
+            }
+            Stmt::Bare(e) => e.for_each_name_mut(f),
+            Stmt::Unsupported { .. } => {}
+        }
+    }
 }

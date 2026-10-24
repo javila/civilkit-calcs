@@ -46,6 +46,7 @@ pub enum Code {
     // ---- notes: the region converted, with a caveat ----
     GlobalDefinition,
     RangeLoop,
+    FrozenValue,
     AngleMode,
     ArrayOrigin,
     OriginAssigned,
@@ -112,6 +113,7 @@ impl Code {
         Code::TooDeep,
         Code::GlobalDefinition,
         Code::RangeLoop,
+        Code::FrozenValue,
         Code::AngleMode,
         Code::ArrayOrigin,
         Code::OriginAssigned,
@@ -167,6 +169,7 @@ impl Code {
             TooDeep => "too-deep",
             GlobalDefinition => "global-definition",
             RangeLoop => "range-loop",
+            FrozenValue => "frozen-value",
             AngleMode => "angle-mode",
             ArrayOrigin => "array-origin",
             OriginAssigned => "origin-assigned",
@@ -187,8 +190,10 @@ impl Code {
     pub fn severity(self) -> Severity {
         use Code::*;
         match self {
-            GlobalDefinition | RangeLoop | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits
-            | AbsOfArray | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
+            GlobalDefinition | RangeLoop | FrozenValue | AngleMode | ArrayOrigin | OriginAssigned | LogBase
+            | RoundDigits | AbsOfArray | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => {
+                Severity::Note
+            }
             XmlError | NotAWorksheet | InputTooLarge | UnsupportedContainer => Severity::Fatal,
             _ => Severity::Gap,
         }
@@ -234,6 +239,7 @@ impl Code {
             ArityMismatch => "function called with the wrong number of arguments",
             BadStructure => "expression tree with an unexpected shape",
             TooDeep => "expression nested too deeply",
+            FrozenValue => "value taken from the saved result of an input component the importer cannot run: it is frozen and does not follow a change of the input",
             RangeLoop => "range variable read as the loop bounds of the element assignments that use it; any other use is reported",
             GlobalDefinition => "global definition converted as an ordinary definition at its reading-order position",
             AngleMode => "trigonometric functions: the output switches the sheet to radians (#rad), the source default",
@@ -313,6 +319,8 @@ pub struct ImportReport {
     pub math_shapes: BTreeMap<String, KindStats>,
     pub issues: Vec<Issue>,
     pub page_breaks: usize,
+    /// Definitions whose value is the saved result of an input component (frozen, not live).
+    pub frozen_values: usize,
     pub pictures: PictureStats,
 }
 

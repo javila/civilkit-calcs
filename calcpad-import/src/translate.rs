@@ -448,11 +448,18 @@ struct Tr {
     params: Vec<String>,
     /// Range variables with literal integer bounds, usable as loop bounds of element assignments.
     ranges: HashMap<String, RangeInfo>,
+    /// Names defined inside components that are not run (normalised).
+    component_names: HashSet<String>,
     /// While a program is lowered: its local names and the names they were given in the output.
     locals: HashMap<String, String>,
     /// Output names of locals known to hold an array created in the program.
     local_arrays: HashSet<String>,
+    /// Output names of local arrays whose elements were set to a unitless 0 literal.
+    zero_started: HashSet<String>,
     prog_n: usize,
+    /// Assignments to temporaries that an expression needs before the line it is on (the engine
+    /// cannot index the result of a call: `t = f(x)` then `t.(1; 2)`).
+    hoisted: Vec<String>,
     loop_stack: Vec<LoopCtx>,
     /// Inside an `if` or `while` of the program being lowered.
     cond_depth: usize,
@@ -903,7 +910,7 @@ impl Tr {
                 PStmt::Break => "break".to_string(),
                 PStmt::Continue => "continue".to_string(),
                 PStmt::Expr(e) => self.expr(e).s,
-                PStmt::Unsupported(w) => format!("{w}"),
+                PStmt::Unsupported(w) => w.clone(),
             });
         }
         parts.join("; ")
@@ -915,7 +922,14 @@ impl Tr {
     /// when the end is below the start as the source does. The array is as large as the largest
     /// index any range reaches, and an element no iteration writes stays 0 (the source would
     /// have no such element, or fill it with 0 below the first index written).
-    fn fill_loops(&mut self, f: &str, rs: &[(String, RangeInfo)], idx: &[String], rhs: &str) -> Result<String, String> {
+    fn fill_loops(
+        &mut self,
+        f: &str,
+        rs: &[(String, RangeInfo)],
+        idx: &[String],
+        rhs: &str,
+        pre: &[String],
+    ) -> Result<String, String> {
         let o = self.origin;
         let mut head = Vec::new();
         let mut loops = Vec::new();
@@ -964,6 +978,9 @@ impl Tr {
                 out.push(format!("{}{}", "    ".repeat(d), line));
             }
         }
+        for p in pre {
+            out.push(format!("{}{p}", "    ".repeat(loops.len())));
+        }
         out.push(format!(
             "{}{f}.({}) = {rhs}",
             "    ".repeat(loops.len()),
@@ -992,6 +1009,7 @@ impl Tr {
         self.prog_n += 1;
         let saved_locals = std::mem::take(&mut self.locals);
         let saved_arrays = std::mem::take(&mut self.local_arrays);
+        self.zero_started.clear();
         let mut lines = Vec::new();
         // A `return` before the end is a result variable and a done flag, so nothing after it runs.
         let early = body.iter().any(may_return);
@@ -1050,6 +1068,31 @@ impl Tr {
         }
         let pad = "    ".repeat(depth);
         for (k, st) in stmts.iter().enumerate() {
+            let before = out.len();
+            let outer_hoisted = std::mem::take(&mut self.hoisted);
+            let step = self.lower_stmt(st, depth, in_loop, out);
+            let mine = std::mem::replace(&mut self.hoisted, outer_hoisted);
+            step?;
+            if !mine.is_empty() {
+                let lines: Vec<String> = mine.into_iter().map(|l| format!("{pad}{l}")).collect();
+                out.splice(before..before, lines);
+            }
+            // Whatever follows a statement that may have returned runs only if it did not.
+            if k + 1 < stmts.len() && may_return(st) {
+                if let Some((_, done_v)) = self.ret.clone() {
+                    out.push(format!("{pad}#if {done_v} ≡ 0"));
+                    self.lower_stmts(&stmts[k + 1..], depth + 1, in_loop, out)?;
+                    out.push(format!("{pad}#end if"));
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_stmt(&mut self, st: &PStmt, depth: usize, in_loop: bool, out: &mut Vec<String>) -> Result<(), String> {
+        let pad = "    ".repeat(depth);
+        {
             match st {
                 PStmt::Local(PTarget::Var(n), e) => {
                     let flat = tables::normalise_name(&n.flat());
@@ -1090,6 +1133,16 @@ impl Tr {
                     }
                     if index.is_empty() || index.len() > 2 {
                         return Err("an element index that is not one or two numbers".into());
+                    }
+                    // The source lets a literal 0 take the units of what is added to it; the engine does
+                    // not, so an array started from 0 and then accumulated into is not converted.
+                    let is_zero = matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+                    if is_zero {
+                        self.zero_started.insert(mapped.clone());
+                    } else if self.zero_started.contains(&mapped) && mentions(e, &flat) {
+                        return Err(format!(
+                            "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, the engine reports inconsistent units"
+                        ));
                     }
                     let parts: Vec<String> = index.iter().map(|i| self.index_expr(i)).collect();
                     let rhs = self.expr(e).s;
@@ -1168,6 +1221,9 @@ impl Tr {
                 }
                 PStmt::While { cond, body } => {
                     let c = self.expr(cond).s;
+                    if !self.hoisted.is_empty() {
+                        return Err("the result of a call is indexed in a loop condition".into());
+                    }
                     out.push(format!("{pad}#while {c}"));
                     if self.ret.is_some() && body.iter().any(may_return) {
                         let done_v = self.ret.as_ref().map(|r| r.1.clone()).unwrap_or_default();
@@ -1219,15 +1275,6 @@ impl Tr {
                 }
                 PStmt::Expr(_) => return Err("an expression statement before the end of the program".into()),
                 PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
-            }
-            // Whatever follows a statement that may have returned runs only if it did not.
-            if k + 1 < stmts.len() && may_return(st) {
-                if let Some((_, done_v)) = self.ret.clone() {
-                    out.push(format!("{pad}#if {done_v} ≡ 0"));
-                    self.lower_stmts(&stmts[k + 1..], depth + 1, in_loop, out)?;
-                    out.push(format!("{pad}#end if"));
-                    return Ok(());
-                }
             }
         }
         Ok(())
@@ -1349,6 +1396,12 @@ impl Tr {
 
     fn name_ref(&mut self, n: &Name) -> R {
         let flat = tables::normalise_name(&n.flat());
+        // The file says this identifier is a unit: it is, whatever variables exist.
+        if n.unit && n.sub.is_none() {
+            if let Some(u) = tables::map_unit(&n.base) {
+                return atom(u);
+            }
+        }
         if let Some(m) = self.locals.get(&flat) {
             return atom(m.clone());
         }
@@ -1457,7 +1510,11 @@ impl Tr {
                     for a in &args[1..] {
                         parts.push(self.index_expr(a));
                     }
-                    return atom(format!("submatrix({})", parts.join("; ")));
+                    let text = format!("submatrix({})", parts.join("; "));
+                    // One column: the source indexes it like a vector, and the engine's vector is a
+                    // different thing from a one-column matrix.
+                    let one_column = matches!((&args[3], &args[4]), (Expr::Num(a), Expr::Num(b)) if a == b);
+                    return atom(if one_column { format!("col({text}; 1)") } else { text });
                 }
                 return self.apply_rule(rule, &rendered);
             }
@@ -1532,7 +1589,13 @@ impl Tr {
                 _ => self.readable_bad = true,
             }
         }
-        let b = self.operand(base, P_ATOM, true);
+        let mut b = self.operand(base, P_ATOM, true);
+        if !self.readable && matches!(base, Expr::Call(..)) {
+            self.prog_n += 1;
+            let tmp = format!("ix_{}", self.prog_n);
+            self.hoisted.push(format!("{tmp} = {b}"));
+            b = tmp;
+        }
         if idx.is_empty() || idx.len() > 2 {
             self.issue(Code::BadStructure, Some("index list".into()));
             return atom("?index?");
@@ -2082,8 +2145,9 @@ impl Tr {
                                 for _ in &rs {
                                     self.params.pop();
                                 }
+                                let pre = std::mem::take(&mut self.hoisted);
                                 if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
-                                    match self.fill_loops(&f, &rs, &idx, &rhs.s) {
+                                    match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
                                         Ok(t) => emitted = Some(t),
                                         Err(w) => self.issue(Code::ElementAssignment, Some(w)),
                                     }
@@ -2134,6 +2198,75 @@ impl Tr {
             Stmt::Unsupported { code, detail } => {
                 shape = "other";
                 self.issue(*code, detail.clone());
+            }
+        }
+
+        if m.frozen && emitted.is_some() {
+            // Data read from the workbook an input component saved.
+            self.issue(Code::FrozenValue, None);
+            self.report.frozen_values += 1;
+            let note = format!(
+                "'<small><i>R{}: value taken from the saved workbook of an input component (frozen, not live)</i></small>",
+                sanitize_id(&r.id)
+            );
+            emitted = emitted.map(|e| format!("{note}\n{e}"));
+        }
+
+        // Temporaries the line needs first (a call result that is indexed).
+        let hoisted = std::mem::take(&mut self.hoisted);
+        if !hoisted.is_empty() {
+            if matches!(
+                &m.stmt,
+                Stmt::Define {
+                    target: Target::Func(..),
+                    ..
+                }
+            ) {
+                self.issue(
+                    Code::BadStructure,
+                    Some("the result of a call is indexed inside a function body".into()),
+                );
+            } else if let Some(e) = emitted.take() {
+                emitted = Some(format!("{}\n{}", hoisted.join("\n"), e));
+            }
+        }
+
+        // A definition that only fails because it reads a name an input component defines is given
+        // the value the file saved for it, as a literal, and says so.
+        if let (
+            Stmt::Define {
+                target: Target::Var(n), ..
+            },
+            Some(saved),
+        ) = (&m.stmt, &m.saved_expr)
+        {
+            let flat = tables::normalise_name(&n.flat());
+            let blockers: Vec<&Pending> = self.cur.iter().filter(|p| p.code.severity() == Severity::Gap).collect();
+            let only_inputs = !blockers.is_empty()
+                && blockers.iter().all(|p| {
+                    p.code == Code::UndefinedVariable
+                        && p.detail.as_ref().is_some_and(|d| self.component_names.contains(d))
+                });
+            if only_inputs && valid_ident(&flat) {
+                let stash = std::mem::take(&mut self.cur);
+                let v = self.expr(saved);
+                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                    self.cur.clear();
+                    self.issue(Code::FrozenValue, Some(flat.clone()));
+                    self.report.frozen_values += 1;
+                    let is_array = matches!(saved, Expr::Matrix { .. })
+                        || matches!(saved, Expr::Bin(BinOp::Mul, a, _) if matches!(**a, Expr::Matrix { .. }));
+                    emitted = Some(format!(
+                        "'<small><i>R{}: value taken from the saved result of an input component (frozen, not live)</i></small>\n{} = {}",
+                        sanitize_id(&r.id),
+                        flat,
+                        v.s
+                    ));
+                    attempt = None;
+                    define_name = Some((flat, None, is_array));
+                } else {
+                    self.cur = stash;
+                }
             }
         }
 
@@ -2346,7 +2479,58 @@ fn text_line(p: &Paragraph) -> Option<String> {
 }
 
 /// Translates a sheet. See the crate documentation.
+/// A name the file labels as a unit in one place and defines as a variable in another (a matrix
+/// `N` next to forces in `N`): the engine would read every `N` as the variable, so the variable is
+/// renamed `N_v` everywhere and the unit keeps its name.
+fn rename_unit_clashes(sheet: &mut Sheet) {
+    let mut units: HashSet<String> = HashSet::new();
+    let mut vars: HashSet<String> = HashSet::new();
+    let mut scan = |stmt: &mut Stmt| {
+        // Names read or bound anywhere; the labelled ones are units, the targets are variables.
+        stmt.for_each_name_mut(&mut |n: &mut Name| {
+            if n.unit && n.sub.is_none() && tables::map_unit(&n.base).is_some() {
+                units.insert(n.base.clone());
+            }
+        });
+        if let Stmt::Define { target, .. } = stmt {
+            match target {
+                Target::Var(n) if !n.unit && n.sub.is_none() => {
+                    vars.insert(n.base.clone());
+                }
+                Target::Element { base: Some(b), .. } if b.sub.is_none() => {
+                    vars.insert(b.base.clone());
+                }
+                Target::Multi(ns) => {
+                    for n in ns.iter().filter(|n| n.sub.is_none()) {
+                        vars.insert(n.base.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    for r in sheet.regions.iter_mut() {
+        if let RegionKind::Math(m) = &mut r.kind {
+            scan(&mut m.stmt);
+        }
+    }
+    let clash: HashSet<String> = units.intersection(&vars).cloned().collect();
+    if clash.is_empty() {
+        return;
+    }
+    for r in sheet.regions.iter_mut() {
+        if let RegionKind::Math(m) = &mut r.kind {
+            m.stmt.for_each_name_mut(&mut |n: &mut Name| {
+                if !n.unit && n.sub.is_none() && clash.contains(&n.base) {
+                    n.base = format!("{}_v", n.base);
+                }
+            });
+        }
+    }
+}
+
 pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
+    rename_unit_clashes(&mut sheet);
     reading_order(&mut sheet.regions);
     let has_references = sheet.regions.iter().any(|r| matches!(r.kind, RegionKind::Reference));
     let mut tr = Tr {
@@ -2357,9 +2541,16 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         arrays: HashSet::new(),
         params: Vec::new(),
         ranges: HashMap::new(),
+        component_names: sheet
+            .component_names
+            .iter()
+            .map(|n| tables::normalise_name(&n.flat()))
+            .collect(),
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
+        zero_started: HashSet::new(),
         prog_n: 0,
+        hoisted: Vec::new(),
         loop_stack: Vec::new(),
         cond_depth: 0,
         ret: None,

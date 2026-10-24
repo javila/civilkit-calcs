@@ -195,7 +195,11 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
             collect_region(&ctx, r, 0, &mut regions);
         }
     }
-    Ok(Sheet { origin, regions })
+    Ok(Sheet {
+        origin,
+        regions,
+        component_names: Vec::new(),
+    })
 }
 
 struct Ctx<'a, 'i> {
@@ -434,11 +438,83 @@ pub(crate) fn read_math(m: Node, lim: &Limits) -> MathRegion {
         .descendants()
         .find(|n| is_ml(*n) && local(*n) == "result")
         .and_then(read_saved_result);
+    let saved_expr = m
+        .descendants()
+        .find(|n| is_ml(*n) && local(*n) == "result")
+        .and_then(read_saved_expr);
     MathRegion {
         stmt,
         disabled,
         saved_result,
+        saved_expr,
+        frozen: false,
     }
+}
+
+/// The stored result as an expression, only when it is complete and exact: a number, or a matrix of
+/// numbers (at most 4000), optionally times a unit written as a product of unit names and powers.
+pub(crate) fn read_saved_expr(res: Node) -> Option<Expr> {
+    fn number(n: Node) -> Option<Expr> {
+        if local(n) != "real" {
+            return None;
+        }
+        let t = n.text()?.trim();
+        (!t.is_empty() && t.len() <= 64 && t.parse::<f64>().map(|v| v.is_finite()).unwrap_or(false))
+            .then(|| Expr::Num(t.to_string()))
+    }
+    fn plain(n: Node) -> Option<Expr> {
+        match local(n) {
+            "real" => number(n),
+            "matrix" => {
+                let rows = n.attribute("rows")?.parse::<usize>().ok()?;
+                let cols = n.attribute("cols")?.parse::<usize>().ok()?;
+                let items: Vec<Expr> = n
+                    .children()
+                    .filter(|c| c.is_element())
+                    .map(number)
+                    .collect::<Option<_>>()?;
+                (rows >= 1 && cols >= 1 && rows.checked_mul(cols)? == items.len() && items.len() <= 4000)
+                    .then_some(Expr::Matrix { rows, cols, items })
+            }
+            _ => None,
+        }
+    }
+    let kid = res.children().find(|c| c.is_element())?;
+    if local(kid) != "unitedValue" {
+        return plain(kid);
+    }
+    let value = kid.children().filter(|c| c.is_element()).find_map(plain)?;
+    let mono = kid.children().find(|c| c.is_element() && local(*c) == "unitMonomial");
+    let mut unit: Option<Expr> = None;
+    if let Some(m) = mono {
+        for u in m.children().filter(|c| c.is_element() && local(*c) == "unitReference") {
+            let name = u.attribute("unit")?;
+            let pn: i32 = u.attribute("power-numerator").and_then(|v| v.parse().ok()).unwrap_or(1);
+            let pd: i32 = u
+                .attribute("power-denominator")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1);
+            if pd != 1 || pn == 0 || name.len() > 40 {
+                return None;
+            }
+            let base = Expr::Name(Name::new(name));
+            let term = if pn.abs() == 1 {
+                base
+            } else {
+                Expr::Bin(BinOp::Pow, Box::new(base), Box::new(Expr::Num(pn.abs().to_string())))
+            };
+            unit = Some(match (unit, pn < 0) {
+                (None, false) => term,
+                (None, true) => Expr::Bin(BinOp::Div, Box::new(Expr::Num("1".into())), Box::new(term)),
+                (Some(u), false) => Expr::Bin(BinOp::Mul, Box::new(u), Box::new(term)),
+                (Some(u), true) => Expr::Bin(BinOp::Div, Box::new(u), Box::new(term)),
+            });
+        }
+    }
+    Some(match unit {
+        Some(u) => Expr::Bin(BinOp::Mul, Box::new(value), Box::new(u)),
+        None => value,
+    })
 }
 
 /// The stored result of an evaluation when it is a single number or string, with its unit.
@@ -587,6 +663,10 @@ fn bad(why: &str) -> Stmt {
     }
 }
 
+pub(crate) fn read_name_pub(n: Node) -> Name {
+    read_name(n)
+}
+
 fn read_name(n: Node) -> Name {
     // The mcdx format writes a subscript as a styled span inside the identifier; the older
     // format as an attribute. Text inside a superscript cannot be a name: it is kept with a
@@ -623,6 +703,7 @@ fn read_name(n: Node) -> Name {
     Name {
         base: base.trim().to_string(),
         sub,
+        unit: n.attribute("labels") == Some("UNIT"),
     }
 }
 

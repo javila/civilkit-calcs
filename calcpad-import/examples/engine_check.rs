@@ -171,6 +171,8 @@ fn with_probes(regions: Vec<Region>, pairs: &mut String) -> Vec<Region> {
                         },
                         disabled: false,
                         saved_result: None,
+                        saved_expr: None,
+                        frozen: false,
                     }),
                     ..r.clone()
                 };

@@ -12,6 +12,8 @@ export interface ImportReportJson {
     regionsConverted: number;
     regionsShowing: number;
     regionsNeedingAttention: number;
+    /** Definitions whose value was taken from the saved data of an input component (frozen). */
+    frozenValues?: number;
     kinds: Record<string, { total: number; converted: number; withNotes: number; attention: number; pictured: number }>;
     pictures: { svgOk: number; svgFailed: number; pngUsed: number; fallbackShown: number; savedResultAvailable: number; savedResultEmitted: number };
     ranked: { code: string; reason: string; direct: number; downstream: number; blocked: number; topDetails: [string, number][] }[];
@@ -295,6 +297,14 @@ export class WorksheetImport {
         line.style.margin = '6px 0';
         line.textContent = `Imported ${s.name}: ${sum.live} of ${sum.total} regions converted live, ${sum.pictures} shown as static pictures, ${sum.attention} need attention.`;
         box.append(line);
+
+        if ((rep.frozenValues ?? 0) > 0) {
+            const fz = document.createElement('p');
+            fz.setAttribute('data-cprs-import-frozen', '');
+            fz.style.margin = '6px 0';
+            fz.textContent = `${rep.frozenValues} ${rep.frozenValues === 1 ? 'value' : 'values'} frozen from input components: taken from what the file saved, so they do not follow a change of the input.`;
+            box.append(fz);
+        }
 
         const gaps = rep.ranked.filter(r => r.code !== 'depends-on-gap' && r.blocked > 0).slice(0, 5);
         if (gaps.length) {

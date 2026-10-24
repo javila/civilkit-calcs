@@ -34,6 +34,7 @@ pub mod picture;
 pub mod report;
 pub mod tables;
 pub mod translate;
+pub mod xls;
 pub mod xmcd;
 pub mod zip;
 

@@ -842,3 +842,351 @@ fn converted_package_runs_in_the_engine() {
         parser.html_result
     );
 }
+
+// ---- values frozen from input components ---------------------------------------------------------------------------
+
+fn input_component() -> String {
+    r#"<region region-id="1" top="0" left="0" width="300" height="100"><excelComponent resultRef="1"><regions><region region-id="2" top="10" left="0"><math resultRef="0"><ml:define><ml:id>Inp</ml:id><ml:apply><ml:indexer/><ml:id>excel</ml:id><ml:str>Sheet1!A1:B2</ml:str></ml:apply></ml:define></math></region></regions></excelComponent></region>"#.to_string()
+}
+
+#[test]
+fn a_definition_read_from_an_input_component_takes_the_saved_value() {
+    let regions = [
+        input_component(),
+        // n_n := rows(Inp), saved as 2
+        mregion(
+            3,
+            200.0,
+            r#"<ml:define><ml:id>n_n</ml:id><ml:apply><ml:id>rows</ml:id><ml:id>Inp</ml:id></ml:apply></ml:define>"#,
+        ),
+        // N := Inp * cm, saved as a 2x2 matrix in metres
+        mregion(
+            4,
+            220.0,
+            r#"<ml:define><ml:id>N</ml:id><ml:apply><ml:mult/><ml:id>Inp</ml:id><ml:id>cm</ml:id></ml:apply></ml:define>"#,
+        ),
+        // Downstream regions calculate.
+        mregion(
+            5,
+            240.0,
+            r#"<ml:eval><ml:apply><ml:mult/><ml:id>n_n</ml:id><ml:real>3</ml:real></ml:apply></ml:eval>"#,
+        ),
+        mregion(
+            6,
+            260.0,
+            r#"<ml:eval><ml:apply><ml:indexer/><ml:id>N</ml:id><ml:sequence><ml:real>2</ml:real><ml:real>1</ml:real></ml:sequence></ml:apply></ml:eval>"#,
+        ),
+    ]
+    .concat();
+    let mut p = Pkg::new(&regions);
+    p.results = [
+        r#"<resultData result-id="3"><ml:result><ml:real>2</ml:real></ml:result></resultData>"#,
+        r#"<resultData result-id="4"><ml:result><ml:unitedValue><ml:matrix rows="2" cols="2"><ml:real>0.01</ml:real><ml:real>0.02</ml:real><ml:real>0.03</ml:real><ml:real>0.04</ml:real></ml:matrix><u:unitMonomial><u:unitReference unit="meter" power-numerator="1" power-denominator="1"/></u:unitMonomial></ml:unitedValue></ml:result></resultData>"#,
+    ]
+    .concat();
+    let res = p.import();
+    assert_eq!(res.report.frozen_values, 2, "{:?}", res.report.issues);
+    assert!(res.report.notes().any(|i| i.code == Code::FrozenValue));
+    assert!(
+        res.calcpad.contains("input component (frozen, not live)"),
+        "{}",
+        res.calcpad
+    );
+    assert!(res.calcpad.contains("n_n = 2"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("N = [0.01; 0.03|0.02; 0.04]*m"), "{}", res.calcpad);
+    // Only the component itself needs attention; everything that read the input converted.
+    assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.parse(&res.calcpad, true);
+    let html = parser.html_result.clone();
+    assert!(!html.contains("class=\"err\""), "{html}");
+    let text: String = {
+        let mut o = String::new();
+        let mut tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => tag = true,
+                '>' => tag = false,
+                c if !tag => o.push(c),
+                _ => {}
+            }
+        }
+        o
+    };
+    // n_n * 3 = 6 and N[2,1] = 0.02 m (0.02 metres).
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("nn · 3 = 2 · 3 = 6"), "{flat}");
+    assert!(flat.contains("= 0.02 m"), "{flat}");
+}
+
+#[test]
+fn a_saved_value_is_not_used_when_something_else_blocks_the_definition() {
+    let regions = [
+        input_component(),
+        // Also reads an add-in function: not only the input.
+        mregion(
+            3,
+            200.0,
+            r#"<ml:define><ml:id>q</ml:id><ml:apply><ml:id>vendor_fn</ml:id><ml:id>Inp</ml:id></ml:apply></ml:define>"#,
+        ),
+        // No saved value at all.
+        mregion(
+            4,
+            220.0,
+            r#"<ml:define><ml:id>r2</ml:id><ml:apply><ml:id>rows</ml:id><ml:id>Inp</ml:id></ml:apply></ml:define>"#,
+        ),
+    ]
+    .concat();
+    let mut p = Pkg::new(&regions);
+    p.results = r#"<resultData result-id="3"><ml:result><ml:real>7</ml:real></ml:result></resultData>"#.into();
+    let res = p.import();
+    assert_eq!(res.report.frozen_values, 0, "{:?}", res.report.issues);
+    assert!(res.report.gaps().any(|i| i.code == Code::AddinFunction));
+    assert!(res.report.gaps().any(|i| i.code == Code::UndefinedVariable));
+}
+
+#[test]
+fn a_variable_named_like_a_unit_is_renamed_so_the_unit_keeps_its_name() {
+    // N is a vector of coordinates and also the newton: F := 3 N.
+    let regions = [
+        mregion(
+            1,
+            0.0,
+            r#"<ml:define><ml:id labels="VARIABLE">N</ml:id><ml:matrix rows="2" cols="1"><ml:real>1</ml:real><ml:real>2</ml:real></ml:matrix></ml:define>"#,
+        ),
+        mregion(
+            2,
+            20.0,
+            r#"<ml:define><ml:id labels="VARIABLE">F</ml:id><ml:apply><ml:scale/><ml:real>3</ml:real><ml:id labels="UNIT">N</ml:id></ml:apply></ml:define>"#,
+        ),
+        mregion(
+            3,
+            40.0,
+            r#"<ml:eval><ml:apply><ml:indexer/><ml:id labels="VARIABLE">N</ml:id><ml:real>2</ml:real></ml:apply></ml:eval>"#,
+        ),
+        mregion(
+            4,
+            60.0,
+            r#"<ml:eval><ml:id labels="VARIABLE">F</ml:id><ml:unitOverride><ml:id labels="UNIT">N</ml:id></ml:unitOverride></ml:eval>"#,
+        ),
+    ]
+    .concat();
+    let res = Pkg::new(&regions).import();
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("N_v = [1; 2]"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("F = 3*N"), "{}", res.calcpad);
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.parse(&res.calcpad, true);
+    let html = parser.html_result.clone();
+    assert!(!html.contains("class=\"err\""), "{html}");
+    let text: String = {
+        let mut o = String::new();
+        let mut tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => tag = true,
+                '>' => tag = false,
+                c if !tag => o.push(c),
+                _ => {}
+            }
+        }
+        o
+    };
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(flat.contains("= 2"), "{flat}");
+    assert!(flat.contains("F|N") || flat.contains("= 3 N"), "{flat}");
+}
+
+// ---- numbers read from the workbook an input component saved ------------------------------------------------------
+
+fn rec(id: u16, data: &[u8]) -> Vec<u8> {
+    let mut v = id.to_le_bytes().to_vec();
+    v.extend_from_slice(&(data.len() as u16).to_le_bytes());
+    v.extend_from_slice(data);
+    v
+}
+fn number_cell(row: u16, col: u16, x: f64) -> Vec<u8> {
+    let mut d = Vec::new();
+    d.extend_from_slice(&row.to_le_bytes());
+    d.extend_from_slice(&col.to_le_bytes());
+    d.extend_from_slice(&0u16.to_le_bytes());
+    d.extend_from_slice(&x.to_le_bytes());
+    rec(0x0203, &d)
+}
+fn rk_cell(row: u16, col: u16, int: i32) -> Vec<u8> {
+    let mut d = Vec::new();
+    d.extend_from_slice(&row.to_le_bytes());
+    d.extend_from_slice(&col.to_le_bytes());
+    d.extend_from_slice(&0u16.to_le_bytes());
+    d.extend_from_slice(&(((int << 2) | 2) as u32).to_le_bytes());
+    rec(0x027E, &d)
+}
+fn text_cell(row: u16, col: u16) -> Vec<u8> {
+    let mut d = Vec::new();
+    d.extend_from_slice(&row.to_le_bytes());
+    d.extend_from_slice(&col.to_le_bytes());
+    d.extend_from_slice(&0u16.to_le_bytes());
+    d.extend_from_slice(&0u32.to_le_bytes());
+    rec(0x00FD, &d)
+}
+
+/// A compound file holding one `Workbook` stream with the sheet "Data" and the cells given.
+fn workbook(cells: &[Vec<u8>]) -> Vec<u8> {
+    let name = b"Data";
+    let mut bound = Vec::new();
+    bound.extend_from_slice(&0u32.to_le_bytes()); // patched below
+    bound.extend_from_slice(&[0, 0, name.len() as u8, 0]);
+    bound.extend_from_slice(name);
+    let bof = rec(0x0809, &[0u8; 16]);
+    let eof = rec(0x000A, &[]);
+    let globals_len = bof.len() + rec(0x0085, &bound).len() + eof.len();
+    bound[..4].copy_from_slice(&(globals_len as u32).to_le_bytes());
+    let mut wb = Vec::new();
+    wb.extend(&bof);
+    wb.extend(rec(0x0085, &bound));
+    wb.extend(&eof);
+    wb.extend(&bof);
+    for c in cells {
+        wb.extend(c);
+    }
+    wb.extend(&eof);
+    // Pad past the size at which a stream moves out of the mini stream.
+    while wb.len() < 4200 {
+        wb.extend(rec(0x00FF, &[0u8; 1000]));
+    }
+    let n = wb.len().div_ceil(512);
+    let mut file = vec![0u8; 512 * (3 + n)];
+    file[..8].copy_from_slice(&[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+    let put32 = |f: &mut Vec<u8>, at: usize, v: u32| f[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    file[0x1E..0x20].copy_from_slice(&9u16.to_le_bytes());
+    file[0x20..0x22].copy_from_slice(&6u16.to_le_bytes());
+    put32(&mut file, 0x2C, 1);
+    put32(&mut file, 0x30, 1);
+    put32(&mut file, 0x38, 4096);
+    put32(&mut file, 0x3C, 0xFFFF_FFFE);
+    put32(&mut file, 0x44, 0xFFFF_FFFE);
+    for k in 0..109 {
+        put32(&mut file, 0x4C + 4 * k, if k == 0 { 0 } else { 0xFFFF_FFFF });
+    }
+    // Sector 0: the allocation table. 1: the directory. 2..: the stream.
+    let fat = 512;
+    for k in 0..128 {
+        put32(&mut file, fat + 4 * k, 0xFFFF_FFFF);
+    }
+    put32(&mut file, fat, 0xFFFF_FFFD);
+    put32(&mut file, fat + 4, 0xFFFF_FFFE);
+    for k in 0..n {
+        put32(
+            &mut file,
+            fat + 4 * (2 + k),
+            if k + 1 == n { 0xFFFF_FFFE } else { (3 + k) as u32 },
+        );
+    }
+    let dir = 1024;
+    let entry = |f: &mut Vec<u8>, at: usize, name: &str, kind: u8, start: u32, size: u32| {
+        let units: Vec<u8> = name.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        f[at..at + units.len()].copy_from_slice(&units);
+        f[at + 0x40..at + 0x42].copy_from_slice(&((units.len() + 2) as u16).to_le_bytes());
+        f[at + 0x42] = kind;
+        f[at + 0x74..at + 0x78].copy_from_slice(&start.to_le_bytes());
+        f[at + 0x78..at + 0x7C].copy_from_slice(&size.to_le_bytes());
+    };
+    entry(&mut file, dir, "Root Entry", 5, 0xFFFF_FFFE, 0);
+    entry(&mut file, dir + 128, "Workbook", 2, 2, wb.len() as u32);
+    file[512 * 3..512 * 3 + wb.len()].copy_from_slice(&wb);
+    file
+}
+
+fn component_with_workbook(range: &str) -> (String, Vec<(String, String, String)>) {
+    let region = format!(
+        r#"<region region-id="1" top="0" left="0" width="300" height="100"><excelComponent resultRef="1"><regions><region region-id="2" top="10" left="0"><excelTable item-idref="Rx"/></region><region region-id="3" top="50" left="0"><math resultRef="0"><ml:define><ml:id>Inp</ml:id><ml:apply><ml:indexer/><ml:id>excel</ml:id><ml:str>{range}</ml:str></ml:apply></ml:define></math></region></regions></excelComponent></region>"#
+    );
+    (region, vec![("Rx".into(), "excel".into(), "/ws/excel/x.ole".into())])
+}
+
+#[test]
+fn the_numbers_of_a_components_workbook_define_the_name_and_downstream_regions_calculate() {
+    let ole = workbook(&[
+        number_cell(0, 0, 1.5),
+        rk_cell(1, 0, 2),
+        number_cell(0, 1, -3.0),
+        number_cell(1, 1, 4.0),
+    ]);
+    let (comp, rels) = component_with_workbook("Data!A1:B2");
+    let downstream = [
+        mregion(
+            5,
+            200.0,
+            r#"<ml:eval><ml:apply><ml:indexer/><ml:id>Inp</ml:id><ml:sequence><ml:real>2</ml:real><ml:real>1</ml:real></ml:sequence></ml:apply></ml:eval>"#,
+        ),
+        mregion(
+            6,
+            220.0,
+            r#"<ml:define><ml:id>s</ml:id><ml:apply><ml:plus/><ml:apply><ml:indexer/><ml:id>Inp</ml:id><ml:sequence><ml:real>1</ml:real><ml:real>2</ml:real></ml:sequence></ml:apply><ml:real>10</ml:real></ml:apply></ml:define>"#,
+        ),
+        mregion(7, 240.0, r#"<ml:eval><ml:id>s</ml:id></ml:eval>"#),
+    ]
+    .concat();
+    let mut p = Pkg::new(&format!("{comp}{downstream}"));
+    for (id, kind, target) in rels {
+        p = p.rel(&id, &kind, &target);
+    }
+    let mut part = part("ws/excel/x.ole", ole);
+    part.deflate = true;
+    let res = p.part(part).import();
+    assert_eq!(res.report.frozen_values, 1, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("Inp = [1.5; -3|2; 4]"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("frozen, not live"), "{}", res.calcpad);
+    // Only the component needs attention; the regions that read the name converted.
+    assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.parse(&res.calcpad, true);
+    let html = parser.html_result.clone();
+    assert!(!html.contains("class=\"err\""), "{html}");
+    let text: String = {
+        let mut o = String::new();
+        let mut tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => tag = true,
+                '>' => tag = false,
+                c if !tag => o.push(c),
+                _ => {}
+            }
+        }
+        o
+    };
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Inp[2,1] = 2 (the RK integer); s = Inp[1,2] + 10 = -3 + 10 = 7.
+    assert!(flat.contains("Inp2,1 = 2"), "{flat}");
+    assert!(flat.contains("s = Inp1,2 + 10 = 7"), "{flat}");
+}
+
+#[test]
+fn a_range_that_is_not_all_numbers_or_not_in_the_workbook_is_not_read() {
+    let ole = workbook(&[
+        number_cell(0, 0, 1.0),
+        text_cell(0, 1),
+        number_cell(1, 0, 3.0),
+        number_cell(1, 1, 4.0),
+    ]);
+    for range in ["Data!A1:B2", "Missing!A1:B2", "Data!D9:E10", "bad range"] {
+        let (comp, rels) = component_with_workbook(range);
+        let mut p = Pkg::new(&comp);
+        for (id, kind, target) in rels {
+            p = p.rel(&id, &kind, &target);
+        }
+        let res = p.part(part("ws/excel/x.ole", ole.clone())).import();
+        assert_eq!(res.report.frozen_values, 0, "{range}: {:?}", res.report.issues);
+        assert!(!res.calcpad.contains("Inp ="), "{range}: {}", res.calcpad);
+    }
+    // A cell nothing was written to reads as 0.
+    let ole = workbook(&[number_cell(0, 0, 1.0), number_cell(1, 0, 3.0)]);
+    let (comp, rels) = component_with_workbook("Data!A1:B2");
+    let mut p = Pkg::new(&comp);
+    for (id, kind, target) in rels {
+        p = p.rel(&id, &kind, &target);
+    }
+    let res = p.part(part("ws/excel/x.ole", ole)).import();
+    assert!(res.calcpad.contains("Inp = [1; 0|3; 0]"), "{}", res.calcpad);
+}
