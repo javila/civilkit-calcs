@@ -3,42 +3,21 @@
 
 use calcpad_import::ir::{MathRegion, Region, RegionKind, Stmt};
 use calcpad_import::translate::reading_order;
-use calcpad_import::{import_xmcd, import_xmcd_with, Code, ImportResult, Limits, Severity, GAP_MARKER};
+use calcpad_import::{
+    import_xmcd_opts, import_xmcd_with, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
+};
 
-/// The page as it was before definitions were shown as the author's equation: the computed form of
-/// every region (a definition echoes its value, substituted steps shown), so numbers can be read
-/// from the engine's output. Only the wrappers the display adds are removed.
-pub fn legacy(code: &str) -> String {
-    let lines: Vec<&str> = code.lines().collect();
-    let mut skip = vec![false; lines.len()];
-    for i in 0..lines.len() {
-        let t = lines[i].trim();
-        if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") {
-            skip[i] = true;
-        } else if t == "#end hide" && lines.get(i + 1).map(|l| l.trim()) == Some("#noc") {
-            // The author's equation shown after a hidden computation: dropped. When the computation
-            // is one line it was hidden for this display only and is shown again (a definition then
-            // echoes its value, as before).
-            let close = (i + 2..lines.len())
-                .find(|&k| lines[k].trim() == "#end noc")
-                .unwrap_or(i + 1);
-            for s in &mut skip[i + 1..=close] {
-                *s = true;
-            }
-            if i >= 2 && lines[i - 2].trim() == "#hide" {
-                skip[i - 2] = true;
-                skip[i] = true;
-            }
-        }
-    }
-    let mut out = String::new();
-    for (l, s) in lines.iter().zip(&skip) {
-        if !s {
-            out.push_str(l);
-            out.push('\n');
-        }
-    }
-    out
+mod common;
+use common::legacy;
+
+/// These tests read the structure of the page (gap lines, `#noc` blocks), which is the typeset-Calcpad
+/// display; the MathML display is covered in `mathml.rs`.
+fn import_xmcd(xml: &str) -> ImportResult {
+    let opts = ImportOptions {
+        mathml: false,
+        ..Default::default()
+    };
+    import_xmcd_opts(xml, &opts)
 }
 
 // ---- builders ---------------------------------------------------------------------------------

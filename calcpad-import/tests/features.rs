@@ -4,41 +4,8 @@
 
 use calcpad_import::{import_xmcd, Code, ImportResult};
 
-/// The page as it was before definitions were shown as the author's equation: the computed form of
-/// every region (a definition echoes its value, substituted steps shown), so numbers can be read
-/// from the engine's output. Only the wrappers the display adds are removed.
-pub fn legacy(code: &str) -> String {
-    let lines: Vec<&str> = code.lines().collect();
-    let mut skip = vec![false; lines.len()];
-    for i in 0..lines.len() {
-        let t = lines[i].trim();
-        if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") {
-            skip[i] = true;
-        } else if t == "#end hide" && lines.get(i + 1).map(|l| l.trim()) == Some("#noc") {
-            // The author's equation shown after a hidden computation: dropped. When the computation
-            // is one line it was hidden for this display only and is shown again (a definition then
-            // echoes its value, as before).
-            let close = (i + 2..lines.len())
-                .find(|&k| lines[k].trim() == "#end noc")
-                .unwrap_or(i + 1);
-            for s in &mut skip[i + 1..=close] {
-                *s = true;
-            }
-            if i >= 2 && lines[i - 2].trim() == "#hide" {
-                skip[i - 2] = true;
-                skip[i] = true;
-            }
-        }
-    }
-    let mut out = String::new();
-    for (l, s) in lines.iter().zip(&skip) {
-        if !s {
-            out.push_str(l);
-            out.push('\n');
-        }
-    }
-    out
-}
+mod common;
+use common::legacy;
 
 // ---- builders (the same shapes as the plain-XML worksheet) ---------------------------------------
 
@@ -95,6 +62,15 @@ pub fn eval_in(expr: &str, unit: &str) -> String {
 
 pub fn convert(inners: &[String]) -> ImportResult {
     import_xmcd(&sheet_of(inners, 1))
+}
+
+/// The same worksheet with the typeset-Calcpad display (`#noc` blocks) instead of MathML.
+pub fn convert_noc(inners: &[String]) -> ImportResult {
+    let opts = calcpad_import::ImportOptions {
+        mathml: false,
+        ..Default::default()
+    };
+    calcpad_import::import_xmcd_opts(&sheet_of(inners, 1), &opts)
 }
 
 pub fn convert_origin(inners: &[String], origin: i64) -> ImportResult {
@@ -755,7 +731,7 @@ fn gap_line<'a>(res: &'a ImportResult, id: &str) -> &'a str {
 
 #[test]
 fn an_unconverted_region_is_shown_with_its_real_names() {
-    let res = convert(&[
+    let res = convert_noc(&[
         define("y", &call("vendor_fn", &[n("a"), r("2")])),
         define("z", &app("plus", &[n("y"), r("1")])),
         define("s", "<ml:str>abc</ml:str>"),
@@ -769,8 +745,8 @@ fn an_unconverted_region_is_shown_with_its_real_names() {
     );
     assert!(res.calcpad.contains("#noc\nz = y + 1\n#end noc"), "{}", res.calcpad);
     assert!(res.calcpad.contains("n_rows(Input_N)*kN\n#end noc"), "{}", res.calcpad);
-    // A string is not Calcpad maths: it is code text, not an equation.
-    assert!(res.calcpad.contains("<code>s = \"\"abc\"\"</code>"), "{}", res.calcpad);
+    // A string is not maths, and source is never shown as code text: the reader sees the note only.
+    assert!(!res.calcpad.contains("<code>"), "{}", res.calcpad);
     // The marker and the codes are in an HTML comment, with a small muted note.
     assert!(
         gap_line(&res, "1").starts_with("'<!-- [import-gap R1 "),
@@ -803,7 +779,7 @@ fn html_of(code: &str) -> String {
 
 #[test]
 fn gap_regions_render_as_equations_without_errors() {
-    let res = convert(&[
+    let res = convert_noc(&[
         define(
             "N",
             &app(
@@ -1177,7 +1153,7 @@ fn function_bodies_with_conditions_and_returns_become_one_expression() {
 
 #[test]
 fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
-    let res = convert(&[function(
+    let res = convert_noc(&[function(
         "h",
         &["x"],
         &program(&[
@@ -1192,14 +1168,8 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
         d.contains("$While") && d.contains("loop statement usable inside a block"),
         "{d}"
     );
-    // And the readable line still shows the function.
-    assert!(res.calcpad.contains("<code>h(x) = program:</code>"), "{}", res.calcpad);
-    assert!(res.calcpad.contains("#noc\nt = 0\n#end noc"), "{}", res.calcpad);
-    assert!(
-        res.calcpad.contains("'&emsp;<code>for k = 1 to x:</code>"),
-        "{}",
-        res.calcpad
-    );
+    // A program is source, not an equation: no code text is shown for it.
+    assert!(!res.calcpad.contains("<code>"), "{}", res.calcpad);
 }
 
 // ---- constraint equations ---------------------------------------------------------------------------------------
@@ -1208,7 +1178,7 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
 fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
     // f_B = c*L + d with c and d unknown (a solve block would find them).
     let eq = app("equal", &[n("fB"), plus(&times(&n("c"), &n("L")), &n("d"))]);
-    let res = convert(&[
+    let res = convert_noc(&[
         define("L", &times(&r("6"), &n("m"))),
         eq,
         eval(&app("mult", &[r("2"), r("3")])),
@@ -1222,7 +1192,7 @@ fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
     let nums = numbers(&res.calcpad);
     assert_close(*nums.last().unwrap(), 6.0);
     // Any other bare expression is still a bare expression.
-    let res = convert(&[eval(&n("zz"))]);
+    let res = convert_noc(&[eval(&n("zz"))]);
     assert!(!res.report.gaps().any(|i| i.code == Code::ConstraintEquation));
 }
 
@@ -1441,7 +1411,7 @@ fn run_with_errors(code: &str) -> (String, Vec<String>) {
 
 fn fill_loop_sheet() -> ImportResult {
     // i = 1..3, h[i] = i * 2 m, then h shown.
-    convert(&[
+    convert_noc(&[
         define("i", &range("1", "3")),
         set_element("h", &n("i"), &app("mult", &[n("i"), app("mult", &[r("2"), n("m")])])),
         eval(&n("h")),
@@ -1498,7 +1468,7 @@ fn a_program_block_is_hidden_and_its_errors_are_still_reported() {
         app("plus", &[n("s"), n("k")]),
         n("s")
     );
-    let res = convert(&[prog, eval(&n("y"))]);
+    let res = convert_noc(&[prog, eval(&n("y"))]);
     assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
     let code = &res.calcpad;
     assert!(code.contains("#hide\n") && code.contains("#end hide"), "{code}");
@@ -1627,7 +1597,7 @@ fn text_of(html: &str) -> String {
 fn a_definition_shows_only_the_authors_equation_and_still_defines_the_name() {
     // s := (16 12 13.5)^T * ft, then a := 2 * 3 and a * 2 shown.
     let tr = |x: &str| format!("<ml:apply><ml:transpose/>{x}</ml:apply>");
-    let res = convert(&[
+    let res = convert_noc(&[
         define("s", &app("mult", &[tr(&mat(1, 3, &["16", "12", "13.5"])), n("ft")])),
         define("a", &app("mult", &[r("2"), r("3")])),
         eval(&app("mult", &[n("a"), r("2")])),
@@ -1665,7 +1635,7 @@ fn the_page_carries_the_styling_that_hides_the_engines_array_marks() {
 
 #[test]
 fn an_evaluation_shows_the_expression_and_its_result_without_the_substituted_step() {
-    let res = convert(&[define("a", &r("2")), eval(&app("plus", &[n("a"), r("1")]))]);
+    let res = convert_noc(&[define("a", &r("2")), eval(&app("plus", &[n("a"), r("1")]))]);
     let (html, errors) = shown(&res.calcpad);
     assert!(errors.is_empty(), "{errors:?}");
     let text = text_of(&html);
@@ -1684,7 +1654,7 @@ fn a_renamed_variable_is_shown_under_the_authors_name() {
         ),
         eval(&n("N")),
     ];
-    let res = convert(&regions);
+    let res = convert_noc(&regions);
     assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
     assert!(
         res.calcpad
@@ -1724,7 +1694,7 @@ fn an_error_in_the_hidden_computation_is_still_reported() {
 #[test]
 fn elements_defined_over_a_range_show_the_authors_equation() {
     // i := 1..3 ; h[i] := 2 i  is shown as h_i = 2 i, and h is filled.
-    let res = convert(&[
+    let res = convert_noc(&[
         define("i", &range("1", "3")),
         set_element("h", &n("i"), &app("mult", &[r("2"), n("i")])),
         eval(&index1("h", &r("3"))),
@@ -1738,17 +1708,25 @@ fn elements_defined_over_a_range_show_the_authors_equation() {
 
 #[test]
 fn a_matrix_result_scrolls_instead_of_wrapping() {
-    let res = convert(&[define("v", &mat(3, 1, &["1", "2", "3"])), eval(&n("v"))]);
+    let res = convert_noc(&[define("v", &mat(3, 1, &["1", "2", "3"])), eval(&n("v"))]);
     assert!(
         res.calcpad.contains("'<div class=\"imp-scroll\">\nv\n'</div>"),
         "{}",
         res.calcpad
     );
-    let res = convert(&[define("a", &r("2")), eval(&n("a"))]);
+    let res = convert_noc(&[define("a", &r("2")), eval(&n("a"))]);
     assert!(!res.calcpad.contains("imp-scroll\">"), "{}", res.calcpad);
 }
 
 // ---- 6. results are shown to the precision the file used, and computed in full ----------------------------------
+
+fn import_noc(xml: &str) -> ImportResult {
+    let opts = calcpad_import::ImportOptions {
+        mathml: false,
+        ..Default::default()
+    };
+    calcpad_import::import_xmcd_opts(xml, &opts)
+}
 
 /// A sheet whose settings give `default` decimals and whose math regions are (inner, own decimals).
 fn precision_sheet(default: Option<i32>, regions: &[(String, Option<i32>)]) -> String {
@@ -1782,7 +1760,7 @@ fn precision_sheet(default: Option<i32>, regions: &[(String, Option<i32>)]) -> S
 #[test]
 fn results_use_the_files_precision_and_the_engine_computes_in_full() {
     let third = define("x", &app("div", &[r("2"), r("3")]));
-    let res = import_xmcd(&precision_sheet(
+    let res = import_noc(&precision_sheet(
         None,
         &[
             (third, None),
@@ -1808,7 +1786,7 @@ fn results_use_the_files_precision_and_the_engine_computes_in_full() {
 
 #[test]
 fn the_documents_default_precision_applies_where_a_region_says_nothing() {
-    let res = import_xmcd(&precision_sheet(
+    let res = import_noc(&precision_sheet(
         Some(4),
         &[
             (define("x", &app("div", &[r("2"), r("3")])), None),

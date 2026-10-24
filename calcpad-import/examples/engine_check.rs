@@ -26,7 +26,11 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let opts = calcpad_import::ImportOptions::default();
+    let opts = calcpad_import::ImportOptions {
+        // NO_MATHML=1 checks the typeset-Calcpad display instead of the MathML one.
+        mathml: std::env::var_os("NO_MATHML").is_none(),
+        ..Default::default()
+    };
     let mut pairs = String::new();
     let r = if bytes.starts_with(b"PK") {
         match calcpad_import::mcdx::read(&bytes, opts.limits) {

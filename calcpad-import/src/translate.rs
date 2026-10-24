@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ir::*;
+use crate::mathml::{self, MathMl};
 use crate::picture::{self, SvgError};
 use crate::report::{Code, ImportReport, Issue, KindStats, Severity};
 use crate::tables::{self, Constant, FnRule};
@@ -659,6 +660,10 @@ struct Tr {
     used_paths: HashSet<String>,
     asset_total: usize,
     has_references: bool,
+    /// A result was written for the engine to typeset as MathML (the page then turns that on).
+    uses_val_ml: bool,
+    /// The typeset form of the unconverted region being shown, when it has one.
+    pending_ml: Option<String>,
 }
 
 const MAX_RENDER_DEPTH: usize = 300;
@@ -2407,6 +2412,10 @@ impl Tr {
             note
         ));
         let Some(lines) = body else { return };
+        if let Some(ml) = self.pending_ml.take() {
+            self.lines.push(ml);
+            return;
+        }
         let mut in_noc = false;
         for (eq, text) in lines {
             let one_line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
@@ -2424,11 +2433,7 @@ impl Tr {
                     self.lines.push("#end noc".to_string());
                     in_noc = false;
                 }
-                // Leading `&emsp;` indents are markup already; the rest is text.
-                let indent_len = one_line.len() - one_line.trim_start_matches("&emsp;").len();
-                let (indent, rest) = one_line.split_at(indent_len);
-                let rest: String = rest.chars().take(600).collect();
-                self.lines.push(format!("'{indent}<code>{}</code>", escape_text(&rest)));
+                // Source that is not maths is not shown: the reader sees the note, never code.
             }
         }
         if in_noc {
@@ -2623,10 +2628,29 @@ impl Tr {
     /// sight and shows the author's equation only (a definition shows no result in the source). An
     /// evaluation shows the expression and its result at the precision the file used; when the
     /// engine would show a renamed variable, the author's expression is typeset first.
-    fn present(&mut self, m: &MathRegion, shape: &str, plain_def: bool, elem_def: bool, line: String) -> String {
+    fn present(
+        &mut self,
+        m: &MathRegion,
+        shape: &str,
+        plain_def: bool,
+        elem_def: bool,
+        multi_def: bool,
+        line: String,
+    ) -> String {
+        if multi_def {
+            if let Stmt::Define { target, value, global } = &m.stmt {
+                if let Some(typeset) = self.typeset_define(target, value, *global) {
+                    return format!("#hide\n{line}\n#end hide\n{typeset}");
+                }
+            }
+            return line;
+        }
         if plain_def {
-            if let Stmt::Define { target, value, .. } = &m.stmt {
+            if let Stmt::Define { target, value, global } = &m.stmt {
                 if let Some(shown) = self.display_define(target, value) {
+                    if let Some(typeset) = self.typeset_define(target, value, *global) {
+                        return format!("#hide\n{line}\n#end hide\n{typeset}");
+                    }
                     let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
                     return format!("{fmt}#hide\n{line}\n#end hide\n#noc\n{shown}\n#end noc");
                 }
@@ -2635,9 +2659,9 @@ impl Tr {
         }
         if elem_def {
             if let Stmt::Define {
-                target: Target::Element { base: Some(b), index },
+                target: target @ Target::Element { base: Some(b), index },
                 value,
-                ..
+                global,
             } = &m.stmt
             {
                 if let Some(shown) = self.display_element(b, index, value) {
@@ -2648,6 +2672,9 @@ impl Tr {
                         }
                         _ => line,
                     };
+                    if let Some(typeset) = self.typeset_define(target, value, *global) {
+                        return format!("{hidden}\n{typeset}");
+                    }
                     let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
                     return format!("{fmt}{hidden}\n#noc\n{shown}\n#end noc");
                 }
@@ -2668,7 +2695,17 @@ impl Tr {
         };
         let mut scroll = false;
         if let Stmt::Eval { expr, unit } = &m.stmt {
-            if let Some((shown, renamed)) = self.display_eval(expr, unit.as_ref()) {
+            let shown = self.display_eval(expr, unit.as_ref());
+            // The author's left side typeset, and the engine's own value after it (with its unit once).
+            if let (Some(_), false) = (&shown, line.contains('\n')) {
+                if let Some(head) = self.typeset_eval_head(expr) {
+                    self.uses_val_ml = true;
+                    return format!(
+                        "#round {places}\n'<div class=\"imp-eq\"><math class=\"imp-m\">{head}\n#val\n{line}\n#end val\n'</math></div>\n#round 12"
+                    );
+                }
+            }
+            if let Some((shown, renamed)) = shown {
                 if renamed {
                     if let Some(l) = self.format_line(None) {
                         out.push_str(&format!("{l}\n"));
@@ -2688,6 +2725,73 @@ impl Tr {
             out.push_str(&line);
         }
         out
+    }
+
+    /// Whether an identifier is read as a unit label where the equation sits.
+    fn is_unit_name(&self, n: &Name) -> bool {
+        if n.sub.is_some() || tables::map_unit(&n.base).is_none() {
+            return false;
+        }
+        if n.unit {
+            return true;
+        }
+        let flat = tables::normalise_name(&n.flat());
+        !(self.defined.contains(&flat)
+            || self.params.contains(&flat)
+            || self.funcs.contains_key(&flat)
+            || self.ranges.contains_key(&flat)
+            || self.locals.contains_key(&flat)
+            || self.gap_names.contains_key(&flat))
+    }
+
+    /// A definition as MathML, as an output line; `None` when the option is off or the equation has a
+    /// part this module does not typeset.
+    fn typeset_define(&self, target: &Target, value: &Expr, global: bool) -> Option<String> {
+        if !self.opts.mathml {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            original: &original,
+        };
+        ml.define(target, value, global).map(|m| mathml::line(&m))
+    }
+
+    /// An unconverted region's statement as MathML (a constraint, a check, an evaluation or a
+    /// definition that the engine could not run), as an output line.
+    fn typeset_gap(&self, stmt: &Stmt) -> Option<String> {
+        if !self.opts.mathml {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            original: &original,
+        };
+        let m = match stmt {
+            Stmt::Bare(e) => ml.bare(e)?,
+            Stmt::Eval { expr, .. } => mathml::wrap(&ml.eval_head(expr)?),
+            Stmt::Define { target, value, global } => ml.define(target, value, *global)?,
+            _ => return None,
+        };
+        Some(mathml::line(&m))
+    }
+
+    /// The left side of an evaluation (`expr =`) as MathML.
+    fn typeset_eval_head(&self, expr: &Expr) -> Option<String> {
+        if !self.opts.mathml || self.table_range(expr).is_some() {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            original: &original,
+        };
+        ml.eval_head(expr)
     }
 
     fn math(&mut self, r: &Region, m: &MathRegion) {
@@ -3202,7 +3306,8 @@ impl Tr {
                     .push(format!("'<!-- ORIGIN assigned {} in the source -->", v));
             } else if let Some(line) = emitted.take() {
                 self.maths_shown = true;
-                let text = self.present(m, shape, plain_def, elem_def, line);
+                let multi_def = !multi_names.is_empty();
+                let text = self.present(m, shape, plain_def, elem_def, multi_def, line);
                 self.lines.push(text);
             }
             for name in &multi_names {
@@ -3263,9 +3368,13 @@ impl Tr {
                 let _ = arity;
                 self.gap_names.insert(name, root);
             }
-            let shown: Option<Vec<GapLine>> = self
+            let mut shown: Option<Vec<GapLine>> = self
                 .readable_stmt(&m.stmt)
                 .or_else(|| attempt.map(|a| vec![(false, a)]));
+            self.pending_ml = self.typeset_gap(&m.stmt);
+            if self.pending_ml.is_some() {
+                shown = Some(Vec::new());
+            }
             pictured = self.show_gap(r, &gap_codes, shown.as_deref(), m.saved_result.as_ref());
         }
         self.flush_issues(&r.id, r.line, None);
@@ -3396,7 +3505,9 @@ fn style_block(colors: &std::collections::BTreeSet<String>, maths: bool) -> Opti
     let mut css = String::new();
     if maths {
         css.push_str(
-            ".vec{display:none}b>var{font-weight:normal}sup>small.nth:first-child{display:none}.imp-scroll{overflow-x:auto;white-space:nowrap}",
+            ".vec{display:none}b>var{font-weight:normal}sup>small.nth:first-child{display:none}.imp-scroll{overflow-x:auto;white-space:nowrap}\
+.imp-eq{overflow-x:auto;padding:.2em 0;margin:.3em 0}.imp-m{font-size:1.15em;math-style:normal;font-family:Cambria Math,STIX Two Math,Latin Modern Math,Noto Sans Math,math}\
+.imp-m mi.v{font-style:italic}.imp-m .kw,.imp-m .dot,.imp-m .beq{font-weight:bold}",
         );
     }
     for c in colors {
@@ -3594,7 +3705,7 @@ fn text_line(
             } else {
                 html
             };
-            if class.is_empty() && css.is_empty() && block.is_empty() {
+            if class.is_empty() && css.is_empty() && block.is_empty() && !inner.starts_with('<') {
                 format!("'{inner}")
             } else {
                 // An HTML line gets no paragraph of its own from the engine, so it is one here.
@@ -3726,6 +3837,8 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         used_paths: HashSet::new(),
         asset_total: 0,
         has_references,
+        uses_val_ml: false,
+        pending_ml: None,
     };
     tr.layout_rows(&rows);
     let mut out = String::new();
@@ -3744,6 +3857,9 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         // Equations shown for reading carry the numbers as written (see `format_line`); results are
         // shown under a number format set where they are.
         out.push_str("#nosub\n#round 12\n");
+        if tr.uses_val_ml {
+            out.push_str("#settings {\"valMathml\": true}\n");
+        }
     }
     if tr.uses_trig {
         out.push_str("#rad\n");

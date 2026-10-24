@@ -29,6 +29,7 @@
 #![forbid(unsafe_code)]
 
 pub mod ir;
+pub mod mathml;
 pub mod mcdx;
 pub mod picture;
 pub mod report;
@@ -77,6 +78,10 @@ pub struct ImportOptions {
     pub svg_limits: picture::SvgLimits,
     /// Most asset bytes produced for one worksheet; past it, pictures fall back to placeholders.
     pub max_total_asset_bytes: usize,
+    /// Typeset the author's equations as MathML (stacked fractions, sums with bounds, subscripts,
+    /// `:=`), with results written by the engine. Off, equations are shown as typeset Calcpad
+    /// (the `#noc` display), which every export handles. The computation is the same either way.
+    pub mathml: bool,
 }
 
 impl Default for ImportOptions {
@@ -89,6 +94,7 @@ impl Default for ImportOptions {
             convert_metafiles: true,
             svg_limits: picture::SvgLimits::default(),
             max_total_asset_bytes: 128 * 1024 * 1024,
+            mathml: true,
         }
     }
 }

@@ -6,41 +6,8 @@ use calcpad_import::{
     import_bytes, import_mcdx, import_xmcd, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
 };
 
-/// The page as it was before definitions were shown as the author's equation: the computed form of
-/// every region (a definition echoes its value, substituted steps shown), so numbers can be read
-/// from the engine's output. Only the wrappers the display adds are removed.
-pub fn legacy(code: &str) -> String {
-    let lines: Vec<&str> = code.lines().collect();
-    let mut skip = vec![false; lines.len()];
-    for i in 0..lines.len() {
-        let t = lines[i].trim();
-        if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") {
-            skip[i] = true;
-        } else if t == "#end hide" && lines.get(i + 1).map(|l| l.trim()) == Some("#noc") {
-            // The author's equation shown after a hidden computation: dropped. When the computation
-            // is one line it was hidden for this display only and is shown again (a definition then
-            // echoes its value, as before).
-            let close = (i + 2..lines.len())
-                .find(|&k| lines[k].trim() == "#end noc")
-                .unwrap_or(i + 1);
-            for s in &mut skip[i + 1..=close] {
-                *s = true;
-            }
-            if i >= 2 && lines[i - 2].trim() == "#hide" {
-                skip[i - 2] = true;
-                skip[i] = true;
-            }
-        }
-    }
-    let mut out = String::new();
-    for (l, s) in lines.iter().zip(&skip) {
-        if !s {
-            out.push_str(l);
-            out.push('\n');
-        }
-    }
-    out
-}
+mod common;
+use common::legacy;
 
 // ---- a minimal zip writer ------------------------------------------------------------------------
 
@@ -505,7 +472,7 @@ fn text_region_reads_the_flow_document() {
         .import();
     assert_eq!(
         lines(&res),
-        vec!["'<b>Beam </b>check<i> (draft)</i><br/><u>second line</u>"]
+        vec!["'<p><b>Beam </b>check<i> (draft)</i><br/><u>second line</u></p>"]
     );
     assert_eq!(res.report.regions_total(), 1);
     assert_eq!(res.report.regions_needing_attention(), 0);
@@ -516,7 +483,10 @@ fn inline_flow_document_is_read_like_the_package_form() {
     // Older files hold the flow document inside the text element; no relationship, no part.
     let region = r#"<region region-id="1" top="0" left="0" width="400"><text is-text-block="true"><FlowDocument xmlns="http://example.invalid/presentation"><Paragraph Margin="0,0,0,0"><Run FontWeight="Bold">Beam </Run><Run>check</Run><Run><Run.TextDecorations><TextDecorationCollection><TextDecoration Location="Underline" /></TextDecorationCollection></Run.TextDecorations> underlined</Run></Paragraph><List MarkerStyle="Decimal"><ListItem><Paragraph><Run>one</Run></Paragraph></ListItem></List></FlowDocument></text></region>"#;
     let res = Pkg::new(region).import();
-    assert_eq!(lines(&res), vec!["'<b>Beam </b>check<u> underlined</u>", "'1. one"]);
+    assert_eq!(
+        lines(&res),
+        vec!["'<p><b>Beam </b>check<u> underlined</u></p>", "'1. one"]
+    );
     assert_eq!(res.report.regions_needing_attention(), 0);
     assert!(!res.report.issues.iter().any(|i| i.code == Code::TextUnreadable));
 }

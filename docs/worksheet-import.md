@@ -85,6 +85,26 @@ the number of regions they block.
 
 ### Equations as the author wrote them
 
+### MathML display
+
+By default the author's equation is written as MathML (`<math>` inside `<div class="imp-eq">`), built from the parsed source
+tree by `calcpad-import/src/mathml.rs`: stacked fractions, `munderover` sums and products with bounds, integrals,
+subscripts (`C_(v,i)`, `V_1`), a vector arrow over the whole product, a transpose superscript, bracketed matrices,
+`:=` for a definition (`≡` for a global one) and `=` for an evaluation, original names (`SIUnitsOf`, a variable renamed
+for the engine shows under its own name), units upright and variables italic. Colours are the page's (`currentColor`), so
+the dark theme needs nothing extra. The computation is the unchanged hidden code.
+
+An evaluation is `<math>` with the left side typeset, then the engine's value through `#val`: the page switches on
+`#settings {"valMathml": true}`, an opt-in engine setting under which `#val` writes the value as MathML (bracketed table,
+unit once after it, the file's decimal places through `#round`). Nothing in the engine changes unless the setting is on.
+A region whose equation has a node without a MathML spelling (a program body, for example) keeps the typeset-Calcpad
+display below. `ImportOptions::mathml = false` (the wasm option `mathml`) uses it everywhere.
+
+Exports: the Word export converts each `<math>` to Office Math (fractions, sub and superscripts, sums, brackets,
+matrices, accents) and the Excel export writes a linear text form with the matrix cells apart. Print and PDF use the
+browser's own rendering. Source that is not maths (a program body, an unreadable string) is never shown as code; the
+region keeps its quiet "not calculated" note.
+
 A converted math region is shown as the author's equation and computed out of sight, so the page reads like the source.
 
 - **A definition** (`:=`) is computed inside `#hide` ... `#end hide` and shown as a typeset `#noc` block that carries the

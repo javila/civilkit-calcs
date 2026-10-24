@@ -252,8 +252,8 @@ check(['/imported/synth/R5.svg', '/imported/synth/R6.png', '/imported/synth/R4.p
 const fr = await previewFrame();
 check(!!fr, 'the preview renders');
 if (fr) {
-    const body = await fr.evaluate(() => document.body.innerText);
-    check(/x\s*=\s*2/.test(body) && /=\s*5\b/.test(body), 'the live maths calculates (x = 2, x + 3 = 5)');
+    const body = (await fr.evaluate(() => document.body.innerText)).normalize('NFKC');
+    check(/x\s*:=\s*2/.test(body) && /x\s*\+\s*3\s*=\s*5\b/.test(body), 'the live maths calculates (x := 2, x + 3 = 5)');
     await page.waitForTimeout(500);
     const imgs = await fr.evaluate(() => [...document.images].map(i => ({ w: i.naturalWidth, h: i.naturalHeight, src: i.src.slice(0, 24), style: i.getAttribute('style') })));
     check(imgs.length === 3 && imgs.every(i => i.w > 0), `all three pictures display (${JSON.stringify(imgs.map(i => [i.w, i.h, i.src.slice(5, 20)]))})`);
@@ -359,8 +359,8 @@ check(/package\.cpd/.test(String(mtitle)), `mcdx: a new tab named after the file
 const mfr = await previewFrame('Package test sheet');
 check(!!mfr, 'mcdx: the preview renders');
 if (mfr) {
-    const body = await mfr.evaluate(() => document.body.innerText);
-    check(/x\s*=\s*2/.test(body) && /=\s*5\b/.test(body), 'mcdx: the live maths calculates (x = 2, x + 3 = 5)');
+    const body = (await mfr.evaluate(() => document.body.innerText)).normalize('NFKC');
+    check(/x\s*:=\s*2/.test(body) && /x\s*\+\s*3\s*=\s*5\b/.test(body), 'mcdx: the live maths calculates (x := 2, x + 3 = 5)');
 }
 const mdropped = await page.evaluate(async (b64) => {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -402,9 +402,9 @@ await closeDialog();
 const lfr = await previewFrame('Styled head');
 check(!!lfr, 'loops: the preview renders');
 if (lfr) {
-    const body = (await lfr.evaluate(() => document.body.innerText)).replace(/[\s\u2190]+/g, ' ').trim();
-    check(/h\s*=\s*\[\s*2 m\s+4 m\s+6 m\s*\]/.test(body), `loops: the vector is shown (${body})`);
-    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/⃗?h\s*=\s*\[[^\]]*\]/, '').replace(/hi\s*=\s*i\s*·\s*2\s*·\s*m/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
+    const body = (await lfr.evaluate(() => document.body.innerText)).normalize('NFKC').replace(/[\s\u2190]+/g, ' ').trim();
+    check(/h\s*=\s*\[\s*2\s+4\s+6\s*\]\s*m\b/.test(body), `loops: the vector is shown (${body})`);
+    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/h\s*=\s*\[[^\]]*\]\s*m/, '').replace(/h\s*i\s*:=\s*i\s*[·⋅]\s*\(\s*2\s*[·⋅]\s*m\s*\)/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
     const st = await lfr.evaluate(() => { const h = document.querySelector('h1'); const cs = h && getComputedStyle(h); return cs ? [cs.color, cs.fontFamily, cs.fontSize] : null; });
     check(st && st[0] === 'rgb(128, 0, 0)' && /Times New Roman/.test(st[1]) && st[2] === '16px', `text style: heading keeps the source colour, family and size (${JSON.stringify(st)})`);
 }
@@ -424,8 +424,9 @@ await closeDialog();
 const efr = await previewFrame('Shown equations');
 check(!!efr, 'equations: the preview renders');
 if (efr) {
-    const body = (await efr.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').trim();
-    check(/w = \[16; 12; 13\.5\]\s*T\s*· ft/.test(body), `equations: the definition reads as the author wrote it (${body})`);
+    const body = (await efr.evaluate(() => document.body.innerText)).normalize('NFKC').replace(/\s+/g, ' ').trim();
+    check(await efr.evaluate(() => document.querySelectorAll('math').length > 0 && document.querySelector('math mfrac, math msup') !== null), 'equations: the author\'s equations are typeset as MathML (fraction and transpose present)');
+    check(/w := \( \[ 16 12 13\.5 \] \) T ⋅ ft/.test(body), `equations: the definition reads as the author wrote it (${body})`);
     check(!/16 ft/.test(body) && !/⃗/.test(body), 'equations: no result after a definition and no array arrow');
     check(/x = 0\.667\b/.test(body) && !/0\.6667/.test(body), 'equations: the result has the three decimals the file used');
 }
