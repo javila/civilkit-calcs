@@ -3,6 +3,18 @@
 The build is static files (`web/calcpad-web/dist`). There is no server and no GitHub Actions workflow: a deploy is a
 build and a push of the build folder.
 
+## Working folders
+
+The scripts expect this layout, with the repository in `repo/` and its neighbours beside it:
+
+```
+civilkit-calcs/
+  repo/            this repository (branch main tracks the public remote)
+  calcpad-ref/     the upstream CalcpadCE checkout used as the reference for comparisons (tools and e2e checks default to it)
+  pages-build/     the GitHub Pages build folder (its own git repository, see below)
+  pages-build-calcs/  the Cloudflare Pages build folder
+```
+
 ## Versions
 
 The version is `[workspace.package] version` in the root `Cargo.toml`: YY.M.N with no zero padding (26.10.1 is the
@@ -39,10 +51,10 @@ Build into a folder outside the repository, with a `.nojekyll` file, and push it
 
 ```sh
 cd web && CALCS_BASE=/civilkit-calcs/ npm run build
-mkdir -p ../../calcpad-rs-pages-build
-cp -R calcpad-web/dist/. ../../calcpad-rs-pages-build/
-touch ../../calcpad-rs-pages-build/.nojekyll
-cd ../../calcpad-rs-pages-build
+mkdir -p ../../pages-build
+cp -R calcpad-web/dist/. ../../pages-build/
+touch ../../pages-build/.nojekyll
+cd ../../pages-build
 git init -b gh-pages && git add -A && git commit -m "CivilKit Calcs 26.10.2"
 git remote add origin git@github.com:mageaustralia/civilkit-calcs.git
 git push -f origin gh-pages
@@ -56,11 +68,11 @@ in it, and open `http://127.0.0.1:4176/civilkit-calcs/`.
 
 ```sh
 cd web && CALCS_BASE=/calcs/ npm run build
-mkdir -p ../../calcpad-rs-pages-build-calcs/calcs
-cp -R calcpad-web/dist/. ../../calcpad-rs-pages-build-calcs/calcs/
-cp calcpad-web/cloudflare/_headers ../../calcpad-rs-pages-build-calcs/_headers
+mkdir -p ../../pages-build-calcs/calcs
+cp -R calcpad-web/dist/. ../../pages-build-calcs/calcs/
+cp calcpad-web/cloudflare/_headers ../../pages-build-calcs/_headers
 ```
 
-Deploy `calcpad-rs-pages-build-calcs` as the Pages project root, so the files are served under `/calcs/`. The
+Deploy `pages-build-calcs` as the Pages project root, so the files are served under `/calcs/`. The
 `_headers` file sets `application/wasm` for the modules and long caching for hashed assets. Preview with
 `python3 -m http.server 4177 --bind 127.0.0.1` in that folder, then open `http://127.0.0.1:4177/calcs/`.
