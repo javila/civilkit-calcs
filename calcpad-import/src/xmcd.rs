@@ -804,6 +804,7 @@ fn read_name(n: Node) -> Name {
         base: base.trim().to_string(),
         sub,
         unit: n.attribute("labels") == Some("UNIT"),
+        var: n.attribute("labels") == Some("VARIABLE"),
     }
 }
 

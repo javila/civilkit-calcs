@@ -2735,6 +2735,14 @@ impl Tr {
         if n.unit {
             return true;
         }
+        if n.var {
+            return false;
+        }
+        // A one-letter name the file does not label as a unit is a variable (an unknown of a
+        // solve block); longer unlabelled names such as `ft` are units where nothing defines them.
+        if n.base.chars().count() == 1 {
+            return false;
+        }
         let flat = tables::normalise_name(&n.flat());
         !(self.defined.contains(&flat)
             || self.params.contains(&flat)
@@ -2751,9 +2759,11 @@ impl Tr {
             return None;
         }
         let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
         let original = |b: &str| self.renamed.get(b).cloned();
         let ml = MathMl {
             is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
             original: &original,
         };
         ml.define(target, value, global).map(|m| mathml::line(&m))
@@ -2766,9 +2776,11 @@ impl Tr {
             return None;
         }
         let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
         let original = |b: &str| self.renamed.get(b).cloned();
         let ml = MathMl {
             is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
             original: &original,
         };
         let m = match stmt {
@@ -2786,9 +2798,11 @@ impl Tr {
             return None;
         }
         let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
         let original = |b: &str| self.renamed.get(b).cloned();
         let ml = MathMl {
             is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
             original: &original,
         };
         ml.eval_head(expr)

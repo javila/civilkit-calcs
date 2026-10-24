@@ -332,3 +332,53 @@ fn names_and_strings_from_the_file_cannot_add_markup_or_directives() {
         assert!(!l.contains('\''), "{}", &l[1..]);
     }
 }
+
+fn app_call(name: &str, arg: &str) -> String {
+    format!("<ml:apply>{name}{arg}</ml:apply>")
+}
+
+fn func_def(name: &str, param: &str, body: &str) -> String {
+    format!(
+        "<ml:define><ml:function>{}<ml:boundVars>{}</ml:boundVars></ml:function>{body}</ml:define>",
+        name,
+        n(param)
+    )
+}
+
+#[test]
+fn the_pages_own_function_names_are_italic_everywhere_and_the_tools_functions_upright() {
+    // F_AB(x) := 2 x; F_BC(x) := F_AB(x) - sin(x). The name F_AB is set the same way where it is
+    // defined and where it is called; sin stays upright.
+    let res = convert(&[
+        func_def(&sub("F", "AB"), "x", &app("mult", &[r("2"), n("x")])),
+        func_def(
+            &sub("F", "BC"),
+            "x",
+            &app(
+                "minus",
+                &[app_call(&sub("F", "AB"), &n("x")), app_call(&n("sin"), &n("x"))],
+            ),
+        ),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let line = res.calcpad.lines().rfind(|l| l.contains("<math")).unwrap();
+    assert!(
+        line.contains("<msub><mi>F</mi><mrow><mi class=\"v\">AB</mi></mrow></msub><mrow><mo>(</mo>"),
+        "{line}"
+    );
+    assert!(!line.contains("<mi mathvariant=\"normal\">F</mi>"), "{line}");
+    assert!(line.contains("<mi mathvariant=\"normal\">sin</mi>"), "{line}");
+}
+
+#[test]
+fn an_unlabelled_one_letter_name_is_a_variable_not_a_unit() {
+    // `d` and `V` carry no unit label in the file: they are variables, never upright unit labels.
+    let res = convert(&[eval(&app("plus", &[n("d"), n("V")]))]);
+    let line = res
+        .calcpad
+        .lines()
+        .rfind(|l| l.contains("<math"))
+        .expect("a typeset line");
+    assert!(!line.contains("mathvariant=\"normal\">d<"), "{line}");
+    assert!(!line.contains("mathvariant=\"normal\">V<"), "{line}");
+}

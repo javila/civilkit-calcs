@@ -171,6 +171,8 @@ pub struct Name {
     /// The file labels the identifier as a unit (so `N` is the newton even when a variable `N`
     /// exists).
     pub unit: bool,
+    /// The file labels the identifier as a variable: it is never read as a unit label.
+    pub var: bool,
 }
 
 impl Name {
@@ -179,6 +181,7 @@ impl Name {
             base: base.to_string(),
             sub: None,
             unit: false,
+            var: false,
         }
     }
     /// The Calcpad spelling: `base_sub`.

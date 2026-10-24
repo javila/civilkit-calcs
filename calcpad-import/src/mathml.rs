@@ -73,6 +73,9 @@ fn paren(inner: &str) -> String {
 /// unit (upright) rather than a variable (italic) where the equation sits.
 pub struct MathMl<'a> {
     pub is_unit: &'a dyn Fn(&Name) -> bool,
+    /// Whether the page defines this name as its own function (a user function is a variable name
+    /// like any other and is set in italic; only the tool's own functions are upright).
+    pub is_user_fn: &'a dyn Fn(&Name) -> bool,
     /// The author's spelling of a name the translator renamed to keep it apart from a unit.
     pub original: &'a dyn Fn(&str) -> Option<String>,
 }
@@ -138,6 +141,7 @@ impl MathMl<'_> {
             base: base.base.clone(),
             sub: None,
             unit: base.unit,
+            var: base.var,
         };
         Some(format!(
             "<msub>{}{}</msub>",
@@ -165,6 +169,26 @@ impl MathMl<'_> {
         }
     }
 
+    /// How the name of a called function is set: one rule everywhere. The tool's own functions
+    /// (and the `if` keyword) are upright; any other name, the page's own functions included,
+    /// is an italic variable name.
+    fn call_kind(&self, n: &Name) -> Kind {
+        if (self.is_user_fn)(n) {
+            return Kind::Var;
+        }
+        let flat = crate::tables::normalise_name(&n.flat());
+        let builtin = n.sub.is_none()
+            && (matches!(n.base.as_str(), "if" | "otherwise")
+                || crate::tables::lookup_function(&flat).is_some()
+                || crate::tables::is_builtin_missing(&flat)
+                || crate::tables::is_solve_name(&flat));
+        if builtin {
+            Kind::Func
+        } else {
+            Kind::Var
+        }
+    }
+
     fn expr(&self, e: &Expr) -> Option<M> {
         Some(match e {
             Expr::Num(s) => {
@@ -189,7 +213,7 @@ impl MathMl<'_> {
                 }
                 atom(format!(
                     "{}{}",
-                    self.name(n, Kind::Func),
+                    self.name(n, self.call_kind(n)),
                     paren(&parts.join("<mo>,</mo>"))
                 ))
             }
@@ -309,6 +333,7 @@ impl MathMl<'_> {
             base: n.base.clone(),
             sub: None,
             unit: n.unit,
+            var: n.var,
         };
         let lit = match n.sub.as_deref().filter(|s| !s.is_empty()) {
             Some(s) => format!("{}<mo>,</mo>", sub_text(s)),
