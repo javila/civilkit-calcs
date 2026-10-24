@@ -34,6 +34,94 @@ struct R {
     prec: u8,
 }
 
+/// A program of local definitions (each name assigned once) and a final value, as the single
+/// expression it stands for. `None` if it is anything else, or if substituting would let a
+/// local's value be captured by an integration variable.
+fn inline_program(stmts: &[PStmt]) -> Option<Expr> {
+    let (last, body) = stmts.split_last()?;
+    let tail = match last {
+        PStmt::Expr(e) | PStmt::Return(e) => e,
+        _ => return None,
+    };
+    let mut env: HashMap<String, Expr> = HashMap::new();
+    for st in body {
+        let PStmt::Local(PTarget::Var(n), e) = st else {
+            return None;
+        };
+        let key = tables::normalise_name(&n.flat());
+        if env.contains_key(&key) {
+            return None;
+        }
+        let v = subst(e, &env)?;
+        env.insert(key, v);
+    }
+    subst(tail, &env)
+}
+
+fn subst(e: &Expr, env: &HashMap<String, Expr>) -> Option<Expr> {
+    let b = |x: &Expr| subst(x, env).map(Box::new);
+    let without = |v: &str| -> HashMap<String, Expr> {
+        env.iter()
+            .filter(|(k, _)| k.as_str() != v)
+            .map(|(k, x)| (k.clone(), x.clone()))
+            .collect()
+    };
+    Some(match e {
+        Expr::Name(n) => match env.get(&tables::normalise_name(&n.flat())) {
+            Some(v) => v.clone(),
+            None => e.clone(),
+        },
+        Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => e.clone(),
+        Expr::Un(o, x) => Expr::Un(*o, b(x)?),
+        Expr::Bin(o, x, y) => Expr::Bin(*o, b(x)?, b(y)?),
+        Expr::Call(f, args) => Expr::Call(f.clone(), args.iter().map(|a| subst(a, env)).collect::<Option<_>>()?),
+        Expr::Postfix(u, x) => Expr::Postfix(u.clone(), b(x)?),
+        Expr::Index(x, idx) => Expr::Index(b(x)?, idx.iter().map(|a| subst(a, env)).collect::<Option<_>>()?),
+        Expr::Matrix { rows, cols, items } => Expr::Matrix {
+            rows: *rows,
+            cols: *cols,
+            items: items.iter().map(|a| subst(a, env)).collect::<Option<_>>()?,
+        },
+        Expr::Range { first, second, last } => Expr::Range {
+            first: b(first)?,
+            second: match second {
+                Some(s) => Some(b(s)?),
+                None => None,
+            },
+            last: b(last)?,
+        },
+        Expr::Integral {
+            var,
+            body,
+            lower,
+            upper,
+        } => {
+            let v = tables::normalise_name(&var.flat());
+            // A substituted value that mentions the integration variable would be captured by it.
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Integral {
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+                lower: b(lower)?,
+                upper: b(upper)?,
+            }
+        }
+        Expr::Derivative { var, body } => {
+            let v = tables::normalise_name(&var.flat());
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Derivative {
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+            }
+        }
+        Expr::Program(_) => return None,
+    })
+}
+
 /// True when `name` (already normalised) occurs as a name anywhere in `e`.
 fn mentions(e: &Expr, name: &str) -> bool {
     match e {
@@ -58,6 +146,7 @@ fn mentions(e: &Expr, name: &str) -> bool {
         }
         Expr::Derivative { var, body } => tables::normalise_name(&var.flat()) != name && mentions(body, name),
         Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => false,
+        Expr::Program(_) => true,
     }
 }
 
@@ -216,6 +305,11 @@ struct Tr {
     params: Vec<String>,
     /// Range variables with literal integer bounds, usable as loop bounds of element assignments.
     ranges: HashMap<String, (i64, i64)>,
+    /// While a program is lowered: its local names and the names they were given in the output.
+    locals: HashMap<String, String>,
+    /// Output names of locals known to hold an array created in the program.
+    local_arrays: HashSet<String>,
+    prog_n: usize,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -288,6 +382,16 @@ impl Tr {
                 lower,
                 upper,
             } => self.integral(var, body, lower, upper),
+            Expr::Program(_) => {
+                self.issue(
+                    Code::ProgramBlock,
+                    Some(
+                        "a program inside an expression, or a program that is not the whole value of a definition"
+                            .into(),
+                    ),
+                );
+                atom("?program?")
+            }
             Expr::Derivative { var, body } => self.derivative(var, body),
             Expr::Index(base, idx) => self.index(base, idx),
             Expr::Matrix { rows, cols, items } => self.matrix(*rows, *cols, items),
@@ -402,6 +506,180 @@ impl Tr {
         args.iter().map(|a| self.expr(a).s).collect()
     }
 
+    /// Lowers a program that is the value of `name := program` to Calcpad statements and the
+    /// definition of `name`. Returns the text and whether the value is an array, or the reason
+    /// the program is not read. Locals get names of their own (`x_p1`), so nothing leaks into the
+    /// sheet's variables; an array is only written element by element if the program created it
+    /// whole first, because the engine cannot grow one.
+    fn lower_program(&mut self, stmts: &[PStmt], name: &str) -> Result<(String, bool), String> {
+        let Some((last, body)) = stmts.split_last() else {
+            return Err("an empty program".into());
+        };
+        let tail = match last {
+            PStmt::Expr(e) | PStmt::Return(e) => e,
+            _ => return Err("the program does not end with a value".into()),
+        };
+        self.prog_n += 1;
+        let saved_locals = std::mem::take(&mut self.locals);
+        let saved_arrays = std::mem::take(&mut self.local_arrays);
+        let mut lines = Vec::new();
+        let res = self.lower_stmts(body, 0, false, &mut lines);
+        let out = match res {
+            Ok(()) => {
+                let value = self.expr(tail);
+                let is_array = matches!(tail, Expr::Name(n)
+                    if self.locals.get(&tables::normalise_name(&n.flat())).is_some_and(|m| self.local_arrays.contains(m)));
+                let def = format!("{} = {}", name, value.s);
+                if lines.is_empty() {
+                    Ok((def, is_array))
+                } else {
+                    Ok((format!("#hide\n{}\n#show\n{}", lines.join("\n"), def), is_array))
+                }
+            }
+            Err(e) => Err(e),
+        };
+        self.locals = saved_locals;
+        self.local_arrays = saved_arrays;
+        out
+    }
+
+    fn local_name(&mut self, source: &str) -> String {
+        let mapped = format!("{}_p{}", source, self.prog_n);
+        self.locals.insert(source.to_string(), mapped.clone());
+        mapped
+    }
+
+    fn lower_stmts(
+        &mut self,
+        stmts: &[PStmt],
+        depth: usize,
+        in_loop: bool,
+        out: &mut Vec<String>,
+    ) -> Result<(), String> {
+        if depth > 12 {
+            return Err("blocks nested too deeply".into());
+        }
+        let pad = "    ".repeat(depth);
+        for st in stmts {
+            match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    let flat = tables::normalise_name(&n.flat());
+                    if !valid_ident(&flat) {
+                        return Err(format!("local name {flat} that Calcpad cannot spell"));
+                    }
+                    // The value is read before the name is a local: `x <- x + 1` starts from the outer x.
+                    let rhs = self.expr(e).s;
+                    let is_array = matches!(e, Expr::Matrix { .. })
+                        || matches!(e, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack"));
+                    let mapped = match self.locals.get(&flat) {
+                        Some(m) => m.clone(),
+                        None => self.local_name(&flat),
+                    };
+                    if is_array {
+                        self.local_arrays.insert(mapped.clone());
+                    } else {
+                        self.local_arrays.remove(&mapped);
+                    }
+                    out.push(format!("{pad}{mapped} = {rhs}"));
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let flat = tables::normalise_name(&base.flat());
+                    let Some(mapped) = self.locals.get(&flat).cloned() else {
+                        return Err(format!(
+                            "element assignment to {flat}, which the program did not create (the source would copy or grow it)"
+                        ));
+                    };
+                    if !self.local_arrays.contains(&mapped) {
+                        return Err(format!(
+                            "element assignment to {flat}, which grows element by element; the engine cannot grow an array"
+                        ));
+                    }
+                    if index.is_empty() || index.len() > 2 {
+                        return Err("an element index that is not one or two numbers".into());
+                    }
+                    let parts: Vec<String> = index.iter().map(|i| self.index_expr(i)).collect();
+                    let rhs = self.expr(e).s;
+                    out.push(format!("{pad}{mapped}.({}) = {rhs}", parts.join("; ")));
+                }
+                PStmt::For { var, range, body } => {
+                    let Expr::Range {
+                        first,
+                        second: None,
+                        last,
+                    } = range
+                    else {
+                        return Err("a loop over something other than a plain range a .. b".into());
+                    };
+                    let v = tables::normalise_name(&var.flat());
+                    if !valid_ident(&v) {
+                        return Err(format!("loop variable {v} that Calcpad cannot spell"));
+                    }
+                    let a = self.expr(first).s;
+                    let z = self.expr(last).s;
+                    let prev = self.locals.get(&v).cloned();
+                    let mapped = format!("{}_p{}", v, self.prog_n);
+                    let literal = |e: &Expr| match e {
+                        Expr::Num(s) => is_int_literal(s),
+                        _ => None,
+                    };
+                    match (literal(first), literal(last)) {
+                        (Some(x), Some(y)) if x <= y => {
+                            out.push(format!("{pad}#for {mapped} = {x} : {y}"));
+                        }
+                        _ => {
+                            // The source counts down when the end is below the start; the engine's
+                            // loop only counts up, so count steps and derive the value.
+                            let (lo, hi, k) = (format!("{mapped}_a"), format!("{mapped}_z"), format!("{mapped}_k"));
+                            out.push(format!("{pad}{lo} = {a}"));
+                            out.push(format!("{pad}{hi} = {z}"));
+                            out.push(format!("{pad}#for {k} = 0 : abs({hi} - {lo})"));
+                            out.push(format!("{pad}    {mapped} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"));
+                        }
+                    }
+                    self.locals.insert(v.clone(), mapped);
+                    let r = self.lower_stmts(body, depth + 1, true, out);
+                    match prev {
+                        Some(p) => self.locals.insert(v, p),
+                        None => self.locals.remove(&v),
+                    };
+                    r?;
+                    out.push(format!("{pad}#loop"));
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    out.push(format!("{pad}#while {c}"));
+                    self.lower_stmts(body, depth + 1, true, out)?;
+                    out.push(format!("{pad}#loop"));
+                }
+                PStmt::If { branches, otherwise } => {
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        out.push(format!("{pad}{} {cs}", if i == 0 { "#if" } else { "#else if" }));
+                        if b.is_empty() {
+                            return Err("an empty branch".into());
+                        }
+                        self.lower_stmts(b, depth + 1, in_loop, out)?;
+                    }
+                    if let Some(b) = otherwise {
+                        if b.is_empty() {
+                            return Err("an empty branch".into());
+                        }
+                        out.push(format!("{pad}#else"));
+                        self.lower_stmts(b, depth + 1, in_loop, out)?;
+                    }
+                    out.push(format!("{pad}#end if"));
+                }
+                PStmt::Break if in_loop => out.push(format!("{pad}#break")),
+                PStmt::Continue if in_loop => out.push(format!("{pad}#continue")),
+                PStmt::Break | PStmt::Continue => return Err("break or continue outside a loop".into()),
+                PStmt::Return(_) => return Err("a return before the end of the program (an early exit)".into()),
+                PStmt::Expr(_) => return Err("an expression statement before the end of the program".into()),
+                PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
+            }
+        }
+        Ok(())
+    }
+
     /// `$Integral{body @ x = a : b}`. The bound variable is local to the body; if the bounds
     /// mention the same name the reading is ambiguous and the region is a gap.
     fn integral(&mut self, var: &Name, body: &Expr, lower: &Expr, upper: &Expr) -> R {
@@ -468,6 +746,9 @@ impl Tr {
 
     fn name_ref(&mut self, n: &Name) -> R {
         let flat = tables::normalise_name(&n.flat());
+        if let Some(m) = self.locals.get(&flat) {
+            return atom(m.clone());
+        }
         if self.ranges.contains_key(&flat) && !self.params.contains(&flat) {
             self.issue(
                 Code::RangeVariable,
@@ -660,7 +941,12 @@ impl Tr {
 
     fn flush_issues(&mut self, id: &str, line: u32, severity_filter: Option<Severity>) {
         let pend = std::mem::take(&mut self.cur);
+        // A name used many times in one region (a long program) is reported once.
+        let mut seen: HashSet<(Code, Option<String>)> = HashSet::new();
         for p in pend {
+            if !seen.insert((p.code, p.detail.clone())) {
+                continue;
+            }
             let sev = p.code.severity();
             if let Some(f) = severity_filter {
                 if sev != f {
@@ -929,7 +1215,57 @@ impl Tr {
                 } else {
                     "definition"
                 };
+                // A program that is only local definitions and a final value is that value with the
+                // locals substituted. Other programs are statements, possible for a variable only.
+                let inlined: Option<Expr>;
+                let mut statements: Option<&[PStmt]> = None;
+                let stub: Expr;
+                let value: &Expr = match value {
+                    Expr::Program(stmts) => match inline_program(stmts) {
+                        Some(e) => {
+                            inlined = Some(e);
+                            inlined.as_ref().unwrap()
+                        }
+                        None if matches!(target, Target::Var(_)) => {
+                            statements = Some(stmts);
+                            value
+                        }
+                        None => {
+                            stub = Expr::Unsupported {
+                                code: Code::ProgramBlock,
+                                detail: Some(
+                                    "a function body with loops, conditions or reassigned locals cannot be one expression".into(),
+                                ),
+                            };
+                            &stub
+                        }
+                    },
+                    other => other,
+                };
                 match target {
+                    Target::Var(n) if statements.is_some() => {
+                        let flat = tables::normalise_name(&n.flat());
+                        if !valid_ident(&flat) {
+                            self.issue(Code::InvalidName, Some(flat.clone()));
+                        }
+                        match self.lower_program(statements.unwrap_or_default(), &flat) {
+                            Ok((text, is_array)) => {
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    emitted = Some(text);
+                                } else {
+                                    attempt = Some(text);
+                                }
+                                define_name = Some((flat, None, is_array));
+                            }
+                            Err(why) => {
+                                self.issue(Code::ProgramBlock, Some(why));
+                                define_name = Some((flat, None, false));
+                            }
+                        }
+                        if *global {
+                            self.issue(Code::GlobalDefinition, None);
+                        }
+                    }
                     Target::Var(n) => {
                         let flat = tables::normalise_name(&n.flat());
                         if !valid_ident(&flat) {
@@ -1327,6 +1663,9 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         arrays: HashSet::new(),
         params: Vec::new(),
         ranges: HashMap::new(),
+        locals: HashMap::new(),
+        local_arrays: HashSet::new(),
+        prog_n: 0,
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),

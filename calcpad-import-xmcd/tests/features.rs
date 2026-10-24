@@ -90,14 +90,18 @@ pub fn engine_lines(code: &str) -> Vec<String> {
 }
 
 /// The last number printed on a line, after the last `=`.
-pub fn last_number(line: &str) -> f64 {
+pub fn try_last_number(line: &str) -> Option<f64> {
     let tail = line.rsplit('=').next().unwrap();
     let digits: String = tail
         .trim()
         .chars()
         .take_while(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | 'E' | '+'))
         .collect();
-    digits.parse().unwrap_or_else(|_| panic!("no number in {line:?}"))
+    digits.parse().ok()
+}
+
+pub fn last_number(line: &str) -> f64 {
+    try_last_number(line).unwrap_or_else(|| panic!("no number in {line:?}"))
 }
 
 pub fn assert_close(got: f64, want: f64) {
@@ -248,8 +252,8 @@ fn set_element(base: &str, idx: &str, value: &str) -> String {
 fn numbers(code: &str) -> Vec<f64> {
     engine_lines(code)
         .iter()
-        .filter(|l| l.contains('='))
-        .map(|l| last_number(l))
+        .filter(|l| l.contains('=') && !l.contains('['))
+        .filter_map(|l| try_last_number(l))
         .collect()
 }
 
@@ -360,4 +364,298 @@ fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
         define("k", &format!("<ml:range>{}{}</ml:range>", r("1"), n("m1"))),
     ]);
     assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
+}
+
+// ---- 4. programs -------------------------------------------------------------------------------------------
+
+fn program(stmts: &[String]) -> String {
+    format!("<ml:program>{}</ml:program>", stmts.join(""))
+}
+fn local(name: &str, value: &str) -> String {
+    format!("<ml:localDefine>{}{}</ml:localDefine>", n(name), value)
+}
+fn local_el(base: &str, idx: &str, value: &str) -> String {
+    format!("<ml:localDefine>{}{}</ml:localDefine>", index1(base, idx), value)
+}
+fn for_in(var: &str, lo: &str, hi: &str, body: &[String]) -> String {
+    format!(
+        "<ml:for>{}<ml:range>{lo}{hi}</ml:range>{}</ml:for>",
+        n(var),
+        program(body)
+    )
+}
+fn if_then(test: &str, then: &[String], otherwise: Option<&[String]>) -> String {
+    let e = otherwise
+        .map(|o| format!("<ml:else>{}</ml:else>", program(o)))
+        .unwrap_or_default();
+    format!(
+        "<ml:if><ml:test>{test}</ml:test><ml:then>{}</ml:then>{e}</ml:if>",
+        program(then)
+    )
+}
+fn while_do(cond: &str, body: &[String]) -> String {
+    format!("<ml:while>{cond}{}</ml:while>", program(body))
+}
+fn gt(a: &str, b: &str) -> String {
+    app("greaterThan", &[a.to_string(), b.to_string()])
+}
+fn lt(a: &str, b: &str) -> String {
+    app("lessThan", &[a.to_string(), b.to_string()])
+}
+fn plus(a: &str, b: &str) -> String {
+    app("plus", &[a.to_string(), b.to_string()])
+}
+fn times(a: &str, b: &str) -> String {
+    app("mult", &[a.to_string(), b.to_string()])
+}
+fn sq(a: &str) -> String {
+    app("pow", &[a.to_string(), r("2")])
+}
+fn last(code: &str) -> f64 {
+    *numbers(code).last().expect("a printed result")
+}
+
+#[test]
+fn straight_line_program_is_the_expression_with_its_locals_substituted() {
+    // f(x) = (a = 2x; b = a + 1; b * a): f(3) = 7 * 6 = 42.
+    let res = convert(&[
+        format!(
+            "<ml:define><ml:function>{}<ml:boundVars>{}</ml:boundVars></ml:function>{}</ml:define>",
+            n("f"),
+            n("x"),
+            program(&[
+                local("a", &times(&r("2"), &n("x"))),
+                local("b", &plus(&n("a"), &r("1"))),
+                times(&n("b"), &n("a")),
+            ])
+        ),
+        eval(&call("f", &[r("3")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(!res.calcpad.contains("#"), "no statements are needed: {}", res.calcpad);
+    assert_close(last(&res.calcpad), 42.0);
+}
+
+#[test]
+fn loop_with_an_accumulator_and_literal_bounds() {
+    // s = 0; for i in 1..4: s = s + i^2; s  -> 1 + 4 + 9 + 16 = 30
+    let res = convert(&[define(
+        "S",
+        &program(&[
+            local("s", &r("0")),
+            for_in("i", &r("1"), &r("4"), &[local("s", &plus(&n("s"), &sq(&n("i"))))]),
+            n("s"),
+        ]),
+    )]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("#for i_p1 = 1 : 4"), "{}", res.calcpad);
+    assert_close(last(&res.calcpad), 30.0);
+}
+
+#[test]
+fn loop_bounds_that_are_names_count_up_or_down_like_the_source() {
+    // Ascending 1..5 and descending 5..1 both visit five values: sum 15, count 5.
+    for (lo, hi) in [(1.0, 5.0), (5.0, 1.0)] {
+        let res = convert(&[
+            define("lo", &r(&lo.to_string())),
+            define("hi", &r(&hi.to_string())),
+            define(
+                "T",
+                &program(&[
+                    local("t", &r("0")),
+                    local("c", &r("0")),
+                    for_in(
+                        "k",
+                        &n("lo"),
+                        &n("hi"),
+                        &[local("t", &plus(&n("t"), &n("k"))), local("c", &plus(&n("c"), &r("1")))],
+                    ),
+                    plus(&times(&n("t"), &r("100")), &n("c")),
+                ]),
+            ),
+        ]);
+        assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+        assert_close(last(&res.calcpad), 1505.0);
+    }
+}
+
+#[test]
+fn if_break_and_while() {
+    // First i with i^2 > 10 is 4.
+    let res = convert(&[define(
+        "F",
+        &program(&[
+            local("r", &r("0")),
+            for_in(
+                "i",
+                &r("1"),
+                &r("10"),
+                &[if_then(
+                    &gt(&sq(&n("i")), &r("10")),
+                    &[local("r", &n("i")), "<ml:break/>".to_string()],
+                    None,
+                )],
+            ),
+            n("r"),
+        ]),
+    )]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 4.0);
+    // Doubling until at least 100 starting from 1 gives 128; an if/else picks the sign.
+    let res = convert(&[
+        define(
+            "W",
+            &program(&[
+                local("w", &r("1")),
+                while_do(&lt(&n("w"), &r("100")), &[local("w", &times(&n("w"), &r("2")))]),
+                n("w"),
+            ]),
+        ),
+        define(
+            "Q",
+            &program(&[
+                local("q", &r("0")),
+                if_then(
+                    &gt(&n("W"), &r("100")),
+                    &[local("q", &r("1"))],
+                    Some(&[local("q", &r("-1"))]),
+                ),
+                n("q"),
+            ]),
+        ),
+        eval(&plus(&n("W"), &n("Q"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 129.0);
+}
+
+#[test]
+fn locals_do_not_leak_into_the_sheet() {
+    // x = 10 outside; the program's own x is separate: P = 5 + 1 + 2 = 8, and x is still 10.
+    let res = convert(&[
+        define("x", &r("10")),
+        define(
+            "P",
+            &program(&[
+                local("x", &r("5")),
+                for_in("i", &r("1"), &r("2"), &[local("x", &plus(&n("x"), &n("i")))]),
+                n("x"),
+            ]),
+        ),
+        eval(&plus(&times(&n("x"), &r("100")), &n("P"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 1008.0);
+}
+
+#[test]
+fn a_local_array_created_whole_can_be_filled_element_by_element() {
+    let zeros =
+        "<ml:matrix rows=\"3\" cols=\"1\"><ml:real>0</ml:real><ml:real>0</ml:real><ml:real>0</ml:real></ml:matrix>";
+    let res = convert(&[
+        define(
+            "V",
+            &program(&[
+                local("v", zeros),
+                for_in("i", &r("1"), &r("3"), &[local_el("v", &n("i"), &sq(&n("i")))]),
+                n("v"),
+            ]),
+        ),
+        eval(&index1("V", &r("3"))),
+        eval(&index1("V", &r("2"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 9.0);
+    assert_close(nums[nums.len() - 1], 4.0);
+}
+
+#[test]
+fn units_survive_in_a_program() {
+    // s = 0 m; for i in 1..3: s = s + i * 2 m  -> 12 m
+    let res = convert(&[define(
+        "D",
+        &program(&[
+            local("s", &times(&r("0"), &n("m"))),
+            for_in(
+                "i",
+                &r("1"),
+                &r("3"),
+                &[local("s", &plus(&n("s"), &times(&n("i"), &times(&r("2"), &n("m")))))],
+            ),
+            n("s"),
+        ]),
+    )]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 12.0);
+}
+
+#[test]
+fn programs_that_cannot_be_read_faithfully_say_why() {
+    let reason = |res: &ImportResult| -> String {
+        res.report
+            .gaps()
+            .find(|i| i.code == Code::ProgramBlock)
+            .and_then(|i| i.detail.clone())
+            .unwrap_or_default()
+    };
+    // An array that grows element by element.
+    let res = convert(&[define(
+        "G",
+        &program(&[
+            for_in("i", &r("1"), &r("3"), &[local_el("g", &n("i"), &n("i"))]),
+            n("g"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("did not create"), "{}", reason(&res));
+    // An early return.
+    let res = convert(&[define(
+        "E",
+        &program(&[
+            if_then(
+                &gt(&r("2"), &r("1")),
+                &["<ml:return><ml:real>1</ml:real></ml:return>".to_string()],
+                None,
+            ),
+            r("2"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("early exit"), "{}", reason(&res));
+    // try/catch.
+    let res = convert(&[define(
+        "C",
+        &program(&[
+            format!(
+                "<ml:tryCatch>{}{}</ml:tryCatch>",
+                program(&[local("a", &r("1"))]),
+                program(&[r("0")])
+            ),
+            r("1"),
+        ]),
+    )]);
+    assert!(reason(&res).contains("tryCatch"), "{}", reason(&res));
+    // A function whose body loops.
+    let res = convert(&[format!(
+        "<ml:define><ml:function>{}<ml:boundVars>{}</ml:boundVars></ml:function>{}</ml:define>",
+        n("h"),
+        n("x"),
+        program(&[
+            local("s", &r("0")),
+            for_in("i", &r("1"), &r("2"), &[local("s", &n("i"))]),
+            n("s")
+        ])
+    )]);
+    assert!(reason(&res).contains("one expression"), "{}", reason(&res));
+    // A gap leaves the name blocked for later uses.
+    let res = convert(&[
+        define(
+            "G",
+            &program(&[
+                for_in("i", &r("1"), &r("3"), &[local_el("g", &n("i"), &n("i"))]),
+                n("g"),
+            ]),
+        ),
+        eval(&n("G")),
+    ]);
+    assert!(res.report.gaps().any(|i| i.code == Code::DependsOnGap));
 }

@@ -213,9 +213,51 @@ pub enum Expr {
         var: Name,
         body: Box<Expr>,
     },
+    /// A multi-statement program (local definitions, loops, conditions).
+    Program(Vec<PStmt>),
     /// A construct the reader recognises by name but does not read further.
     Unsupported {
         code: Code,
         detail: Option<String>,
     },
+}
+
+/// What a program statement assigns to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PTarget {
+    Var(Name),
+    /// `v[i, j] <- ...`
+    Element {
+        base: Name,
+        index: Vec<Expr>,
+    },
+}
+
+/// One statement of a program.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PStmt {
+    /// `target <- value`
+    Local(PTarget, Expr),
+    /// `for var in range` (the range is kept as the expression the file has).
+    For {
+        var: Name,
+        range: Expr,
+        body: Vec<PStmt>,
+    },
+    While {
+        cond: Expr,
+        body: Vec<PStmt>,
+    },
+    /// `if` with its `elseif` branches in order, and an optional `otherwise` branch.
+    If {
+        branches: Vec<(Expr, Vec<PStmt>)>,
+        otherwise: Option<Vec<PStmt>>,
+    },
+    Return(Expr),
+    Break,
+    Continue,
+    /// A bare expression: the value of the program when it comes last.
+    Expr(Expr),
+    /// A statement the reader recognises but does not read (the element name is the detail).
+    Unsupported(String),
 }

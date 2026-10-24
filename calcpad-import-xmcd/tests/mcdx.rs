@@ -314,8 +314,17 @@ fn matrix_is_column_major() {
 }
 
 #[test]
-fn program_with_if_and_for_is_a_reported_gap_in_both_paths() {
+fn program_with_if_and_for_converts_alike_in_both_paths() {
     let prog = r#"<ml:define><ml:id>y</ml:id><ml:program><ml:localDefine><ml:id>s</ml:id><ml:real>0</ml:real></ml:localDefine><ml:for><ml:id>i</ml:id><ml:range><ml:real>1</ml:real><ml:real>4</ml:real></ml:range><ml:program><ml:if><ml:test><ml:apply><ml:lessThan/><ml:id>i</ml:id><ml:real>3</ml:real></ml:apply></ml:test><ml:then><ml:program><ml:localDefine><ml:id>s</ml:id><ml:id>i</ml:id></ml:localDefine></ml:program></ml:then></ml:if></ml:program></ml:for><ml:id>s</ml:id></ml:program></ml:define>"#;
+    let res = both(&[prog]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("#for i_p1 = 1 : 4"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("#if i_p1 < 3"), "{}", res.calcpad);
+}
+
+#[test]
+fn program_with_try_catch_is_a_reported_gap_in_both_paths() {
+    let prog = r#"<ml:define><ml:id>y</ml:id><ml:program><ml:tryCatch><ml:program><ml:localDefine><ml:id>s</ml:id><ml:real>1</ml:real></ml:localDefine></ml:program><ml:program><ml:real>0</ml:real></ml:program></ml:tryCatch><ml:id>s</ml:id></ml:program></ml:define>"#;
     let res = both(&[prog]);
     assert_eq!(res.report.regions_needing_attention(), 1);
     assert!(res.report.gaps().any(|i| i.code == Code::ProgramBlock));

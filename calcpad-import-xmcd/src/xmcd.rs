@@ -749,6 +749,7 @@ fn read_expr(n: Node, lim: &Limits, depth: usize) -> Expr {
                 last: Box::new(read_expr(kids[1], lim, depth + 1)),
             }
         }
+        "program" => Expr::Program(read_program(n, lim, depth + 1)),
         other => match unsupported_code(other) {
             Some(code) => Expr::Unsupported {
                 code,
@@ -815,6 +816,122 @@ fn read_calculus(tag: &str, args: &[Node], lim: &Limits, depth: usize) -> Option
             }
             Some(Expr::Derivative { var, body })
         }
+    }
+}
+
+/// The statements of a `program` element.
+fn read_program(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
+    if depth > lim.max_depth {
+        return vec![PStmt::Unsupported("nested too deeply".into())];
+    }
+    ml_kids(n)
+        .into_iter()
+        .map(|k| read_pstmt(unwrap_provenance(k), lim, depth))
+        .collect()
+}
+
+/// The statements of the `program` inside a `then`, `else` or loop body element.
+fn read_body(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
+    match ml_kids(n)
+        .into_iter()
+        .map(unwrap_provenance)
+        .find(|k| local(*k) == "program")
+    {
+        Some(p) => read_program(p, lim, depth + 1),
+        None => vec![PStmt::Unsupported("block without a program".into())],
+    }
+}
+
+fn read_pstmt(k: Node, lim: &Limits, depth: usize) -> PStmt {
+    let kids = ml_kids(k);
+    let bad = |what: &str| PStmt::Unsupported(what.to_string());
+    match local(k) {
+        "localDefine" => {
+            let [t, v] = kids.as_slice() else {
+                return bad("localDefine");
+            };
+            let t = unwrap_provenance(*t);
+            let value = read_expr(unwrap_provenance(*v), lim, depth + 1);
+            match local(t) {
+                "id" => PStmt::Local(PTarget::Var(read_name(t)), value),
+                "apply" => match read_target(t, lim) {
+                    Some(Target::Element {
+                        base: Some(base),
+                        index,
+                    }) => PStmt::Local(PTarget::Element { base, index }, value),
+                    _ => bad("local assignment target"),
+                },
+                _ => bad("local assignment target"),
+            }
+        }
+        "for" => {
+            let [v, range, body] = kids.as_slice() else {
+                return bad("for");
+            };
+            let v = unwrap_provenance(*v);
+            if local(v) != "id" || local(*body) != "program" {
+                return bad("for");
+            }
+            PStmt::For {
+                var: read_name(v),
+                range: read_expr(unwrap_provenance(*range), lim, depth + 1),
+                body: read_program(*body, lim, depth + 1),
+            }
+        }
+        "while" => {
+            let [cond, body] = kids.as_slice() else {
+                return bad("while");
+            };
+            if local(*body) != "program" {
+                return bad("while");
+            }
+            PStmt::While {
+                cond: read_expr(unwrap_provenance(*cond), lim, depth + 1),
+                body: read_program(*body, lim, depth + 1),
+            }
+        }
+        "if" => {
+            let mut branches = Vec::new();
+            let mut otherwise = None;
+            let mut pending: Option<Expr> = None;
+            // `if` holds `test`, `then`, any number of `elseif` (each `test`, `then`) and an `else`.
+            let mut items: Vec<Node> = kids;
+            let mut i = 0;
+            while i < items.len() {
+                let it = unwrap_provenance(items[i]);
+                match local(it) {
+                    "test" => match ml_kids(it).first() {
+                        Some(c) => pending = Some(read_expr(unwrap_provenance(*c), lim, depth + 1)),
+                        None => return bad("if"),
+                    },
+                    "then" => match pending.take() {
+                        Some(c) => branches.push((c, read_body(it, lim, depth))),
+                        None => return bad("if"),
+                    },
+                    "elseif" => {
+                        // Flatten its children into the list being walked.
+                        let inner = ml_kids(it);
+                        items.splice(i + 1..i + 1, inner);
+                    }
+                    "else" => otherwise = Some(read_body(it, lim, depth)),
+                    _ => return bad("if"),
+                }
+                i += 1;
+            }
+            if branches.is_empty() || pending.is_some() {
+                return bad("if");
+            }
+            PStmt::If { branches, otherwise }
+        }
+        "return" => match kids.as_slice() {
+            [v] => PStmt::Return(read_expr(unwrap_provenance(*v), lim, depth + 1)),
+            _ => bad("return"),
+        },
+        "break" => PStmt::Break,
+        "continue" => PStmt::Continue,
+        "tryCatch" => bad("tryCatch"),
+        "program" => bad("nested program"),
+        _ => PStmt::Expr(read_expr(k, lim, depth + 1)),
     }
 }
 
