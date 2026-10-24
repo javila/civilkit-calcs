@@ -4,7 +4,7 @@ use calcpad_core::settings::ColorScales;
 use serde_json::Value;
 
 /// The recognised keys, in declaration order.
-pub const SETTING_KEY_NAMES: [&str; 19] = [
+pub const SETTING_KEY_NAMES: [&str; 20] = [
     "Decimals",
     "Degrees",
     "Complex",
@@ -24,6 +24,7 @@ pub const SETTING_KEY_NAMES: [&str; 19] = [
     "PlotStep",
     "Precision",
     "Tol",
+    "ValMathml",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -47,6 +48,7 @@ pub enum SettingKey {
     PlotStep,
     Precision,
     Tol,
+    ValMathml,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -70,6 +72,8 @@ pub struct SettingsDto {
     pub plot_step: Option<i32>,
     pub precision: Option<f64>,
     pub tol: Option<f64>,
+    /// A civilkit extension (see DEVIATIONS.md): `#val` writes a result as MathML.
+    pub val_mathml: Option<bool>,
 }
 
 impl SettingsDto {
@@ -110,6 +114,7 @@ impl SettingsDto {
                 "plotstep" => d.plot_step = get_int(v)?,
                 "precision" => d.precision = get_double(v)?,
                 "tol" => d.tol = get_double(v)?,
+                "valmathml" => d.val_mathml = get_bool(v)?,
                 _ => {}
             }
         }

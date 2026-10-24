@@ -382,3 +382,13 @@ fn an_unlabelled_one_letter_name_is_a_variable_not_a_unit() {
     assert!(!line.contains("mathvariant=\"normal\">d<"), "{line}");
     assert!(!line.contains("mathvariant=\"normal\">V<"), "{line}");
 }
+
+#[test]
+fn an_imported_sheet_asks_the_editor_not_to_report_unused_names() {
+    let res = convert(&[define("a", &r("2")), eval(&app("plus", &[n("a"), r("1")]))]);
+    let head: Vec<&str> = res.calcpad.lines().take(4).collect();
+    assert!(
+        head.iter().any(|l| l.contains("\"LintIgnore\": [\"CPD-3312\"]")),
+        "{head:?}"
+    );
+}

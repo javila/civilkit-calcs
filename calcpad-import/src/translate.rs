@@ -3862,6 +3862,11 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         tr.report.regions_total(),
         GAP_MARKER
     ));
+    // The definitions are the author's; a name used only by a region shown as a picture or by an
+    // unconverted one is not an editor finding.
+    if tr.maths_shown {
+        out.push_str("'<!--{\"LintIgnore\": [\"CPD-3312\"]}-->\n");
+    }
     if let Some(block) = style_block(&tr.colors, tr.maths_shown) {
         out.push_str(&block);
         out.push('\n');

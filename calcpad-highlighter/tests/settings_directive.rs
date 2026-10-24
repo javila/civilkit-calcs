@@ -69,3 +69,12 @@ fn def_directive_is_matched_case_insensitively() {
         .iter()
         .any(|t| t.token_type == TokenType::Macro && t.text == "m$"));
 }
+
+/// The civilkit extension key `valMathml` is a known boolean setting; a wrong type still warns.
+#[test]
+fn val_mathml_is_a_known_boolean_setting() {
+    let ok = lint("#settings {\"valMathml\": true}\nx = 1");
+    assert!(!ok.diagnostics.iter().any(|d| d.code == "CPD-3413"), "{:?}", ok.diagnostics);
+    let bad = lint("#settings {\"valMathml\": 3}\nx = 1");
+    assert!(bad.diagnostics.iter().any(|d| d.code == "CPD-3413"));
+}

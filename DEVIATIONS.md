@@ -413,3 +413,9 @@ it differs. Tests: `calcpad-highlighter/tests` and the unit tests in `calcpad-hi
   Checked by `web/e2e/browser-check.mjs` (the samples section) and `web/e2e/samples-sweep.mjs`, which
   compares every bundled sample's editor diagnostics and engine errors with the command line's on the same
   file with its includes on disk.
+* **H12. `valMathml` is a known `#settings` key.** The engine's opt-in `#settings {"valMathml": true}`
+  (an extension, see the engine's `MathSettings`) is accepted by the editor's `#settings` check as a
+  boolean, so the line an imported worksheet carries raises no warning. Any other unknown key still warns
+  (CPD-3413). An imported worksheet also carries a `LintIgnore` comment for the unused-name hint
+  (CPD-3312): its definitions are the author's, and a name used only by a region shown as a picture or
+  an unconverted one is not an editor finding.

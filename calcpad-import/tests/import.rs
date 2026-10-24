@@ -87,10 +87,9 @@ fn lines(res: &ImportResult) -> Vec<String> {
     let mut in_noc = false;
     let mut in_gap = false;
     let code = legacy(&res.calcpad);
-    for l in code
-        .lines()
-        .filter(|l| !l.starts_with("'<!-- Imported") && !l.starts_with("'<style>"))
-    {
+    for l in code.lines().filter(|l| {
+        !l.starts_with("'<!-- Imported") && !l.starts_with("'<style>") && !l.starts_with("'<!--{\"LintIgnore")
+    }) {
         if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
             let head = rest.split(" --><small>").next().unwrap_or(rest);
             out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
