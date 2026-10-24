@@ -1,0 +1,2603 @@
+//! The translator: a [`Sheet`] in, Calcpad text and a report out. It does no arithmetic and
+//! evaluates nothing; every number it writes is a literal that was in the source.
+//!
+//! Safety rule: a line of output is built only from (a) text that goes through the escaping in
+//! [`text_line`], (b) names that passed [`valid_ident`], (c) numbers that parsed as finite
+//! numbers, (d) entries of the mapping tables, or (e) a placeholder line that starts with
+//! [`GAP_MARKER`]. Nothing else from the input reaches the output.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+
+use crate::ir::*;
+use crate::picture::{self, SvgError};
+use crate::report::{Code, ImportReport, Issue, KindStats, Severity};
+use crate::tables::{self, Constant, FnRule};
+use crate::{Asset, ImportOptions};
+
+/// Every placeholder line starts with this (after the leading `'` that makes it a text line).
+pub const GAP_MARKER: &str = "[import-gap";
+
+/// Rows closer than this many points (by baseline) are one row for reading order.
+pub const ROW_TOLERANCE: f64 = 4.0;
+
+// Precedence levels of the rendered Calcpad text.
+const P_LOGIC: u8 = 1;
+const P_CMP: u8 = 2;
+const P_ADD: u8 = 3;
+const P_MUL: u8 = 4;
+const P_NEG: u8 = 5;
+const P_POW: u8 = 6;
+const P_ATOM: u8 = 7;
+
+struct R {
+    s: String,
+    prec: u8,
+}
+
+/// A program run symbolically: locals are substituted into what uses them, an `if` becomes the
+/// engine's `if(c; a; b)` over the rest of the program, a `return` ends its path, and a `for`
+/// over a short literal range is unrolled. The program is then one expression, with no
+/// statements and no names of its own. `Err` says why a program is not that: a loop whose
+/// iterations are not known, an element write, `break`/`continue`, or too many paths.
+fn symexec_program(stmts: &[PStmt], unroll: bool) -> Result<Expr, String> {
+    let mut budget = if unroll { 600usize } else { 600_000 };
+    symexec(stmts, &HashMap::new(), &mut budget, unroll)
+}
+
+const LOOP_NEEDS: &str = "a loop whose number of iterations is not a short literal range cannot be an expression: the engine's expression blocks cannot update a variable from inside $While or $Repeat (a loop statement usable inside a block is needed)";
+
+fn symexec(stmts: &[PStmt], env: &HashMap<String, Expr>, budget: &mut usize, unroll: bool) -> Result<Expr, String> {
+    if *budget == 0 {
+        return Err("too many branches and loop iterations to write as one expression".into());
+    }
+    *budget -= 1;
+    let mut env = env.clone();
+    for (k, st) in stmts.iter().enumerate() {
+        let rest = &stmts[k + 1..];
+        match st {
+            PStmt::Local(PTarget::Var(n), e) => {
+                let v = subst(e, &env).ok_or("a local's value would be captured by an integration variable")?;
+                env.insert(tables::normalise_name(&n.flat()), v);
+            }
+            PStmt::Local(PTarget::Element { .. }, _) => {
+                return Err(
+                    "an element assignment needs an array built by statements, which an expression cannot hold".into(),
+                )
+            }
+            PStmt::Expr(e) | PStmt::Return(e) => {
+                if matches!(st, PStmt::Expr(_)) && !rest.is_empty() {
+                    return Err("an expression statement before the end of the program".into());
+                }
+                return subst(e, &env)
+                    .ok_or_else(|| "a local's value would be captured by an integration variable".to_string());
+            }
+            PStmt::If { branches, otherwise } => {
+                let mut arms = Vec::new();
+                for (c, body) in branches {
+                    let cond = subst(c, &env).ok_or("a condition would capture a local")?;
+                    let mut path: Vec<PStmt> = body.clone();
+                    path.extend(rest.iter().cloned());
+                    arms.push((cond, symexec(&path, &env, budget, unroll)?));
+                }
+                let mut path: Vec<PStmt> = otherwise.clone().unwrap_or_default();
+                path.extend(rest.iter().cloned());
+                let mut value = symexec(&path, &env, budget, unroll)?;
+                for (cond, v) in arms.into_iter().rev() {
+                    value = Expr::Call(Name::new("if"), vec![cond, v, value]);
+                }
+                return Ok(value);
+            }
+            PStmt::For { var, range, body } => {
+                let Expr::Range {
+                    first,
+                    second: None,
+                    last,
+                } = range
+                else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                let (Expr::Num(a), Expr::Num(z)) = (&**first, &**last) else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                let (Some(a), Some(z)) = (is_int_literal(a), is_int_literal(z)) else {
+                    return Err(LOOP_NEEDS.into());
+                };
+                if !unroll || (z - a).abs() > 63 {
+                    return Err(LOOP_NEEDS.into());
+                }
+                if body.iter().any(has_break) {
+                    return Err("break or continue in a loop cannot be unrolled".into());
+                }
+                let values: Vec<i64> = if a <= z {
+                    (a..=z).collect()
+                } else {
+                    (z..=a).rev().collect()
+                };
+                let mut path: Vec<PStmt> = Vec::new();
+                for v in values {
+                    path.push(PStmt::Local(PTarget::Var(var.clone()), Expr::Num(v.to_string())));
+                    path.extend(body.iter().cloned());
+                }
+                path.extend(rest.iter().cloned());
+                return symexec(&path, &env, budget, unroll);
+            }
+            PStmt::While { .. } => return Err(LOOP_NEEDS.into()),
+            PStmt::Break | PStmt::Continue => return Err("break or continue outside a loop".into()),
+            PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
+        }
+    }
+    Err("the program does not end with a value".into())
+}
+
+fn subst(e: &Expr, env: &HashMap<String, Expr>) -> Option<Expr> {
+    let b = |x: &Expr| subst(x, env).map(Box::new);
+    let without = |v: &str| -> HashMap<String, Expr> {
+        env.iter()
+            .filter(|(k, _)| k.as_str() != v)
+            .map(|(k, x)| (k.clone(), x.clone()))
+            .collect()
+    };
+    Some(match e {
+        Expr::Name(n) => match env.get(&tables::normalise_name(&n.flat())) {
+            Some(v) => v.clone(),
+            None => e.clone(),
+        },
+        Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => e.clone(),
+        Expr::Un(o, x) => Expr::Un(*o, b(x)?),
+        Expr::Bin(o, x, y) => Expr::Bin(*o, b(x)?, b(y)?),
+        Expr::Call(f, args) => Expr::Call(f.clone(), args.iter().map(|a| subst(a, env)).collect::<Option<_>>()?),
+        Expr::Postfix(u, x) => Expr::Postfix(u.clone(), b(x)?),
+        Expr::Index(x, idx) => Expr::Index(b(x)?, idx.iter().map(|a| subst(a, env)).collect::<Option<_>>()?),
+        Expr::Matrix { rows, cols, items } => Expr::Matrix {
+            rows: *rows,
+            cols: *cols,
+            items: items.iter().map(|a| subst(a, env)).collect::<Option<_>>()?,
+        },
+        Expr::Range { first, second, last } => Expr::Range {
+            first: b(first)?,
+            second: match second {
+                Some(s) => Some(b(s)?),
+                None => None,
+            },
+            last: b(last)?,
+        },
+        Expr::Integral {
+            var,
+            body,
+            lower,
+            upper,
+        } => {
+            let v = tables::normalise_name(&var.flat());
+            // A substituted value that mentions the integration variable would be captured by it.
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Integral {
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+                lower: b(lower)?,
+                upper: b(upper)?,
+            }
+        }
+        Expr::Derivative { var, body } => {
+            let v = tables::normalise_name(&var.flat());
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Derivative {
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+            }
+        }
+        Expr::Program(_) => return None,
+    })
+}
+
+/// True when `name` (already normalised) occurs as a name anywhere in `e`.
+fn mentions(e: &Expr, name: &str) -> bool {
+    match e {
+        Expr::Name(n) => tables::normalise_name(&n.flat()) == name,
+        Expr::Un(_, a) | Expr::Postfix(_, a) => mentions(a, name),
+        Expr::Bin(_, a, b) => mentions(a, name) || mentions(b, name),
+        Expr::Call(f, args) => tables::normalise_name(&f.flat()) == name || args.iter().any(|a| mentions(a, name)),
+        Expr::Index(b, idx) => mentions(b, name) || idx.iter().any(|a| mentions(a, name)),
+        Expr::Matrix { items, .. } => items.iter().any(|a| mentions(a, name)),
+        Expr::Range { first, second, last } => {
+            mentions(first, name) || second.as_ref().is_some_and(|s| mentions(s, name)) || mentions(last, name)
+        }
+        Expr::Integral {
+            var,
+            body,
+            lower,
+            upper,
+        } => {
+            mentions(lower, name)
+                || mentions(upper, name)
+                || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
+        }
+        Expr::Derivative { var, body } => tables::normalise_name(&var.flat()) != name && mentions(body, name),
+        Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => false,
+        Expr::Program(_) => true,
+    }
+}
+
+fn atom(s: impl Into<String>) -> R {
+    R {
+        s: s.into(),
+        prec: P_ATOM,
+    }
+}
+
+struct Pending {
+    code: Code,
+    detail: Option<String>,
+    root: Option<Code>,
+}
+
+/// Sorts regions into the order the source evaluates them: top to bottom, then left to right,
+/// where regions whose baselines are within [`ROW_TOLERANCE`] of the first region of a row share
+/// that row. The baseline (not the top edge) is used because a tall region next to a short one
+/// sits on the same line while their top edges differ.
+pub fn reading_order(regions: &mut Vec<Region>) {
+    let key = |r: &Region| r.baseline.unwrap_or(r.top);
+    let mut idx: Vec<usize> = (0..regions.len()).collect();
+    idx.sort_by(|&a, &b| {
+        key(&regions[a])
+            .partial_cmp(&key(&regions[b]))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.cmp(&b))
+    });
+    // Group into rows, then order each row by left edge.
+    let mut ordered: Vec<usize> = Vec::with_capacity(idx.len());
+    let mut i = 0;
+    while i < idx.len() {
+        let anchor = key(&regions[idx[i]]);
+        let mut j = i;
+        while j < idx.len() && key(&regions[idx[j]]) - anchor <= ROW_TOLERANCE {
+            j += 1;
+        }
+        let mut row: Vec<usize> = idx[i..j].to_vec();
+        row.sort_by(|&a, &b| {
+            regions[a]
+                .left
+                .partial_cmp(&regions[b].left)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.cmp(&b))
+        });
+        ordered.extend(row);
+        i = j;
+    }
+    let mut old: Vec<Option<Region>> = std::mem::take(regions).into_iter().map(Some).collect();
+    regions.extend(ordered.iter().filter_map(|&src| old[src].take()));
+}
+
+/// Calcpad identifiers: a letter, then letters, digits, `_` and primes.
+pub fn valid_ident(s: &str) -> bool {
+    let mut ch = s.chars();
+    match ch.next() {
+        Some(c) if c.is_alphabetic() => {}
+        _ => return false,
+    }
+    ch.all(|c| c.is_alphanumeric() || c == '_' || c == '\u{2032}' || c == '\u{2033}')
+}
+
+fn is_int_literal(s: &str) -> Option<i64> {
+    s.parse::<i64>().ok()
+}
+
+/// Calcpad does not read `1.5e-3`: rewrites a literal with an exponent as plain digits (exactly,
+/// by moving the decimal point) or, for a large exponent, as `(m*10^e)`.
+fn expand_literal(s: &str) -> Option<String> {
+    let Some(epos) = s.find(['e', 'E']) else {
+        return Some(s.to_string());
+    };
+    let (mant, exp) = (&s[..epos], &s[epos + 1..]);
+    let exp: i32 = exp.trim_start_matches('+').parse().ok()?;
+    let (neg, mant) = match mant.strip_prefix('-') {
+        Some(m) => (true, m),
+        None => (false, mant),
+    };
+    let (int, frac) = match mant.split_once('.') {
+        Some((i, f)) => (i, f),
+        None => (mant, ""),
+    };
+    if int.is_empty() && frac.is_empty() || !int.chars().chain(frac.chars()).all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    let sign = if neg { "-" } else { "" };
+    if exp.abs() > 20 {
+        return Some(format!("({}{}*10^({}))", sign, mant, exp));
+    }
+    let digits = format!("{}{}", int, frac);
+    let point = int.len() as i32 + exp; // position of the decimal point within `digits`
+    let body = if point <= 0 {
+        format!("0.{}{}", "0".repeat((-point) as usize), digits)
+    } else if point as usize >= digits.len() {
+        format!("{}{}", digits, "0".repeat(point as usize - digits.len()))
+    } else {
+        format!("{}.{}", &digits[..point as usize], &digits[point as usize..])
+    };
+    // Tidy leading zeros of the integer part and trailing zeros of the fraction.
+    let body = match body.split_once('.') {
+        Some((i, f)) => {
+            let i = i.trim_start_matches('0');
+            let f = f.trim_end_matches('0');
+            let i = if i.is_empty() { "0" } else { i };
+            if f.is_empty() {
+                i.to_string()
+            } else {
+                format!("{}.{}", i, f)
+            }
+        }
+        None => {
+            let b = body.trim_start_matches('0');
+            if b.is_empty() {
+                "0".to_string()
+            } else {
+                b.to_string()
+            }
+        }
+    };
+    Some(format!("{}{}", sign, body))
+}
+
+fn sanitize_id(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(16)
+        .collect()
+}
+
+/// Escapes one line of prose for a Calcpad text line (without the leading quote mark).
+fn escape_text(s: &str) -> String {
+    let mut o = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => o.push_str("&amp;"),
+            '<' => o.push_str("&lt;"),
+            '>' => o.push_str("&gt;"),
+            '\'' => o.push_str("''"),
+            '"' => o.push_str("\"\""),
+            c if c.is_control() => o.push(' '),
+            c => o.push(c),
+        }
+    }
+    o
+}
+
+/// One line of an unconverted region as shown to the reader: `true` when it is Calcpad maths that
+/// goes in a `#noc` block (typeset, never evaluated), `false` for plain text.
+type GapLine = (bool, String);
+
+/// A conservative check that a rendered expression is Calcpad the engine parses, so that a `#noc`
+/// block never shows an error: only the characters and shapes the renderer produces for maths,
+/// balanced brackets, no stand-in, no string, no `..`, no indexing of a call result.
+fn plausible_calcpad(s: &str) -> bool {
+    if s.trim().is_empty() || s.len() > 3000 || s.contains("..") || s.contains(").") || s.contains("].") {
+        return false;
+    }
+    let mut depth = 0i32;
+    for c in s.chars() {
+        match c {
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return false;
+                }
+            }
+            c if c.is_alphanumeric() => {}
+            ' ' | '_' | '.' | ',' | ';' | '+' | '-' | '*' | '/' | '^' | '|' | '=' | '<' | '>' | '≡' | '≠' | '≤'
+            | '≥' | '∧' | '∨' | '⊕' | '!' | '$' | '@' | ':' | '%' | '′' | '°' => {}
+            _ => return false,
+        }
+    }
+    depth == 0
+}
+
+/// A range variable `i := a .. z` (no step): its bounds as Calcpad text, and as integers when both
+/// are literals and `a <= z`.
+#[derive(Debug, Clone)]
+struct RangeInfo {
+    a: String,
+    z: String,
+    lit: Option<(i64, i64)>,
+}
+
+/// An enclosing `for` loop while a program is lowered: its variable, the expression for the
+/// largest index it reaches (when that can be written ahead of the loop), and the output line the
+/// loop starts at.
+struct LoopCtx {
+    var: String,
+    size: Option<String>,
+    start: usize,
+}
+
+fn may_return(st: &PStmt) -> bool {
+    match st {
+        PStmt::Return(_) => true,
+        PStmt::For { body, .. } | PStmt::While { body, .. } => body.iter().any(may_return),
+        PStmt::If { branches, otherwise } => {
+            branches.iter().any(|(_, b)| b.iter().any(may_return))
+                || otherwise.as_ref().is_some_and(|o| o.iter().any(may_return))
+        }
+        _ => false,
+    }
+}
+
+fn has_break(st: &PStmt) -> bool {
+    match st {
+        PStmt::Break | PStmt::Continue => true,
+        PStmt::For { body, .. } | PStmt::While { body, .. } => body.iter().any(has_break),
+        PStmt::If { branches, otherwise } => {
+            branches.iter().any(|(_, b)| b.iter().any(has_break))
+                || otherwise.as_ref().is_some_and(|o| o.iter().any(has_break))
+        }
+        _ => false,
+    }
+}
+
+struct Tr {
+    origin: i64,
+    defined: HashSet<String>,
+    funcs: HashMap<String, usize>,
+    /// Names defined by regions that did not convert, with the code that ultimately blocks them.
+    gap_names: HashMap<String, Code>,
+    /// Defined names known to hold an array.
+    arrays: HashSet<String>,
+    params: Vec<String>,
+    /// Range variables with literal integer bounds, usable as loop bounds of element assignments.
+    ranges: HashMap<String, RangeInfo>,
+    /// Names defined inside components that are not run (normalised).
+    component_names: HashSet<String>,
+    /// While a program is lowered: its local names and the names they were given in the output.
+    locals: HashMap<String, String>,
+    /// Output names of locals known to hold an array created in the program.
+    local_arrays: HashSet<String>,
+    /// Output names of local arrays whose elements were set to a unitless 0 literal.
+    zero_started: HashSet<String>,
+    prog_n: usize,
+    /// Assignments to temporaries that an expression needs before the line it is on (the engine
+    /// cannot index the result of a call: `t = f(x)` then `t.(1; 2)`).
+    hoisted: Vec<String>,
+    loop_stack: Vec<LoopCtx>,
+    /// Inside an `if` or `while` of the program being lowered.
+    cond_depth: usize,
+    /// Result and done variables when the program returns early.
+    ret: Option<(String, String)>,
+    /// Rendering a gap region for the reader: pieces that cannot be converted keep their real
+    /// names instead of a `?stand-in?`, and no issue is recorded.
+    readable: bool,
+    /// Set while rendering for the reader when something written cannot be Calcpad maths.
+    readable_bad: bool,
+    cur: Vec<Pending>,
+    uses_trig: bool,
+    lines: Vec<String>,
+    report: ImportReport,
+    depth: usize,
+    opts: ImportOptions,
+    assets: Vec<Asset>,
+    used_paths: HashSet<String>,
+    asset_total: usize,
+    has_references: bool,
+}
+
+const MAX_RENDER_DEPTH: usize = 300;
+
+impl Tr {
+    fn issue(&mut self, code: Code, detail: Option<String>) {
+        self.cur.push(Pending {
+            code,
+            detail,
+            root: None,
+        });
+    }
+
+    // ---- expressions ----------------------------------------------------------------------
+
+    fn expr(&mut self, e: &Expr) -> R {
+        if self.depth > MAX_RENDER_DEPTH {
+            self.issue(Code::TooDeep, None);
+            return atom("?too-deep?");
+        }
+        self.depth += 1;
+        let r = self.expr_inner(e);
+        self.depth -= 1;
+        r
+    }
+
+    /// Renders `e` and wraps it in parentheses when it binds looser than `min`.
+    fn operand(&mut self, e: &Expr, min: u8, allow_bare_neg: bool) -> String {
+        let r = self.expr(e);
+        let is_neg = matches!(e, Expr::Un(UnOp::Neg, _)) || matches!(e, Expr::Num(s) if s.starts_with('-'));
+        if r.prec < min || (!allow_bare_neg && is_neg) {
+            format!("({})", r.s)
+        } else {
+            r.s
+        }
+    }
+
+    fn expr_inner(&mut self, e: &Expr) -> R {
+        match e {
+            Expr::Num(s) => self.number(s),
+            Expr::Str(s) => {
+                self.issue(Code::StringValue, None);
+                if self.readable {
+                    atom(format!("\"{}\"", s.chars().take(60).collect::<String>()))
+                } else {
+                    atom("?string?")
+                }
+            }
+            Expr::Name(n) => self.name_ref(n),
+            Expr::Un(op, x) => self.unary(*op, x),
+            Expr::Bin(op, a, b) => self.binary(*op, a, b),
+            Expr::Call(n, args) => self.call(n, args),
+            Expr::Postfix(unit, v) => {
+                let u = self.unit_only(unit);
+                let val = self.operand(v, P_MUL, true);
+                R {
+                    s: format!("{}*{}", val, u),
+                    prec: P_MUL,
+                }
+            }
+            Expr::Integral {
+                var,
+                body,
+                lower,
+                upper,
+            } => self.integral(var, body, lower, upper),
+            Expr::Program(stmts) if self.readable => {
+                let t = self.program_outline(stmts);
+                atom(format!("?program {{ {t} }}?"))
+            }
+            Expr::Program(_) => {
+                self.issue(
+                    Code::ProgramBlock,
+                    Some(
+                        "a program inside an expression, or a program that is not the whole value of a definition"
+                            .into(),
+                    ),
+                );
+                atom("?program?")
+            }
+            Expr::Derivative { var, body } => self.derivative(var, body),
+            Expr::Index(base, idx) => self.index(base, idx),
+            Expr::Matrix { rows, cols, items } => self.matrix(*rows, *cols, items),
+            Expr::Range { first, second, last } => {
+                // Render for the placeholder, record the gap.
+                let a = self.expr(first).s;
+                let b = second.as_ref().map(|s| self.expr(s).s);
+                let c = self.expr(last).s;
+                self.issue(Code::RangeVariable, None);
+                let s = match (b, self.readable) {
+                    (Some(b), true) => format!("range({a}; {c}; ({b}) - ({a}))"),
+                    (None, true) => format!("range({a}; {c}; 1)"),
+                    (Some(b), false) => format!("{}, {} .. {}", a, b, c),
+                    (None, false) => format!("{} .. {}", a, c),
+                };
+                atom(s)
+            }
+            Expr::Unsupported { code, detail } => {
+                self.issue(*code, detail.clone());
+                if self.readable {
+                    // The element's own name is the best a reader gets (`imag` is the imaginary unit).
+                    return match detail.as_deref() {
+                        Some("imag") => atom("i"),
+                        Some(d) => atom(format!("?{d}?")),
+                        None => atom(format!("?{}?", code.as_str())),
+                    };
+                }
+                atom(format!("?{}?", code.as_str()))
+            }
+        }
+    }
+
+    /// The text for something that cannot be converted: its real name or call when rendering a
+    /// gap for the reader, else the `?stand-in?`.
+    fn stand_in(&mut self, readable: &str, placeholder: &str) -> R {
+        if self.readable {
+            // A name Calcpad cannot spell cannot be shown as maths.
+            let head = readable.split('(').next().unwrap_or(readable);
+            if !valid_ident(head) {
+                self.readable_bad = true;
+            }
+            atom(readable.to_string())
+        } else {
+            atom(placeholder.to_string())
+        }
+    }
+
+    fn number(&mut self, s: &str) -> R {
+        let ok = !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
+            && s.parse::<f64>().map(|v| v.is_finite()).unwrap_or(false);
+        let text = if ok { expand_literal(s) } else { None };
+        match text {
+            None => {
+                self.issue(Code::BadNumber, None);
+                atom("?number?")
+            }
+            Some(t) => {
+                let prec = if t.starts_with('-') { P_NEG } else { P_ATOM };
+                R { s: t, prec }
+            }
+        }
+    }
+
+    fn unary(&mut self, op: UnOp, x: &Expr) -> R {
+        match op {
+            UnOp::Neg => {
+                let inner = self.operand(x, P_POW, true);
+                R {
+                    s: format!("-{}", inner),
+                    prec: P_NEG,
+                }
+            }
+            UnOp::Abs => {
+                if let Expr::Name(n) = x {
+                    if self.arrays.contains(&n.flat()) {
+                        self.issue(Code::AbsOfArray, None);
+                    }
+                }
+                let inner = self.expr(x).s;
+                atom(format!("abs({})", inner))
+            }
+            UnOp::Sqrt => {
+                let inner = self.expr(x).s;
+                atom(format!("sqrt({})", inner))
+            }
+            UnOp::Factorial => {
+                let inner = self.operand(x, P_ATOM, true);
+                atom(format!("{}!", inner))
+            }
+            UnOp::Transpose => {
+                let inner = self.expr(x).s;
+                atom(format!("transp({})", inner))
+            }
+            UnOp::Not => {
+                let _ = self.expr(x);
+                self.issue(Code::UnknownElement, Some("not".into()));
+                atom("?not?")
+            }
+        }
+    }
+
+    fn binary(&mut self, op: BinOp, a: &Expr, b: &Expr) -> R {
+        let (sym, lmin, rmin, prec, rneg): (&str, u8, u8, u8, bool) = match op {
+            BinOp::Add => (" + ", P_ADD, P_ADD, P_ADD, false),
+            BinOp::Sub => (" - ", P_ADD, P_MUL, P_ADD, false),
+            BinOp::Mul => ("*", P_MUL, P_MUL, P_MUL, false),
+            BinOp::Div => ("/", P_MUL, P_NEG, P_MUL, false),
+            BinOp::Pow => ("^", P_ATOM, P_ATOM, P_POW, false),
+            BinOp::Eq => (" ≡ ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Ne => (" ≠ ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Lt => (" < ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Gt => (" > ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Le => (" ≤ ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Ge => (" ≥ ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::And => (" ∧ ", P_CMP, P_CMP, P_LOGIC, false),
+            BinOp::Or => (" ∨ ", P_CMP, P_CMP, P_LOGIC, false),
+            BinOp::Xor => (" ⊕ ", P_CMP, P_CMP, P_LOGIC, false),
+        };
+        let _ = rneg;
+        let l = self.operand(a, lmin, true);
+        // A product's right operand that is itself a division keeps its parentheses.
+        let rmin = if op == BinOp::Mul && matches!(b, Expr::Bin(BinOp::Div, ..)) {
+            P_NEG
+        } else {
+            rmin
+        };
+        let r = self.operand(b, rmin, false);
+        R {
+            s: format!("{}{}{}", l, sym, r),
+            prec,
+        }
+    }
+
+    fn render_args(&mut self, args: &[Expr]) -> Vec<String> {
+        args.iter().map(|a| self.expr(a).s).collect()
+    }
+
+    /// The statement of an unconverted region as the reader should see it: Calcpad-style maths
+    /// with the real names. Nothing here is recorded in the report.
+    fn readable_stmt(&mut self, stmt: &Stmt) -> Option<Vec<GapLine>> {
+        let saved_cur = std::mem::take(&mut self.cur);
+        let saved_params = std::mem::take(&mut self.params);
+        self.readable = true;
+        self.readable_bad = false;
+        let as_line = |t: String, bad: bool| -> GapLine { (!bad && plausible_calcpad(&t), t) };
+        let lines: Option<Vec<GapLine>> = match stmt {
+            Stmt::Define { target, value, .. } => {
+                let names: Vec<String> = match target {
+                    Target::Var(n) | Target::Func(n, _) => vec![tables::normalise_name(&n.flat())],
+                    Target::Element { base, .. } => base.iter().map(|b| tables::normalise_name(&b.flat())).collect(),
+                    Target::Multi(ns) => ns.iter().map(|n| tables::normalise_name(&n.flat())).collect(),
+                };
+                // An element assignment is only valid for an array the engine holds; a function that
+                // mentions itself is a circular reference to it.
+                let head_bad = names.iter().any(|n| !valid_ident(n)) || matches!(target, Target::Element { .. });
+                let head = match target {
+                    Target::Var(n) => tables::normalise_name(&n.flat()),
+                    Target::Func(n, ps) => {
+                        let plist: Vec<String> = ps.iter().map(|p| tables::normalise_name(&p.flat())).collect();
+                        self.params = plist.clone();
+                        format!("{}({})", tables::normalise_name(&n.flat()), plist.join("; "))
+                    }
+                    Target::Element { base, index } => {
+                        let b = base
+                            .as_ref()
+                            .map(|b| tables::normalise_name(&b.flat()))
+                            .unwrap_or_default();
+                        let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                        format!("{}.({})", b, idx.join("; "))
+                    }
+                    Target::Multi(names) => {
+                        let l: Vec<String> = names.iter().map(|n| tables::normalise_name(&n.flat())).collect();
+                        format!("[{}]", l.join("; "))
+                    }
+                };
+                if let Expr::Program(stmts) = value {
+                    let mut out = vec![(false, format!("{head} = program:"))];
+                    self.program_lines(stmts, 1, &mut out);
+                    Some(out)
+                } else {
+                    let rhs = self.expr(value).s;
+                    let own_name = names.first().map(|n| format!("{n}(")).unwrap_or_default();
+                    let unknown_fn = matches!(target, Target::Func(..))
+                        && self.cur.iter().any(|p| {
+                            matches!(
+                                p.code,
+                                Code::AddinFunction
+                                    | Code::ReferenceFunction
+                                    | Code::BuiltinMissing
+                                    | Code::SolveBlock
+                                    | Code::DependsOnGap
+                                    | Code::UndefinedVariable
+                            )
+                        });
+                    let recursive = unknown_fn || (matches!(target, Target::Func(..)) && rhs.contains(&own_name));
+                    let bad = self.readable_bad || head_bad || recursive;
+                    Some(vec![as_line(format!("{head} = {rhs}"), bad)])
+                }
+            }
+            Stmt::Eval { expr, unit } => {
+                let mut t = self.expr(expr).s;
+                if let Some(u) = unit {
+                    t = format!("{}|{}", t, self.expr(u).s);
+                }
+                let bad = self.readable_bad;
+                Some(vec![as_line(t, bad)])
+            }
+            Stmt::Bare(e) => {
+                let mut t = self.expr(e).s;
+                let mut bad = self.readable_bad;
+                if matches!(e, Expr::Bin(BinOp::Eq, ..)) {
+                    t = t.replace(" ≡ ", " = ");
+                    // `f(x) = ...` on its own would be read as a definition of f.
+                    if let Some((lhs, _)) = t.split_once(" = ") {
+                        bad |= lhs.contains('(');
+                    }
+                }
+                Some(vec![as_line(t, bad)])
+            }
+            Stmt::Unsupported { .. } => None,
+        };
+        self.readable = false;
+        self.readable_bad = false;
+        self.params = saved_params;
+        self.cur = saved_cur;
+        lines
+    }
+
+    /// The statements of an unconverted program as lines for the reader: assignments and the final
+    /// value are equations, `for`, `while` and `if` are indented text.
+    fn program_lines(&mut self, stmts: &[PStmt], depth: usize, out: &mut Vec<GapLine>) {
+        let pad = "&emsp;".repeat(depth);
+        for st in stmts {
+            match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    self.readable_bad = false;
+                    let name = tables::normalise_name(&n.flat());
+                    let t = format!("{} = {}", name, self.expr(e).s);
+                    out.push((!self.readable_bad && valid_ident(&name) && plausible_calcpad(&t), t));
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                    let t = format!(
+                        "{}.({}) = {}",
+                        tables::normalise_name(&base.flat()),
+                        idx.join("; "),
+                        self.expr(e).s
+                    );
+                    out.push((false, t));
+                }
+                PStmt::For { var, range, body } => {
+                    let v = tables::normalise_name(&var.flat());
+                    let r = match range {
+                        Expr::Range {
+                            first,
+                            second: None,
+                            last,
+                        } => {
+                            format!("{} to {}", self.expr(first).s, self.expr(last).s)
+                        }
+                        other => self.expr(other).s,
+                    };
+                    out.push((false, format!("{pad}for {v} = {r}:")));
+                    self.params.push(v);
+                    self.program_lines(body, depth + 1, out);
+                    self.params.pop();
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    out.push((false, format!("{pad}while {c}:")));
+                    self.program_lines(body, depth + 1, out);
+                }
+                PStmt::If { branches, otherwise } => {
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        out.push((false, format!("{pad}{} {cs}:", if i == 0 { "if" } else { "else if" })));
+                        self.program_lines(b, depth + 1, out);
+                    }
+                    if let Some(o) = otherwise {
+                        out.push((false, format!("{pad}else:")));
+                        self.program_lines(o, depth + 1, out);
+                    }
+                }
+                PStmt::Return(e) => {
+                    let t = self.expr(e).s;
+                    out.push((false, format!("{pad}return {t}")));
+                }
+                PStmt::Break => out.push((false, format!("{pad}break"))),
+                PStmt::Continue => out.push((false, format!("{pad}continue"))),
+                PStmt::Expr(e) => {
+                    self.readable_bad = false;
+                    let t = self.expr(e).s;
+                    out.push((!self.readable_bad && plausible_calcpad(&t), t));
+                }
+                PStmt::Unsupported(w) => out.push((false, format!("{pad}{w}"))),
+            }
+        }
+    }
+
+    /// A compact one-line outline of a program, for the reader of an unconverted region.
+    fn program_outline(&mut self, stmts: &[PStmt]) -> String {
+        let mut parts = Vec::new();
+        for st in stmts {
+            parts.push(match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    format!("{} = {}", tables::normalise_name(&n.flat()), self.expr(e).s)
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                    format!(
+                        "{}.({}) = {}",
+                        tables::normalise_name(&base.flat()),
+                        idx.join("; "),
+                        self.expr(e).s
+                    )
+                }
+                PStmt::For { var, range, body } => {
+                    let v = tables::normalise_name(&var.flat());
+                    let r = self.expr(range).s;
+                    self.params.push(v.clone());
+                    let b = self.program_outline(body);
+                    self.params.pop();
+                    format!("for {v} in {r} {{ {b} }}")
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    format!("while {c} {{ {} }}", self.program_outline(body))
+                }
+                PStmt::If { branches, otherwise } => {
+                    let mut t = String::new();
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        t.push_str(&format!(
+                            "{}{} {{ {} }}",
+                            if i == 0 { "if " } else { " else if " },
+                            cs,
+                            self.program_outline(b)
+                        ));
+                    }
+                    if let Some(o) = otherwise {
+                        t.push_str(&format!(" else {{ {} }}", self.program_outline(o)));
+                    }
+                    t
+                }
+                PStmt::Return(e) => format!("return {}", self.expr(e).s),
+                PStmt::Break => "break".to_string(),
+                PStmt::Continue => "continue".to_string(),
+                PStmt::Expr(e) => self.expr(e).s,
+                PStmt::Unsupported(w) => w.clone(),
+            });
+        }
+        parts.join("; ")
+    }
+
+    /// The loops that fill a new array `f` from range variables, preceded by its allocation.
+    /// `idx` are the shifted index texts in the order of `rs`. A range with literal ascending
+    /// bounds is a plain `#for`; any other counts steps and derives the value, so it runs down
+    /// when the end is below the start as the source does. The array is as large as the largest
+    /// index any range reaches, and an element no iteration writes stays 0 (the source would
+    /// have no such element, or fill it with 0 below the first index written).
+    fn fill_loops(
+        &mut self,
+        f: &str,
+        rs: &[(String, RangeInfo)],
+        idx: &[String],
+        rhs: &str,
+        pre: &[String],
+    ) -> Result<String, String> {
+        let o = self.origin;
+        let mut head = Vec::new();
+        let mut loops = Vec::new();
+        let mut sizes = Vec::new();
+        self.prog_n += 1;
+        for (iv, info) in rs {
+            let (a, z) = (&info.a, &info.z);
+            match info.lit {
+                Some((x, y)) => {
+                    if x < o {
+                        return Err("the range starts below the array origin".into());
+                    }
+                    sizes.push((y - o + 1).to_string());
+                    loops.push(format!("#for {iv} = {x} : {y}"));
+                }
+                None => {
+                    let (lo, hi, k) = (
+                        format!("{iv}_a{}", self.prog_n),
+                        format!("{iv}_z{}", self.prog_n),
+                        format!("{iv}_k{}", self.prog_n),
+                    );
+                    head.push(format!("{lo} = {a}"));
+                    head.push(format!("{hi} = {z}"));
+                    let size = if o == 1 {
+                        format!("max({lo}; {hi})")
+                    } else {
+                        format!("max({lo}; {hi}) - {}", o - 1)
+                    };
+                    sizes.push(size);
+                    loops.push(format!(
+                        "#for {k} = 0 : abs({hi} - {lo})\n{iv} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"
+                    ));
+                }
+            }
+        }
+        let alloc = if sizes.len() == 1 {
+            format!("{f} = vector({})", sizes[0])
+        } else {
+            format!("{f} = matrix({}; {})", sizes[0], sizes[1])
+        };
+        let mut out = vec!["#val".to_string()];
+        out.extend(head);
+        out.push(alloc);
+        for (d, l) in loops.iter().enumerate() {
+            for line in l.split('\n') {
+                out.push(format!("{}{}", "    ".repeat(d), line));
+            }
+        }
+        for p in pre {
+            out.push(format!("{}{p}", "    ".repeat(loops.len())));
+        }
+        out.push(format!(
+            "{}{f}.({}) = {rhs}",
+            "    ".repeat(loops.len()),
+            idx.join("; ")
+        ));
+        for d in (0..loops.len()).rev() {
+            out.push(format!("{}#loop", "    ".repeat(d)));
+        }
+        out.push("#end val".to_string());
+        Ok(out.join("\n"))
+    }
+
+    /// Lowers a program that is the value of `name := program` to Calcpad statements and the
+    /// definition of `name`. Returns the text and whether the value is an array, or the reason
+    /// the program is not read. Locals get names of their own (`x_p1`), so nothing leaks into the
+    /// sheet's variables; an array is only written element by element if the program created it
+    /// whole first, because the engine cannot grow one.
+    fn lower_program(&mut self, stmts: &[PStmt], name: &str) -> Result<(String, bool), String> {
+        let Some((last, body)) = stmts.split_last() else {
+            return Err("an empty program".into());
+        };
+        let tail = match last {
+            PStmt::Expr(e) | PStmt::Return(e) => e,
+            _ => return Err("the program does not end with a value".into()),
+        };
+        self.prog_n += 1;
+        let saved_locals = std::mem::take(&mut self.locals);
+        let saved_arrays = std::mem::take(&mut self.local_arrays);
+        self.zero_started.clear();
+        let mut lines = Vec::new();
+        // A `return` before the end is a result variable and a done flag, so nothing after it runs.
+        let early = body.iter().any(may_return);
+        let saved_ret = self.ret.take();
+        if early {
+            let (res_v, done_v) = (format!("ret_p{}", self.prog_n), format!("done_p{}", self.prog_n));
+            lines.push(format!("{done_v} = 0"));
+            self.ret = Some((res_v, done_v));
+        }
+        self.loop_stack.clear();
+        self.cond_depth = 0;
+        let res = self.lower_stmts(body, 0, false, &mut lines);
+        let out = match res {
+            Ok(()) => {
+                let value = self.expr(tail);
+                let is_array = !early
+                    && matches!(tail, Expr::Name(n)
+                        if self.locals.get(&tables::normalise_name(&n.flat())).is_some_and(|m| self.local_arrays.contains(m)));
+                let def = if let Some((res_v, done_v)) = &self.ret {
+                    lines.push(format!("#if {done_v} ≡ 0"));
+                    lines.push(format!("    {res_v} = {}", value.s));
+                    lines.push("#end if".to_string());
+                    format!("{} = {}", name, res_v)
+                } else {
+                    format!("{} = {}", name, value.s)
+                };
+                if lines.is_empty() {
+                    Ok((def, is_array))
+                } else {
+                    Ok((format!("#val\n{}\n#end val\n{}", lines.join("\n"), def), is_array))
+                }
+            }
+            Err(e) => Err(e),
+        };
+        self.locals = saved_locals;
+        self.local_arrays = saved_arrays;
+        self.ret = saved_ret;
+        out
+    }
+
+    fn local_name(&mut self, source: &str) -> String {
+        let mapped = format!("{}_p{}", source, self.prog_n);
+        self.locals.insert(source.to_string(), mapped.clone());
+        mapped
+    }
+
+    fn lower_stmts(
+        &mut self,
+        stmts: &[PStmt],
+        depth: usize,
+        in_loop: bool,
+        out: &mut Vec<String>,
+    ) -> Result<(), String> {
+        if depth > 12 {
+            return Err("blocks nested too deeply".into());
+        }
+        let pad = "    ".repeat(depth);
+        for (k, st) in stmts.iter().enumerate() {
+            let before = out.len();
+            let outer_hoisted = std::mem::take(&mut self.hoisted);
+            let step = self.lower_stmt(st, depth, in_loop, out);
+            let mine = std::mem::replace(&mut self.hoisted, outer_hoisted);
+            step?;
+            if !mine.is_empty() {
+                let lines: Vec<String> = mine.into_iter().map(|l| format!("{pad}{l}")).collect();
+                out.splice(before..before, lines);
+            }
+            // Whatever follows a statement that may have returned runs only if it did not.
+            if k + 1 < stmts.len() && may_return(st) {
+                if let Some((_, done_v)) = self.ret.clone() {
+                    out.push(format!("{pad}#if {done_v} ≡ 0"));
+                    self.lower_stmts(&stmts[k + 1..], depth + 1, in_loop, out)?;
+                    out.push(format!("{pad}#end if"));
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn lower_stmt(&mut self, st: &PStmt, depth: usize, in_loop: bool, out: &mut Vec<String>) -> Result<(), String> {
+        let pad = "    ".repeat(depth);
+        {
+            match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    let flat = tables::normalise_name(&n.flat());
+                    if !valid_ident(&flat) {
+                        return Err(format!("local name {flat} that Calcpad cannot spell"));
+                    }
+                    // The value is read before the name is a local: `x <- x + 1` starts from the outer x.
+                    let rhs = self.expr(e).s;
+                    let is_array = matches!(e, Expr::Matrix { .. })
+                        || matches!(e, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
+                    let mapped = match self.locals.get(&flat) {
+                        Some(m) => m.clone(),
+                        None => self.local_name(&flat),
+                    };
+                    if is_array {
+                        self.local_arrays.insert(mapped.clone());
+                    } else {
+                        self.local_arrays.remove(&mapped);
+                    }
+                    out.push(format!("{pad}{mapped} = {rhs}"));
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let flat = tables::normalise_name(&base.flat());
+                    let Some(mapped) = self
+                        .locals
+                        .get(&flat)
+                        .cloned()
+                        .or_else(|| self.grow_local(&flat, index, out))
+                    else {
+                        return Err(format!(
+                            "element assignment to {flat}, which the program did not create and whose size cannot be known ahead (the source grows it, the engine cannot)"
+                        ));
+                    };
+                    if !self.local_arrays.contains(&mapped) {
+                        return Err(format!(
+                            "element assignment to {flat}, which grows element by element; the engine cannot grow an array"
+                        ));
+                    }
+                    if index.is_empty() || index.len() > 2 {
+                        return Err("an element index that is not one or two numbers".into());
+                    }
+                    // The source lets a literal 0 take the units of what is added to it; the engine does
+                    // not, so an array started from 0 and then accumulated into is not converted.
+                    let is_zero = matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+                    if is_zero {
+                        self.zero_started.insert(mapped.clone());
+                    } else if self.zero_started.contains(&mapped) && mentions(e, &flat) {
+                        return Err(format!(
+                            "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, the engine reports inconsistent units"
+                        ));
+                    }
+                    let parts: Vec<String> = index.iter().map(|i| self.index_expr(i)).collect();
+                    let rhs = self.expr(e).s;
+                    out.push(format!("{pad}{mapped}.({}) = {rhs}", parts.join("; ")));
+                }
+                PStmt::For { var, range, body } => {
+                    let Expr::Range {
+                        first,
+                        second: None,
+                        last,
+                    } = range
+                    else {
+                        return Err("a loop over something other than a plain range a .. b".into());
+                    };
+                    let v = tables::normalise_name(&var.flat());
+                    if !valid_ident(&v) {
+                        return Err(format!("loop variable {v} that Calcpad cannot spell"));
+                    }
+                    let a = self.expr(first).s;
+                    let z = self.expr(last).s;
+                    let prev = self.locals.get(&v).cloned();
+                    let mapped = format!("{}_p{}", v, self.prog_n);
+                    let start = out.len();
+                    let o = self.origin;
+                    let depends_on_locals = self.locals.keys().any(|k| mentions(first, k) || mentions(last, k));
+                    let size = if depends_on_locals || body.iter().any(has_break) {
+                        None
+                    } else {
+                        match (&**first, &**last) {
+                            (Expr::Num(x), Expr::Num(y)) => match (is_int_literal(x), is_int_literal(y)) {
+                                (Some(x), Some(y)) if x <= y && x >= o => Some((y - o + 1).to_string()),
+                                _ => None,
+                            },
+                            _ if o == 1 => Some(format!("max({a}; {z})")),
+                            _ => Some(format!("max({a}; {z}) - {}", o - 1)),
+                        }
+                    };
+                    let literal = |e: &Expr| match e {
+                        Expr::Num(s) => is_int_literal(s),
+                        _ => None,
+                    };
+                    match (literal(first), literal(last)) {
+                        (Some(x), Some(y)) if x <= y => {
+                            out.push(format!("{pad}#for {mapped} = {x} : {y}"));
+                        }
+                        _ => {
+                            // The source counts down when the end is below the start; the engine's
+                            // loop only counts up, so count steps and derive the value.
+                            let (lo, hi, k) = (format!("{mapped}_a"), format!("{mapped}_z"), format!("{mapped}_k"));
+                            out.push(format!("{pad}{lo} = {a}"));
+                            out.push(format!("{pad}{hi} = {z}"));
+                            out.push(format!("{pad}#for {k} = 0 : abs({hi} - {lo})"));
+                            out.push(format!("{pad}    {mapped} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"));
+                        }
+                    }
+                    self.locals.insert(v.clone(), mapped);
+                    if self.ret.is_some() && body.iter().any(may_return) {
+                        let done_v = self.ret.as_ref().map(|r| r.1.clone()).unwrap_or_default();
+                        out.push(format!("{pad}    #if {done_v} ≡ 1"));
+                        out.push(format!("{pad}        #break"));
+                        out.push(format!("{pad}    #end if"));
+                    }
+                    self.loop_stack.push(LoopCtx {
+                        var: v.clone(),
+                        size,
+                        start,
+                    });
+                    let r = self.lower_stmts(body, depth + 1, true, out);
+                    self.loop_stack.pop();
+                    match prev {
+                        Some(p) => self.locals.insert(v, p),
+                        None => self.locals.remove(&v),
+                    };
+                    r?;
+                    out.push(format!("{pad}#loop"));
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    if !self.hoisted.is_empty() {
+                        return Err("the result of a call is indexed in a loop condition".into());
+                    }
+                    out.push(format!("{pad}#while {c}"));
+                    if self.ret.is_some() && body.iter().any(may_return) {
+                        let done_v = self.ret.as_ref().map(|r| r.1.clone()).unwrap_or_default();
+                        out.push(format!("{pad}    #if {done_v} ≡ 1"));
+                        out.push(format!("{pad}        #break"));
+                        out.push(format!("{pad}    #end if"));
+                    }
+                    self.cond_depth += 1;
+                    let r = self.lower_stmts(body, depth + 1, true, out);
+                    self.cond_depth -= 1;
+                    r?;
+                    out.push(format!("{pad}#loop"));
+                }
+                PStmt::If { branches, otherwise } => {
+                    self.cond_depth += 1;
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        out.push(format!("{pad}{} {cs}", if i == 0 { "#if" } else { "#else if" }));
+                        if b.is_empty() {
+                            self.cond_depth -= 1;
+                            return Err("an empty branch".into());
+                        }
+                        self.lower_stmts(b, depth + 1, in_loop, out)?;
+                    }
+                    if let Some(b) = otherwise {
+                        if b.is_empty() {
+                            self.cond_depth -= 1;
+                            return Err("an empty branch".into());
+                        }
+                        out.push(format!("{pad}#else"));
+                        self.lower_stmts(b, depth + 1, in_loop, out)?;
+                    }
+                    self.cond_depth -= 1;
+                    out.push(format!("{pad}#end if"));
+                }
+                PStmt::Break if in_loop => out.push(format!("{pad}#break")),
+                PStmt::Continue if in_loop => out.push(format!("{pad}#continue")),
+                PStmt::Break | PStmt::Continue => return Err("break or continue outside a loop".into()),
+                PStmt::Return(e) => {
+                    let Some((res_v, done_v)) = self.ret.clone() else {
+                        return Err("a return before the end of the program (an early exit)".into());
+                    };
+                    let v = self.expr(e).s;
+                    out.push(format!("{pad}{res_v} = {v}"));
+                    out.push(format!("{pad}{done_v} = 1"));
+                    if in_loop {
+                        out.push(format!("{pad}#break"));
+                    }
+                }
+                PStmt::Expr(_) => return Err("an expression statement before the end of the program".into()),
+                PStmt::Unsupported(w) => return Err(format!("{w} is not read")),
+            }
+        }
+        Ok(())
+    }
+
+    /// An element write to an array the program has not created: if every index is the variable
+    /// of an enclosing `for` loop (each different), the writes are unconditional, and the loops'
+    /// bounds are known ahead of the first of those loops, the array is allocated just before that
+    /// loop with the largest index each loop reaches. Returns the local's output name.
+    fn grow_local(&mut self, flat: &str, index: &[Expr], out: &mut Vec<String>) -> Option<String> {
+        if self.cond_depth > 0 || index.is_empty() || index.len() > 2 || !valid_ident(flat) {
+            return None;
+        }
+        let mut sizes = Vec::new();
+        let mut start = usize::MAX;
+        for (d, e) in index.iter().enumerate() {
+            let Expr::Name(n) = e else { return None };
+            let v = tables::normalise_name(&n.flat());
+            if index[..d]
+                .iter()
+                .any(|p| matches!(p, Expr::Name(q) if tables::normalise_name(&q.flat()) == v))
+            {
+                return None;
+            }
+            let ctx = self.loop_stack.iter().find(|c| c.var == v)?;
+            sizes.push(ctx.size.clone()?);
+            start = start.min(ctx.start);
+        }
+        let mapped = self.local_name(flat);
+        let alloc = if sizes.len() == 1 {
+            format!("{mapped} = vector({})", sizes[0])
+        } else {
+            format!("{mapped} = matrix({}; {})", sizes[0], sizes[1])
+        };
+        let pad = self
+            .loop_stack
+            .iter()
+            .position(|c| c.start == start)
+            .map(|p| "    ".repeat(p))
+            .unwrap_or_default();
+        // The nesting of the loop's line, not of the write, is the allocation's indent.
+        out.insert(start, format!("{pad}{alloc}"));
+        for c in self.loop_stack.iter_mut() {
+            if c.start >= start {
+                c.start += 1;
+            }
+        }
+        self.local_arrays.insert(mapped.clone());
+        Some(mapped)
+    }
+
+    /// `$Integral{body @ x = a : b}`. The bound variable is local to the body; if the bounds
+    /// mention the same name the reading is ambiguous and the region is a gap.
+    fn integral(&mut self, var: &Name, body: &Expr, lower: &Expr, upper: &Expr) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        if mentions(lower, &v) || mentions(upper, &v) {
+            self.issue(
+                Code::CalculusOperator,
+                Some("a bound uses the integration variable's name".into()),
+            );
+            if !self.readable {
+                return atom("?calculus?");
+            }
+        }
+        let mut lo = self.expr(lower).s;
+        let mut hi = self.expr(upper).s;
+        // A bare 0 is a zero of any dimension in the source; the engine wants both bounds in
+        // the same units, so it is written as a zero of the other bound's dimension.
+        let is_zero = |e: &Expr| matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+        if is_zero(lower) && !is_zero(upper) {
+            lo = format!("0*({hi})");
+        } else if is_zero(upper) && !is_zero(lower) {
+            hi = format!("0*({lo})");
+        }
+        self.params.push(v.clone());
+        let b = self.expr(body).s;
+        self.params.pop();
+        atom(format!("$Integral{{{b} @ {v} = {lo} : {hi}}}"))
+    }
+
+    /// `$Slope{body @ x = x}`: the derivative at the value `x` has now. If `x` has no value in the
+    /// sheet the source would not have calculated it either, so that is reported as such.
+    fn derivative(&mut self, var: &Name, body: &Expr) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        if !self.defined.contains(&v) || self.params.contains(&v) {
+            self.issue(
+                Code::CalculusOperator,
+                Some("derivative at a variable that has no value to evaluate it at".into()),
+            );
+            if !self.readable {
+                return atom("?calculus?");
+            }
+        }
+        let b = self.expr(body).s;
+        atom(format!("$Slope{{{b} @ {v} = {v}}}"))
+    }
+
+    fn unit_only(&mut self, n: &Name) -> String {
+        if n.sub.is_none() {
+            if let Some(u) = tables::map_unit(&n.base) {
+                return u;
+            }
+            if tables::is_unmapped_unit(&n.base) {
+                self.issue(Code::UnmappedUnit, Some(n.base.clone()));
+                return format!("?{}?", n.base);
+            }
+        }
+        self.issue(Code::UnmappedUnit, Some(n.flat()));
+        "?unit?".into()
+    }
+
+    fn name_ref(&mut self, n: &Name) -> R {
+        let flat = tables::normalise_name(&n.flat());
+        // The file says this identifier is a unit: it is, whatever variables exist.
+        if n.unit && n.sub.is_none() {
+            if let Some(u) = tables::map_unit(&n.base) {
+                return atom(u);
+            }
+        }
+        if let Some(m) = self.locals.get(&flat) {
+            return atom(m.clone());
+        }
+        if self.ranges.contains_key(&flat) && !self.params.contains(&flat) {
+            self.issue(
+                Code::RangeVariable,
+                Some(format!(
+                    "{flat} is a range variable; it is only read as the loop of an element assignment"
+                )),
+            );
+            return self.stand_in(&flat, "?range?");
+        }
+        if self.params.contains(&flat) || self.defined.contains(&flat) || self.funcs.contains_key(&flat) {
+            if !valid_ident(&flat) {
+                self.issue(Code::InvalidName, Some(flat.clone()));
+                return self.stand_in(&flat, "?name?");
+            }
+            return atom(flat);
+        }
+        if let Some(root) = self.gap_names.get(&flat).copied() {
+            self.cur.push(Pending {
+                code: Code::DependsOnGap,
+                detail: Some(flat.clone()),
+                root: Some(root),
+            });
+            return self.stand_in(&flat, "?gap?");
+        }
+        if n.sub.is_none() {
+            if tables::is_solve_name(&n.base) {
+                self.issue(Code::SolveBlock, Some(n.base.clone()));
+                return self.stand_in(&n.base, "?solve?");
+            }
+            if let Some(c) = tables::lookup_constant(&n.base) {
+                return match c {
+                    Constant::Text(t) => R {
+                        s: t.to_string(),
+                        prec: P_ATOM,
+                    },
+                    Constant::Origin => {
+                        if self.origin != 0 {
+                            self.issue(Code::ArrayOrigin, None);
+                        }
+                        atom(self.origin.to_string())
+                    }
+                };
+            }
+            if let Some(u) = tables::map_unit(&n.base) {
+                return atom(u);
+            }
+            if tables::is_unmapped_unit(&n.base) {
+                self.issue(Code::UnmappedUnit, Some(n.base.clone()));
+                return self.stand_in(&n.base, &format!("?{}?", n.base));
+            }
+        }
+        self.issue(Code::UndefinedVariable, Some(flat.clone()));
+        self.stand_in(&flat, "?name?")
+    }
+
+    fn call(&mut self, n: &Name, args: &[Expr]) -> R {
+        let flat = tables::normalise_name(&n.flat());
+        // A variable applied like a function is a product.
+        if (self.defined.contains(&flat) || self.params.contains(&flat)) && !self.funcs.contains_key(&flat) {
+            if args.len() == 1 {
+                self.issue(Code::CallAsMultiplication, None);
+                let a = self.operand(&args[0], P_MUL, false);
+                return R {
+                    s: format!("{}*{}", flat, a),
+                    prec: P_MUL,
+                };
+            }
+            self.issue(Code::BadStructure, Some("variable applied to several arguments".into()));
+            let shown = self.render_args(args);
+            return self.stand_in(&format!("{}({})", flat, shown.join("; ")), "?call?");
+        }
+        let rendered = self.render_args(args);
+        let shown_call = format!("{}({})", flat, rendered.join("; "));
+        if let Some(&arity) = self.funcs.get(&flat) {
+            if arity != args.len() {
+                self.issue(Code::ArityMismatch, Some(flat.clone()));
+                if self.readable {
+                    self.readable_bad = true;
+                }
+            }
+            return atom(format!("{}({})", flat, rendered.join("; ")));
+        }
+        if let Some(root) = self.gap_names.get(&flat).copied() {
+            self.cur.push(Pending {
+                code: Code::DependsOnGap,
+                detail: Some(flat),
+                root: Some(root),
+            });
+            return self.stand_in(&shown_call, "?gap?");
+        }
+        if tables::is_solve_name(&flat) {
+            self.issue(Code::SolveBlock, Some(flat));
+            return self.stand_in(&shown_call, "?solve?");
+        }
+        if n.sub.is_none() {
+            if let Some((rule, lo, hi)) = tables::lookup_function(&flat) {
+                if args.len() < lo || args.len() > hi {
+                    self.issue(Code::ArityMismatch, Some(flat));
+                    return self.stand_in(&shown_call, "?call?");
+                }
+                if rule == FnRule::Submatrix {
+                    let mut parts = vec![rendered[0].clone()];
+                    for a in &args[1..] {
+                        parts.push(self.index_expr(a));
+                    }
+                    let text = format!("submatrix({})", parts.join("; "));
+                    // One column: the source indexes it like a vector, and the engine's vector is a
+                    // different thing from a one-column matrix.
+                    let one_column = matches!((&args[3], &args[4]), (Expr::Num(a), Expr::Num(b)) if a == b);
+                    return atom(if one_column { format!("col({text}; 1)") } else { text });
+                }
+                return self.apply_rule(rule, &rendered);
+            }
+        }
+        if n.sub.is_none() && tables::is_builtin_missing(&flat) {
+            self.issue(Code::BuiltinMissing, Some(flat));
+        } else if self.has_references {
+            self.issue(Code::ReferenceFunction, Some(flat));
+        } else {
+            self.issue(Code::AddinFunction, Some(flat));
+        }
+        self.stand_in(&shown_call, "?call?")
+    }
+
+    fn apply_rule(&mut self, rule: FnRule, a: &[String]) -> R {
+        match rule {
+            FnRule::Submatrix => atom(format!("submatrix({})", a.join("; "))),
+            FnRule::Direct(name) => atom(format!("{}({})", name, a.join("; "))),
+            FnRule::Trig(name) => {
+                self.uses_trig = true;
+                atom(format!("{}({})", name, a.join("; ")))
+            }
+            FnRule::Log => {
+                if a.len() == 1 {
+                    atom(format!("log({})", a[0]))
+                } else {
+                    self.issue(Code::LogBase, None);
+                    atom(format!("(ln({})/ln({}))", a[0], a[1]))
+                }
+            }
+            FnRule::Round => {
+                if a.len() == 1 {
+                    atom(format!("round({})", a[0]))
+                } else {
+                    self.issue(Code::RoundDigits, None);
+                    atom(format!("(round(({})*10^({}))/10^({}))", a[0], a[1], a[1]))
+                }
+            }
+        }
+    }
+
+    /// An array index shifted from the sheet's origin to Calcpad's 1.
+    fn index_expr(&mut self, e: &Expr) -> String {
+        let delta = 1 - self.origin;
+        if delta != 0 {
+            self.issue(Code::ArrayOrigin, None);
+        }
+        if let Expr::Num(s) = e {
+            if let Some(v) = is_int_literal(s) {
+                return (v + delta).to_string();
+            }
+        }
+        let r = self.operand(e, P_ADD, true);
+        match delta {
+            0 => r,
+            d if d > 0 => format!("{} + {}", r, d),
+            d => format!("{} - {}", r, -d),
+        }
+    }
+
+    fn index(&mut self, base: &Expr, idx: &[Expr]) -> R {
+        if self.readable {
+            // The engine checks a typeset line against what it knows: indexing a name it holds as
+            // a number, or the result of a call, is an error even in a `#noc` block.
+            match base {
+                Expr::Name(n) => {
+                    let f = tables::normalise_name(&n.flat());
+                    if self.defined.contains(&f) && !self.arrays.contains(&f) {
+                        self.readable_bad = true;
+                    }
+                }
+                _ => self.readable_bad = true,
+            }
+        }
+        let mut b = self.operand(base, P_ATOM, true);
+        if !self.readable && matches!(base, Expr::Call(..)) {
+            self.prog_n += 1;
+            let tmp = format!("ix_{}", self.prog_n);
+            self.hoisted.push(format!("{tmp} = {b}"));
+            b = tmp;
+        }
+        if idx.is_empty() || idx.len() > 2 {
+            self.issue(Code::BadStructure, Some("index list".into()));
+            return atom("?index?");
+        }
+        let parts: Vec<String> = idx.iter().map(|i| self.index_expr(i)).collect();
+        atom(format!("{}.({})", b, parts.join("; ")))
+    }
+
+    fn matrix(&mut self, rows: usize, cols: usize, items: &[Expr]) -> R {
+        // The file stores items column by column.
+        let cell: Vec<String> = items.iter().map(|i| self.expr(i).s).collect();
+        let at = |r: usize, c: usize| cell[c * rows + r].clone();
+        if rows * cols > 1_000_000 {
+            self.issue(Code::BadStructure, Some("matrix too large".into()));
+            return atom("?matrix?");
+        }
+        if cols == 1 && rows == 1 {
+            return atom(at(0, 0));
+        }
+        if cols == 1 {
+            let v: Vec<String> = (0..rows).map(|r| at(r, 0)).collect();
+            return atom(format!("[{}]", v.join("; ")));
+        }
+        if rows == 1 {
+            let v: Vec<String> = (0..cols).map(|c| at(0, c)).collect();
+            return atom(format!("transp([{}])", v.join("|")));
+        }
+        let body: Vec<String> = (0..rows)
+            .map(|r| (0..cols).map(|c| at(r, c)).collect::<Vec<_>>().join("; "))
+            .collect();
+        atom(format!("[{}]", body.join("|")))
+    }
+
+    // ---- regions ---------------------------------------------------------------------------
+
+    fn flush_issues(&mut self, id: &str, line: u32, severity_filter: Option<Severity>) {
+        let pend = std::mem::take(&mut self.cur);
+        // A name used many times in one region (a long program) is reported once.
+        let mut seen: HashSet<(Code, Option<String>)> = HashSet::new();
+        for p in pend {
+            if !seen.insert((p.code, p.detail.clone())) {
+                continue;
+            }
+            let sev = p.code.severity();
+            if let Some(f) = severity_filter {
+                if sev != f {
+                    continue;
+                }
+            }
+            self.report.issues.push(Issue {
+                code: p.code,
+                severity: sev,
+                detail: p.detail,
+                region_id: Some(id.to_string()),
+                line: if line > 0 { Some(line) } else { None },
+                reason: p.code.reason().to_string(),
+                root: p.root,
+            });
+        }
+    }
+
+    fn bump(map: &mut BTreeMap<String, KindStats>, key: &str, converted: bool, notes: bool) {
+        Self::bump_p(map, key, converted, notes, false)
+    }
+
+    fn bump_p(map: &mut BTreeMap<String, KindStats>, key: &str, converted: bool, notes: bool, pictured: bool) {
+        let s = map.entry(key.to_string()).or_default();
+        s.total += 1;
+        if converted {
+            s.converted += 1;
+            if notes {
+                s.with_notes += 1;
+            }
+        } else {
+            s.attention += 1;
+            if pictured {
+                s.pictured += 1;
+            }
+        }
+    }
+
+    /// The output for a region that did not convert. The machine-readable marker is an HTML
+    /// comment (with the full reason) followed by a small muted note; the original maths, when it
+    /// can be written, follows in a `#noc` block, so it shows as a typeset equation and is never
+    /// evaluated. Lines that cannot be Calcpad maths are shown as code text.
+    fn placeholder(&mut self, id: &str, codes: &[Code], body: Option<&[GapLine]>) {
+        let mut names: Vec<&str> = Vec::new();
+        for c in codes {
+            if !names.contains(&c.as_str()) {
+                names.push(c.as_str());
+            }
+        }
+        let reason = escape_text(codes[0].reason()).replace("--", "- -");
+        let note = match body {
+            Some(_) => format!("not calculated: {}", names.join(", ")),
+            None => format!("{} (not converted)", escape_text(codes[0].reason())),
+        };
+        self.lines.push(format!(
+            "'<!-- {} R{} {}] {} --><small>{}</small>",
+            GAP_MARKER,
+            sanitize_id(id),
+            names.join(","),
+            reason,
+            note
+        ));
+        let Some(lines) = body else { return };
+        let mut in_noc = false;
+        for (eq, text) in lines {
+            let one_line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+            if *eq {
+                if !in_noc {
+                    self.lines.push("#noc".to_string());
+                    in_noc = true;
+                }
+                self.lines.push(one_line);
+            } else {
+                if in_noc {
+                    self.lines.push("#end noc".to_string());
+                    in_noc = false;
+                }
+                // Leading `&emsp;` indents are markup already; the rest is text.
+                let indent_len = one_line.len() - one_line.trim_start_matches("&emsp;").len();
+                let (indent, rest) = one_line.split_at(indent_len);
+                let rest: String = rest.chars().take(600).collect();
+                self.lines.push(format!("'{indent}<code>{}</code>", escape_text(&rest)));
+            }
+        }
+        if in_noc {
+            self.lines.push("#end noc".to_string());
+        }
+    }
+
+    /// Registers a binary asset and returns its library path, or `None` over the size budget.
+    fn add_asset(&mut self, id: &str, ext: &str, mime: &'static str, bytes: Vec<u8>) -> Option<String> {
+        if self.asset_total.saturating_add(bytes.len()) > self.opts.max_total_asset_bytes {
+            return None;
+        }
+        let base = format!("{}/R{}", self.opts.asset_prefix, sanitize_id(id));
+        let mut path = format!("{}.{}", base, ext);
+        let mut n = 2;
+        while self.used_paths.contains(&path) {
+            path = format!("{}-{}.{}", base, n, ext);
+            n += 1;
+        }
+        self.used_paths.insert(path.clone());
+        self.asset_total += bytes.len();
+        self.assets.push(Asset {
+            path: path.clone(),
+            mime,
+            bytes,
+        });
+        Some(path)
+    }
+
+    fn img_line(path: &str, r: &Region) -> String {
+        let style = if r.width > 0.0 {
+            format!("width:{:.1}pt;max-width:100%;", r.width.min(900.0))
+        } else {
+            "max-width:100%;".to_string()
+        };
+        format!(
+            "'<img style=\"{}\" src=\"{}\" alt=\"R{}\">",
+            style,
+            path,
+            sanitize_id(&r.id)
+        )
+    }
+
+    /// Output for a region that did not convert: a static picture of the original when the option is
+    /// on and the file has one, otherwise the placeholder line (plus a labelled saved result when
+    /// that option is on). Returns true when a picture was written.
+    fn show_gap(&mut self, r: &Region, codes: &[Code], body: Option<&[GapLine]>, saved: Option<&SavedResult>) -> bool {
+        if saved.is_some() {
+            self.report.pictures.saved_result_available += 1;
+        }
+        if self.opts.pictures {
+            if let Some(png) = &r.rendering {
+                let len = png.len();
+                if let Some(path) = self.add_asset(&r.id, "png", "image/png", png.clone()) {
+                    // One line, so the caption stays under its picture.
+                    self.lines.push(format!(
+                        "{}<br/><i>{} (R{} {})</i>",
+                        Self::img_line(&path, r),
+                        picture::PICTURE_CAPTION,
+                        sanitize_id(&r.id),
+                        codes[0].as_str()
+                    ));
+                    self.report.pictures.fallback_shown += 1;
+                    self.report.pictures.png_bytes += len;
+                    self.issue(Code::StaticPicture, None);
+                    return true;
+                }
+            }
+        }
+        self.placeholder(&r.id, codes, body);
+        if self.opts.saved_results {
+            if let Some(sr) = saved {
+                let unit = sr.unit.as_ref().map(|u| format!(" {}", u)).unwrap_or_default();
+                self.lines.push(format!(
+                    "'<i>saved result from the original, not live (R{}): {}{}</i>",
+                    sanitize_id(&r.id),
+                    escape_text(&sr.value),
+                    escape_text(&unit)
+                ));
+                self.report.pictures.saved_result_emitted += 1;
+            }
+        }
+        false
+    }
+
+    fn simple_gap(&mut self, key: &str, r: &Region, code: Code, detail: Option<String>) {
+        self.issue(code, detail);
+        let pictured = self.show_gap(r, &[code], None, None);
+        self.flush_issues(&r.id, r.line, None);
+        Self::bump_p(&mut self.report.kinds, key, false, false, pictured);
+    }
+
+    fn picture(&mut self, r: &Region, p: &Picture) {
+        if !self.opts.pictures {
+            self.simple_gap("image", r, Code::Image, None);
+            return;
+        }
+        let mut note_fallback = false;
+        let metafile = if self.opts.convert_metafiles {
+            p.metafile.as_ref()
+        } else {
+            None
+        };
+        if let Some(mf) = metafile {
+            match picture::metafile_to_svg(mf, self.opts.svg_limits) {
+                Ok(svg) => {
+                    let len = svg.len();
+                    if let Some(path) = self.add_asset(&r.id, "svg", "image/svg+xml", svg.into_bytes()) {
+                        self.lines.push(Self::img_line(&path, r));
+                        self.report.pictures.svg_ok += 1;
+                        self.report.pictures.svg_bytes += len;
+                        Self::bump(&mut self.report.kinds, "image", true, false);
+                        return;
+                    }
+                    note_fallback = true;
+                }
+                Err(e) => {
+                    note_fallback = true;
+                    let why = match e {
+                        SvgError::InputTooLarge => "input too large",
+                        SvgError::Failed => "conversion failed",
+                        SvgError::Aborted => "conversion aborted",
+                        SvgError::OutputTooLarge => "output too large",
+                        SvgError::Unsafe => "unsafe content",
+                    };
+                    self.cur.push(Pending {
+                        code: Code::SvgFallback,
+                        detail: Some(why.to_string()),
+                        root: None,
+                    });
+                }
+            }
+            self.report.pictures.svg_failed += 1;
+        }
+        let png = p.png.clone().or_else(|| r.rendering.clone());
+        if let Some(png) = png {
+            let len = png.len();
+            if let Some(path) = self.add_asset(&r.id, "png", "image/png", png) {
+                self.lines.push(Self::img_line(&path, r));
+                self.report.pictures.png_used += 1;
+                self.report.pictures.png_bytes += len;
+                if note_fallback && self.cur.is_empty() {
+                    self.issue(Code::SvgFallback, None);
+                }
+                self.flush_issues(&r.id, r.line, None);
+                Self::bump_p(&mut self.report.kinds, "image", true, true, false);
+                return;
+            }
+        }
+        // Neither usable: the placeholder.
+        self.cur.retain(|p| p.code != Code::SvgFallback);
+        self.simple_gap("image", r, Code::Image, None);
+    }
+
+    fn region(&mut self, r: &Region) {
+        match &r.kind {
+            RegionKind::PageBreak => self.report.page_breaks += 1,
+            RegionKind::Text(paras) => {
+                for p in paras {
+                    if let Some(l) = text_line(p) {
+                        self.lines.push(l);
+                    }
+                }
+                Self::bump(&mut self.report.kinds, "text", true, false);
+            }
+            RegionKind::Math(m) => self.math(r, m),
+            RegionKind::Plot => self.simple_gap("plot", r, Code::Plot, None),
+            RegionKind::Picture(p) => self.picture(r, p),
+            RegionKind::Ole => self.simple_gap("ole", r, Code::OleObject, None),
+            RegionKind::Component => self.simple_gap("component", r, Code::Component, None),
+            RegionKind::Reference => self.simple_gap("reference", r, Code::WorksheetReference, None),
+            RegionKind::Other(tag) if matches!(tag.as_str(), "header" | "footer") => {
+                self.simple_gap("other", r, Code::HeaderFooter, Some(tag.clone()))
+            }
+            RegionKind::Other(tag) if tag == "textUnreadable" => self.simple_gap("text", r, Code::TextUnreadable, None),
+            RegionKind::Other(tag) if tag.starts_with("xaml") => {
+                self.simple_gap("other", r, Code::RichTextElement, Some(tag[4..].to_string()))
+            }
+            RegionKind::Other(tag) => {
+                let d = Some(
+                    tag.chars()
+                        .filter(|c| c.is_ascii_alphanumeric())
+                        .take(32)
+                        .collect::<String>(),
+                );
+                self.simple_gap("other", r, Code::OtherRegion, d)
+            }
+        }
+    }
+
+    fn math(&mut self, r: &Region, m: &MathRegion) {
+        self.cur.clear();
+        self.params.clear();
+        self.depth = 0;
+        if m.disabled {
+            self.simple_gap("math", r, Code::DisabledRegion, None);
+            Self::bump(&mut self.report.math_shapes, "other", false, false);
+            return;
+        }
+        let mut emitted: Option<String> = None;
+        let mut attempt: Option<String> = None;
+        let mut define_name: Option<(String, Option<usize>, bool)> = None; // name, arity, is array
+                                                                           // Names a gap redefines without our knowing their value (they must not read as stale).
+        let mut poison: Vec<String> = Vec::new();
+        let mut origin_assign: Option<i64> = None;
+        let mut range_def: Option<(String, RangeInfo)> = None;
+        let shape: &str;
+
+        match &m.stmt {
+            Stmt::Define { target, value, global } => {
+                shape = if matches!(target, Target::Func(..)) {
+                    "function"
+                } else {
+                    "definition"
+                };
+                // A program that is only local definitions and a final value is that value with the
+                // locals substituted. Other programs are statements, possible for a variable only.
+                let inlined: Option<Expr>;
+                let mut statements: Option<&[PStmt]> = None;
+                let stub: Expr;
+                let value: &Expr = match value {
+                    Expr::Program(stmts) => match symexec_program(stmts, matches!(target, Target::Func(..))) {
+                        Ok(e) => {
+                            inlined = Some(e);
+                            inlined.as_ref().unwrap()
+                        }
+                        Err(_) if matches!(target, Target::Var(_)) => {
+                            statements = Some(stmts);
+                            value
+                        }
+                        Err(why) => {
+                            stub = Expr::Unsupported {
+                                code: Code::ProgramBlock,
+                                detail: Some(format!("in a function body: {why}")),
+                            };
+                            &stub
+                        }
+                    },
+                    other => other,
+                };
+                match target {
+                    Target::Var(n) if statements.is_some() => {
+                        let flat = tables::normalise_name(&n.flat());
+                        if !valid_ident(&flat) {
+                            self.issue(Code::InvalidName, Some(flat.clone()));
+                        }
+                        match self.lower_program(statements.unwrap_or_default(), &flat) {
+                            Ok((text, is_array)) => {
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    emitted = Some(text);
+                                } else {
+                                    attempt = Some(text);
+                                }
+                                define_name = Some((flat, None, is_array));
+                            }
+                            Err(why) => {
+                                self.issue(Code::ProgramBlock, Some(why));
+                                define_name = Some((flat, None, false));
+                            }
+                        }
+                        if *global {
+                            self.issue(Code::GlobalDefinition, None);
+                        }
+                    }
+                    Target::Var(n) => {
+                        let flat = tables::normalise_name(&n.flat());
+                        if !valid_ident(&flat) {
+                            self.issue(Code::InvalidName, Some(flat.clone()));
+                        }
+                        if flat == "ORIGIN" {
+                            if let Expr::Num(s) = value {
+                                if let Some(v) = is_int_literal(s) {
+                                    origin_assign = Some(v);
+                                }
+                            }
+                        }
+                        if let (
+                            Expr::Range {
+                                first,
+                                second: None,
+                                last,
+                            },
+                            true,
+                        ) = (value, valid_ident(&flat))
+                        {
+                            // The bounds are rendered now, as the source reads them now; a range whose
+                            // bounds do not convert is a gap like any other region.
+                            let mark = self.cur.len();
+                            let a = self.expr(first).s;
+                            let z = self.expr(last).s;
+                            let bad = self.cur[mark..].iter().any(|p| p.code.severity() == Severity::Gap);
+                            self.cur.truncate(mark);
+                            if !bad {
+                                let lit = match (&**first, &**last) {
+                                    (Expr::Num(x), Expr::Num(y)) => match (is_int_literal(x), is_int_literal(y)) {
+                                        (Some(x), Some(y)) if x <= y => Some((x, y)),
+                                        _ => None,
+                                    },
+                                    _ => None,
+                                };
+                                range_def = Some((flat.clone(), RangeInfo { a, z, lit }));
+                            }
+                        }
+                        let rhs = if range_def.is_some() {
+                            atom("")
+                        } else {
+                            self.expr(value)
+                        };
+                        let is_array = matches!(value, Expr::Matrix { .. })
+                            || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
+                        if let Some((_, info)) = &range_def {
+                            let (a, z) = (&info.a, &info.z);
+                            self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
+                            emitted = Some(format!(
+                                "'<!-- range {flat} = {a} .. {z}: used as the loop of the element assignments that follow -->"
+                            ));
+                        } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                            emitted = Some(format!("{} = {}", flat, rhs.s));
+                        } else {
+                            attempt = Some(format!("{} = {}", flat, rhs.s));
+                        }
+                        define_name = Some((flat, None, is_array));
+                        if *global {
+                            self.issue(Code::GlobalDefinition, None);
+                        }
+                    }
+                    Target::Func(n, params) => {
+                        let flat = tables::normalise_name(&n.flat());
+                        if !valid_ident(&flat) {
+                            self.issue(Code::InvalidName, Some(flat.clone()));
+                        }
+                        let mut plist = Vec::new();
+                        for p in params {
+                            let pf = tables::normalise_name(&p.flat());
+                            if !valid_ident(&pf) {
+                                self.issue(Code::InvalidName, Some(pf.clone()));
+                            }
+                            plist.push(pf);
+                        }
+                        self.params = plist.clone();
+                        let rhs = self.expr(value);
+                        self.params.clear();
+                        let head = format!("{}({})", flat, plist.join("; "));
+                        if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                            emitted = Some(format!("{} = {}", head, rhs.s));
+                        } else {
+                            attempt = Some(format!("{} = {}", head, rhs.s));
+                        }
+                        define_name = Some((flat, Some(plist.len()), false));
+                        if *global {
+                            self.issue(Code::GlobalDefinition, None);
+                        }
+                    }
+                    Target::Multi(names) => {
+                        self.issue(
+                            Code::BadStructure,
+                            Some("matrix of names as a definition target".into()),
+                        );
+                        poison.extend(
+                            names
+                                .iter()
+                                .map(|b| tables::normalise_name(&b.flat()))
+                                .filter(|f| valid_ident(f)),
+                        );
+                    }
+                    Target::Element { base, index } => {
+                        let flat = base
+                            .as_ref()
+                            .map(|b| tables::normalise_name(&b.flat()))
+                            .filter(|f| valid_ident(f));
+                        // The array is no longer what an earlier definition said: later uses of its
+                        // name must not read the stale value (or, for a name such as `L`, a unit).
+                        if let Some(f) = &flat {
+                            define_name = Some((f.clone(), None, true));
+                        }
+                        // `v[i] := expr(i)` (or `M[i, j]` with two range variables) for an array that has
+                        // no value yet fills a zero array whose size is the largest index the ranges
+                        // reach: a loop over the range, preceded by `vector(n)` or `matrix(m; n)`. The
+                        // size is an expression the engine evaluates, so run-time bounds work. Anything
+                        // else about an element assignment is reported.
+                        let ranges: Option<Vec<(String, RangeInfo)>> = index
+                            .iter()
+                            .map(|e| match e {
+                                Expr::Name(i) => {
+                                    let f = tables::normalise_name(&i.flat());
+                                    self.ranges.get(&f).map(|b| (f, b.clone()))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        let distinct = ranges.as_ref().is_some_and(|r| {
+                            r.iter()
+                                .enumerate()
+                                .all(|(k, (n, _))| r[..k].iter().all(|(m, _)| m != n))
+                        });
+                        let why = match (&flat, &ranges) {
+                            (None, _) => Some("the target is not a plain indexed name"),
+                            (Some(_), None) => Some("the index is not made of range variables"),
+                            (Some(_), Some(r)) if r.is_empty() || r.len() > 2 || !distinct => {
+                                Some("the index is not one or two different range variables")
+                            }
+                            (Some(f), Some(_))
+                                if self.defined.contains(f)
+                                    || self.funcs.contains_key(f)
+                                    || self.gap_names.contains_key(f) =>
+                            {
+                                Some("the array already has a value, so growing or overwriting it element by element is not read")
+                            }
+                            (Some(f), Some(_)) if mentions(value, f) => Some("the value reads the array it is filling"),
+                            _ => None,
+                        };
+                        match (why, flat, ranges) {
+                            (None, Some(f), Some(rs)) => {
+                                for (iv, _) in &rs {
+                                    self.params.push(iv.clone());
+                                }
+                                let rhs = self.expr(value);
+                                let idx: Vec<String> = rs
+                                    .iter()
+                                    .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
+                                    .collect();
+                                for _ in &rs {
+                                    self.params.pop();
+                                }
+                                let pre = std::mem::take(&mut self.hoisted);
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
+                                        Ok(t) => emitted = Some(t),
+                                        Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                    }
+                                } else {
+                                    attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
+                                }
+                            }
+                            (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
+                            (None, ..) => {}
+                        }
+                    }
+                }
+            }
+            Stmt::Eval { expr, unit } => {
+                shape = "evaluation";
+                let e = self.expr(expr);
+                let mut text = e.s.clone();
+                if let Some(u) = unit {
+                    let ur = self.expr(u);
+                    text = if e.prec >= P_ATOM { e.s } else { format!("({})", e.s) };
+                    text = format!("{}|{}", text, ur.s);
+                    self.issue(Code::UnitOverride, None);
+                }
+                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                    emitted = Some(text);
+                } else {
+                    attempt = Some(text);
+                }
+            }
+            Stmt::Bare(expr) if matches!(expr, Expr::Bin(BinOp::Eq, ..)) => {
+                // An equation on its own line is a constraint (a solve block's equation, or a check):
+                // it is shown with its real names, not reported name by name.
+                shape = "expression";
+                self.issue(Code::ConstraintEquation, None);
+                let saved = std::mem::take(&mut self.cur);
+                self.readable = true;
+                let text = self.expr(expr).s.replace(" ≡ ", " = ");
+                self.readable = false;
+                self.cur = saved;
+                attempt = Some(text);
+            }
+            Stmt::Bare(expr) => {
+                shape = "expression";
+                let e = self.expr(expr);
+                self.issue(Code::BareExpression, None);
+                attempt = Some(e.s);
+            }
+            Stmt::Unsupported { code, detail } => {
+                shape = "other";
+                self.issue(*code, detail.clone());
+            }
+        }
+
+        if m.frozen && emitted.is_some() {
+            // Data read from the workbook an input component saved.
+            self.issue(Code::FrozenValue, None);
+            self.report.frozen_values += 1;
+            let note = format!(
+                "'<small><i>R{}: value taken from the saved workbook of an input component (frozen, not live)</i></small>",
+                sanitize_id(&r.id)
+            );
+            emitted = emitted.map(|e| format!("{note}\n{e}"));
+        }
+
+        // Temporaries the line needs first (a call result that is indexed).
+        let hoisted = std::mem::take(&mut self.hoisted);
+        if !hoisted.is_empty() {
+            if matches!(
+                &m.stmt,
+                Stmt::Define {
+                    target: Target::Func(..),
+                    ..
+                }
+            ) {
+                self.issue(
+                    Code::BadStructure,
+                    Some("the result of a call is indexed inside a function body".into()),
+                );
+            } else if let Some(e) = emitted.take() {
+                emitted = Some(format!("{}\n{}", hoisted.join("\n"), e));
+            }
+        }
+
+        // A definition that only fails because it reads a name an input component defines is given
+        // the value the file saved for it, as a literal, and says so.
+        if let (
+            Stmt::Define {
+                target: Target::Var(n), ..
+            },
+            Some(saved),
+        ) = (&m.stmt, &m.saved_expr)
+        {
+            let flat = tables::normalise_name(&n.flat());
+            let blockers: Vec<&Pending> = self.cur.iter().filter(|p| p.code.severity() == Severity::Gap).collect();
+            let only_inputs = !blockers.is_empty()
+                && blockers.iter().all(|p| {
+                    p.code == Code::UndefinedVariable
+                        && p.detail.as_ref().is_some_and(|d| self.component_names.contains(d))
+                });
+            if only_inputs && valid_ident(&flat) {
+                let stash = std::mem::take(&mut self.cur);
+                let v = self.expr(saved);
+                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                    self.cur.clear();
+                    self.issue(Code::FrozenValue, Some(flat.clone()));
+                    self.report.frozen_values += 1;
+                    let is_array = matches!(saved, Expr::Matrix { .. })
+                        || matches!(saved, Expr::Bin(BinOp::Mul, a, _) if matches!(**a, Expr::Matrix { .. }));
+                    emitted = Some(format!(
+                        "'<small><i>R{}: value taken from the saved result of an input component (frozen, not live)</i></small>\n{} = {}",
+                        sanitize_id(&r.id),
+                        flat,
+                        v.s
+                    ));
+                    attempt = None;
+                    define_name = Some((flat, None, is_array));
+                } else {
+                    self.cur = stash;
+                }
+            }
+        }
+
+        let gap_codes: Vec<Code> = self
+            .cur
+            .iter()
+            .filter(|p| p.code.severity() == Severity::Gap)
+            .map(|p| p.code)
+            .collect();
+        let has_notes = self.cur.iter().any(|p| p.code.severity() == Severity::Note);
+        let converted = gap_codes.is_empty();
+        let mut pictured = false;
+
+        if converted {
+            if let Some(v) = origin_assign {
+                self.origin = v;
+                self.issue(Code::OriginAssigned, None);
+                self.lines
+                    .push(format!("'<!-- ORIGIN assigned {} in the source -->", v));
+            } else if let Some(line) = emitted.take() {
+                self.lines.push(line);
+            }
+            if let Some((name, info)) = &range_def {
+                self.defined.remove(name);
+                self.funcs.remove(name);
+                self.arrays.remove(name);
+                self.gap_names.remove(name);
+                self.ranges.insert(name.clone(), info.clone());
+            } else if let Some((name, arity, is_array)) = define_name {
+                self.ranges.remove(&name);
+                self.gap_names.remove(&name);
+                match arity {
+                    Some(a) => {
+                        self.funcs.insert(name.clone(), a);
+                        self.defined.remove(&name);
+                    }
+                    None => {
+                        if name != "ORIGIN" {
+                            self.defined.insert(name.clone());
+                        }
+                        self.funcs.remove(&name);
+                    }
+                }
+                if is_array {
+                    self.arrays.insert(name);
+                } else {
+                    self.arrays.remove(&name);
+                }
+            }
+        } else {
+            // The root cause this region passes on to the regions that use its name.
+            let root = self
+                .cur
+                .iter()
+                .find(|p| p.code == Code::DependsOnGap)
+                .and_then(|p| p.root)
+                .or_else(|| gap_codes.iter().copied().find(|c| *c != Code::DependsOnGap))
+                .unwrap_or(Code::DependsOnGap);
+            for p in poison {
+                self.defined.remove(&p);
+                self.funcs.remove(&p);
+                self.arrays.remove(&p);
+                self.gap_names.insert(p, root);
+            }
+            if let Some((name, arity, _)) = define_name {
+                self.ranges.remove(&name);
+                self.defined.remove(&name);
+                self.funcs.remove(&name);
+                self.arrays.remove(&name);
+                let _ = arity;
+                self.gap_names.insert(name, root);
+            }
+            let shown: Option<Vec<GapLine>> = self
+                .readable_stmt(&m.stmt)
+                .or_else(|| attempt.map(|a| vec![(false, a)]));
+            pictured = self.show_gap(r, &gap_codes, shown.as_deref(), m.saved_result.as_ref());
+        }
+        self.flush_issues(&r.id, r.line, None);
+        Self::bump_p(&mut self.report.kinds, "math", converted, has_notes, pictured);
+        Self::bump_p(&mut self.report.math_shapes, shape, converted, has_notes, pictured);
+    }
+}
+
+/// One output line for a paragraph, or `None` if it holds no text.
+fn text_line(p: &Paragraph) -> Option<String> {
+    let heading = match p.style.as_str() {
+        "Heading 1" => Some(1),
+        "Heading 2" => Some(2),
+        "Heading 3" => Some(3),
+        _ => None,
+    };
+    // Merge runs of equal formatting (whitespace-only runs take the formatting of their
+    // neighbour), then collapse repeated spaces across run boundaries.
+    enum Seg {
+        Text(Run),
+        Br,
+    }
+    let mut segs: Vec<Seg> = Vec::new();
+    for piece in &p.pieces {
+        match piece {
+            Piece::Break => segs.push(Seg::Br),
+            Piece::Run(r) => {
+                if r.text.is_empty() {
+                    continue;
+                }
+                let mut r = r.clone();
+                if r.text.trim().is_empty() {
+                    if let Some(Seg::Text(prev)) = segs.last() {
+                        r = Run {
+                            text: r.text,
+                            ..prev.clone()
+                        };
+                    } else {
+                        r = Run {
+                            text: r.text,
+                            ..Run::default()
+                        };
+                    }
+                }
+                match segs.last_mut() {
+                    Some(Seg::Text(prev))
+                        if (prev.bold, prev.italic, prev.underline, prev.sub, prev.sup)
+                            == (r.bold, r.italic, r.underline, r.sub, r.sup) =>
+                    {
+                        prev.text.push_str(&r.text);
+                    }
+                    _ => segs.push(Seg::Text(r)),
+                }
+            }
+        }
+    }
+    let mut prev_space = true;
+    let mut any = false;
+    for seg in segs.iter_mut() {
+        match seg {
+            Seg::Br => prev_space = true,
+            Seg::Text(r) => {
+                let mut o = String::with_capacity(r.text.len());
+                for c in r.text.chars() {
+                    if c == ' ' {
+                        if !prev_space {
+                            o.push(' ');
+                        }
+                        prev_space = true;
+                    } else {
+                        o.push(c);
+                        prev_space = false;
+                        any = true;
+                    }
+                }
+                r.text = o;
+            }
+        }
+    }
+    if !any {
+        return None;
+    }
+    // Trim a trailing space before each break and at the end.
+    let n = segs.len();
+    for i in 0..n {
+        let at_end = i + 1 == n || matches!(segs[i + 1], Seg::Br);
+        if at_end {
+            if let Seg::Text(r) = &mut segs[i] {
+                while r.text.ends_with(' ') {
+                    r.text.pop();
+                }
+            }
+        }
+    }
+    let mut html = String::new();
+    for seg in &segs {
+        match seg {
+            Seg::Br => html.push_str("<br/>"),
+            Seg::Text(r) => {
+                if r.text.is_empty() {
+                    continue;
+                }
+                let mut s = escape_text(&r.text);
+                if heading.is_none() {
+                    if r.bold {
+                        s = format!("<b>{}</b>", s);
+                    }
+                    if r.italic {
+                        s = format!("<i>{}</i>", s);
+                    }
+                    if r.underline {
+                        s = format!("<u>{}</u>", s);
+                    }
+                }
+                if r.sub {
+                    s = format!("<sub>{}</sub>", s);
+                }
+                if r.sup {
+                    s = format!("<sup>{}</sup>", s);
+                }
+                html.push_str(&s);
+            }
+        }
+    }
+    Some(match heading {
+        Some(n) => format!("'<h{n}>{html}</h{n}>"),
+        None => {
+            if p.style == "List" {
+                format!("'&bull; {}", html)
+            } else {
+                format!("'{}", html)
+            }
+        }
+    })
+}
+
+/// Translates a sheet. See the crate documentation.
+/// A name the file labels as a unit in one place and defines as a variable in another (a matrix
+/// `N` next to forces in `N`): the engine would read every `N` as the variable, so the variable is
+/// renamed `N_v` everywhere and the unit keeps its name.
+fn rename_unit_clashes(sheet: &mut Sheet) {
+    let mut units: HashSet<String> = HashSet::new();
+    let mut vars: HashSet<String> = HashSet::new();
+    let mut scan = |stmt: &mut Stmt| {
+        // Names read or bound anywhere; the labelled ones are units, the targets are variables.
+        stmt.for_each_name_mut(&mut |n: &mut Name| {
+            if n.unit && n.sub.is_none() && tables::map_unit(&n.base).is_some() {
+                units.insert(n.base.clone());
+            }
+        });
+        if let Stmt::Define { target, .. } = stmt {
+            match target {
+                Target::Var(n) if !n.unit && n.sub.is_none() => {
+                    vars.insert(n.base.clone());
+                }
+                Target::Element { base: Some(b), .. } if b.sub.is_none() => {
+                    vars.insert(b.base.clone());
+                }
+                Target::Multi(ns) => {
+                    for n in ns.iter().filter(|n| n.sub.is_none()) {
+                        vars.insert(n.base.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+    };
+    for r in sheet.regions.iter_mut() {
+        if let RegionKind::Math(m) = &mut r.kind {
+            scan(&mut m.stmt);
+        }
+    }
+    let clash: HashSet<String> = units.intersection(&vars).cloned().collect();
+    if clash.is_empty() {
+        return;
+    }
+    for r in sheet.regions.iter_mut() {
+        if let RegionKind::Math(m) = &mut r.kind {
+            m.stmt.for_each_name_mut(&mut |n: &mut Name| {
+                if !n.unit && n.sub.is_none() && clash.contains(&n.base) {
+                    n.base = format!("{}_v", n.base);
+                }
+            });
+        }
+    }
+}
+
+pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
+    rename_unit_clashes(&mut sheet);
+    reading_order(&mut sheet.regions);
+    let has_references = sheet.regions.iter().any(|r| matches!(r.kind, RegionKind::Reference));
+    let mut tr = Tr {
+        origin: sheet.origin,
+        defined: HashSet::new(),
+        funcs: HashMap::new(),
+        gap_names: HashMap::new(),
+        arrays: HashSet::new(),
+        params: Vec::new(),
+        ranges: HashMap::new(),
+        component_names: sheet
+            .component_names
+            .iter()
+            .map(|n| tables::normalise_name(&n.flat()))
+            .collect(),
+        locals: HashMap::new(),
+        local_arrays: HashSet::new(),
+        zero_started: HashSet::new(),
+        prog_n: 0,
+        hoisted: Vec::new(),
+        loop_stack: Vec::new(),
+        cond_depth: 0,
+        ret: None,
+        readable: false,
+        readable_bad: false,
+        cur: Vec::new(),
+        uses_trig: false,
+        lines: Vec::new(),
+        report: ImportReport {
+            origin: sheet.origin,
+            ..Default::default()
+        },
+        depth: 0,
+        opts: opts.clone(),
+        assets: Vec::new(),
+        used_paths: HashSet::new(),
+        asset_total: 0,
+        has_references,
+    };
+    for r in &sheet.regions {
+        tr.region(r);
+    }
+    let mut out = String::new();
+    out.push_str(&format!(
+        "'<!-- Imported from a foreign worksheet: {} of {} regions need attention. Lines that start with {} mark what did not convert. -->\n",
+        tr.report.regions_needing_attention(),
+        tr.report.regions_total(),
+        GAP_MARKER
+    ));
+    if tr.uses_trig {
+        out.push_str("#rad\n");
+        tr.report.issues.insert(
+            0,
+            Issue {
+                code: Code::AngleMode,
+                severity: Severity::Note,
+                detail: None,
+                region_id: None,
+                line: None,
+                reason: Code::AngleMode.reason().to_string(),
+                root: None,
+            },
+        );
+    }
+    for l in &tr.lines {
+        out.push_str(l);
+        out.push('\n');
+    }
+    (out, tr.report, tr.assets)
+}

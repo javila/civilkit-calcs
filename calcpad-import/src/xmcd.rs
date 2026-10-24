@@ -56,7 +56,7 @@ pub enum ReadError {
 /// A cheap scan for runaway element nesting, done before the real parser sees the input. It
 /// understands comments, CDATA, processing instructions and self-closing tags; malformed input is
 /// left for the parser to reject.
-fn xml_depth_exceeds(xml: &str, max: usize) -> bool {
+pub(crate) fn xml_depth_exceeds(xml: &str, max: usize) -> bool {
     let b = xml.as_bytes();
     let mut i = 0;
     let mut depth = 0usize;
@@ -128,19 +128,25 @@ fn ns_tail<'a>(n: Node<'a, '_>) -> &'a str {
         .unwrap_or("")
 }
 
-fn is_ws(n: Node, local: &str) -> bool {
-    n.is_element() && n.tag_name().name() == local && ns_tail(n) == "worksheet30"
+/// The namespace family of an element: its last path segment without the version digits, so
+/// `worksheet30` (the older format) and `worksheet50` (the mcdx format) are both `worksheet`.
+pub(crate) fn ns_kind<'a>(n: Node<'a, '_>) -> &'a str {
+    ns_tail(n).trim_end_matches(|c: char| c.is_ascii_digit())
 }
 
-fn is_ml(n: Node) -> bool {
-    n.is_element() && ns_tail(n) == "math30"
+pub(crate) fn is_ws(n: Node, local: &str) -> bool {
+    n.is_element() && n.tag_name().name() == local && ns_kind(n) == "worksheet"
 }
 
-fn ml_kids<'a, 'i>(n: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
+pub(crate) fn is_ml(n: Node) -> bool {
+    n.is_element() && ns_kind(n) == "math"
+}
+
+pub(crate) fn ml_kids<'a, 'i>(n: Node<'a, 'i>) -> Vec<Node<'a, 'i>> {
     n.children().filter(|c| is_ml(*c)).collect()
 }
 
-fn local<'a>(n: Node<'a, '_>) -> &'a str {
+pub(crate) fn local<'a>(n: Node<'a, '_>) -> &'a str {
     n.tag_name().name()
 }
 
@@ -189,7 +195,11 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
             collect_region(&ctx, r, 0, &mut regions);
         }
     }
-    Ok(Sheet { origin, regions })
+    Ok(Sheet {
+        origin,
+        regions,
+        component_names: Vec::new(),
+    })
 }
 
 struct Ctx<'a, 'i> {
@@ -239,7 +249,7 @@ fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
     // The content element is the first child that is not a link or a cached rendering.
     let content = r
         .children()
-        .find(|c| c.is_element() && ns_tail(*c) == "worksheet30" && !matches!(local(*c), "link" | "rendering"));
+        .find(|c| c.is_element() && ns_kind(*c) == "worksheet" && !matches!(local(*c), "link" | "rendering"));
     let tag = content.map(local).unwrap_or("");
     // The saved raster picture of the region, wanted for everything that is not prose or layout.
     let rendering = if matches!(tag, "text" | "pageBreak" | "") {
@@ -325,7 +335,7 @@ fn walk_inline<'a, 'i>(
             if !t.is_empty() {
                 push_text(pieces, t, fmt);
             }
-        } else if c.is_element() && ns_tail(c) == "worksheet30" {
+        } else if c.is_element() && ns_kind(c) == "worksheet" {
             match local(c) {
                 "region" => nested.push(c),
                 "sp" | "tab" => push_text(pieces, " ", fmt),
@@ -392,7 +402,7 @@ fn walk_inline<'a, 'i>(
     }
 }
 
-fn push_text(pieces: &mut Vec<Piece>, t: &str, fmt: &Run) {
+pub(crate) fn push_text(pieces: &mut Vec<Piece>, t: &str, fmt: &Run) {
     // Collapse whitespace runs (pretty-printing, tabs, newlines) into single spaces.
     let mut s = String::with_capacity(t.len());
     let mut prev_space = false;
@@ -413,7 +423,7 @@ fn push_text(pieces: &mut Vec<Piece>, t: &str, fmt: &Run) {
 // ---------------------------------------------------------------------------------------------
 // Math
 
-fn read_math(m: Node, lim: &Limits) -> MathRegion {
+pub(crate) fn read_math(m: Node, lim: &Limits) -> MathRegion {
     let disabled = m.attribute("disable-calc") == Some("true");
     // The statement is the first math-namespace child (provenance wrappers are peeled off).
     let stmt_node = m.children().find(|c| is_ml(*c));
@@ -428,15 +438,87 @@ fn read_math(m: Node, lim: &Limits) -> MathRegion {
         .descendants()
         .find(|n| is_ml(*n) && local(*n) == "result")
         .and_then(read_saved_result);
+    let saved_expr = m
+        .descendants()
+        .find(|n| is_ml(*n) && local(*n) == "result")
+        .and_then(read_saved_expr);
     MathRegion {
         stmt,
         disabled,
         saved_result,
+        saved_expr,
+        frozen: false,
     }
 }
 
+/// The stored result as an expression, only when it is complete and exact: a number, or a matrix of
+/// numbers (at most 4000), optionally times a unit written as a product of unit names and powers.
+pub(crate) fn read_saved_expr(res: Node) -> Option<Expr> {
+    fn number(n: Node) -> Option<Expr> {
+        if local(n) != "real" {
+            return None;
+        }
+        let t = n.text()?.trim();
+        (!t.is_empty() && t.len() <= 64 && t.parse::<f64>().map(|v| v.is_finite()).unwrap_or(false))
+            .then(|| Expr::Num(t.to_string()))
+    }
+    fn plain(n: Node) -> Option<Expr> {
+        match local(n) {
+            "real" => number(n),
+            "matrix" => {
+                let rows = n.attribute("rows")?.parse::<usize>().ok()?;
+                let cols = n.attribute("cols")?.parse::<usize>().ok()?;
+                let items: Vec<Expr> = n
+                    .children()
+                    .filter(|c| c.is_element())
+                    .map(number)
+                    .collect::<Option<_>>()?;
+                (rows >= 1 && cols >= 1 && rows.checked_mul(cols)? == items.len() && items.len() <= 4000)
+                    .then_some(Expr::Matrix { rows, cols, items })
+            }
+            _ => None,
+        }
+    }
+    let kid = res.children().find(|c| c.is_element())?;
+    if local(kid) != "unitedValue" {
+        return plain(kid);
+    }
+    let value = kid.children().filter(|c| c.is_element()).find_map(plain)?;
+    let mono = kid.children().find(|c| c.is_element() && local(*c) == "unitMonomial");
+    let mut unit: Option<Expr> = None;
+    if let Some(m) = mono {
+        for u in m.children().filter(|c| c.is_element() && local(*c) == "unitReference") {
+            let name = u.attribute("unit")?;
+            let pn: i32 = u.attribute("power-numerator").and_then(|v| v.parse().ok()).unwrap_or(1);
+            let pd: i32 = u
+                .attribute("power-denominator")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1);
+            if pd != 1 || pn == 0 || name.len() > 40 {
+                return None;
+            }
+            let base = Expr::Name(Name::new(name));
+            let term = if pn.abs() == 1 {
+                base
+            } else {
+                Expr::Bin(BinOp::Pow, Box::new(base), Box::new(Expr::Num(pn.abs().to_string())))
+            };
+            unit = Some(match (unit, pn < 0) {
+                (None, false) => term,
+                (None, true) => Expr::Bin(BinOp::Div, Box::new(Expr::Num("1".into())), Box::new(term)),
+                (Some(u), false) => Expr::Bin(BinOp::Mul, Box::new(u), Box::new(term)),
+                (Some(u), true) => Expr::Bin(BinOp::Div, Box::new(u), Box::new(term)),
+            });
+        }
+    }
+    Some(match unit {
+        Some(u) => Expr::Bin(BinOp::Mul, Box::new(value), Box::new(u)),
+        None => value,
+    })
+}
+
 /// The stored result of an evaluation when it is a single number or string, with its unit.
-fn read_saved_result(res: Node) -> Option<SavedResult> {
+pub(crate) fn read_saved_result(res: Node) -> Option<SavedResult> {
     let kid = res.children().find(|c| c.is_element())?;
     let take_value = |n: Node| -> Option<String> {
         let t = n.text()?.trim().to_string();
@@ -509,10 +591,10 @@ fn unwrap_provenance<'a, 'i>(mut n: Node<'a, 'i>) -> Node<'a, 'i> {
 fn unsupported_code(tag: &str) -> Option<Code> {
     Some(match tag {
         "program" | "ifThen" | "otherwise" | "for" | "while" | "break" | "continue" | "return" | "onError"
-        | "localDefine" => Code::ProgramBlock,
+        | "localDefine" | "if" | "elseif" | "else" | "tryCatch" => Code::ProgramBlock,
         "symEval" | "symbolicEval" | "symbolic" | "keywordEval" => Code::SymbolicEvaluation,
         "derivative" | "integral" | "nthDerivative" | "partialDerivative" => Code::CalculusOperator,
-        "sum" | "product" | "limit" | "iteratedSum" | "iteratedProduct" => Code::SummationOperator,
+        "sum" | "product" | "limit" | "iteratedSum" | "iteratedProduct" | "summation" => Code::SummationOperator,
         "vectorize" => Code::VectorizeOperator,
         "matcol" | "matrow" | "vectorSum" | "magnitude" | "dot" | "cross" => Code::MatrixOperator,
         _ => return None,
@@ -544,7 +626,8 @@ fn read_stmt(n: Node, lim: &Limits) -> Stmt {
             for k in kids {
                 match local(k) {
                     "unitOverride" => {
-                        if let Some(u) = ml_kids(k).into_iter().next() {
+                        // An empty slot (the mcdx format writes a placeholder) means no unit.
+                        if let Some(u) = ml_kids(k).into_iter().next().filter(|u| local(*u) != "placeholder") {
                             unit = Some(read_expr(unwrap_provenance(u), lim, 0));
                         }
                     }
@@ -580,13 +663,47 @@ fn bad(why: &str) -> Stmt {
     }
 }
 
+pub(crate) fn read_name_pub(n: Node) -> Name {
+    read_name(n)
+}
+
 fn read_name(n: Node) -> Name {
+    // The mcdx format writes a subscript as a styled span inside the identifier; the older
+    // format as an attribute. Text inside a superscript cannot be a name: it is kept with a
+    // caret so that the name fails the identifier check instead of reading as another name.
+    let mut base = String::new();
+    let mut sub = String::new();
+    for t in n.descendants().filter(|d| d.is_text()) {
+        let text = t.text().unwrap_or("");
+        let mut in_sub = false;
+        let mut in_sup = false;
+        for a in t.ancestors().take_while(|a| *a != n) {
+            if a.is_element() {
+                match a.tag_name().name() {
+                    "Subscript" => in_sub = true,
+                    "Superscript" => in_sup = true,
+                    _ => {}
+                }
+            }
+        }
+        if in_sub {
+            sub.push_str(text);
+        } else if in_sup {
+            base.push('^');
+            base.push_str(text);
+        } else {
+            base.push_str(text);
+        }
+    }
+    let attr = n
+        .attribute("subscript")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let sub = attr.or_else(|| Some(sub.trim().to_string()).filter(|s| !s.is_empty()));
     Name {
-        base: n.text().unwrap_or("").trim().to_string(),
-        sub: n
-            .attribute("subscript")
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()),
+        base: base.trim().to_string(),
+        sub,
+        unit: n.attribute("labels") == Some("UNIT"),
     }
 }
 
@@ -610,9 +727,34 @@ fn read_target(n: Node, lim: &Limits) -> Option<Target> {
                 .unwrap_or_default();
             Some(Target::Func(read_name(*name), params))
         }
+        "matrix" => {
+            let names: Vec<Name> = ml_kids(n)
+                .into_iter()
+                .map(unwrap_provenance)
+                .filter(|k| local(*k) == "id")
+                .map(read_name)
+                .collect();
+            (!names.is_empty() && names.len() == ml_kids(n).len()).then_some(Target::Multi(names))
+        }
         "apply" => {
-            let _ = lim;
-            Some(Target::Element)
+            let kids = ml_kids(n);
+            let (base, index) = match kids.as_slice() {
+                [op, first, ..]
+                    if local(unwrap_provenance(*op)) == "indexer" && local(unwrap_provenance(*first)) == "id" =>
+                {
+                    let args = operands(&kids);
+                    // The indexes are further operands or one `sequence`.
+                    let idx_nodes: Vec<Node> = if args.len() == 2 && local(args[1]) == "sequence" {
+                        ml_kids(args[1])
+                    } else {
+                        args.iter().skip(1).copied().collect()
+                    };
+                    let index = idx_nodes.iter().map(|a| read_expr(*a, lim, 1)).collect();
+                    (Some(read_name(unwrap_provenance(*first))), index)
+                }
+                _ => (None, Vec::new()),
+            };
+            Some(Target::Element { base, index })
         }
         _ => None,
     }
@@ -694,6 +836,7 @@ fn read_expr(n: Node, lim: &Limits, depth: usize) -> Expr {
                 last: Box::new(read_expr(kids[1], lim, depth + 1)),
             }
         }
+        "program" => Expr::Program(read_program(n, lim, depth + 1)),
         other => match unsupported_code(other) {
             Some(code) => Expr::Unsupported {
                 code,
@@ -701,6 +844,181 @@ fn read_expr(n: Node, lim: &Limits, depth: usize) -> Expr {
             },
             None => unsupported(Code::UnknownElement, other),
         },
+    }
+}
+
+fn single<'a, 'i>(n: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    let k = ml_kids(n);
+    (k.len() == 1).then(|| k[0])
+}
+
+/// `integral(lambda(boundVars x, body), lowerBound a, upperBound b)` and
+/// `derivative(lambda(boundVars x, body), degree 1)`. Any other layout is left unread (`None`).
+fn read_calculus(tag: &str, args: &[Node], lim: &Limits, depth: usize) -> Option<Expr> {
+    let lambda = args
+        .first()
+        .copied()
+        .map(unwrap_provenance)
+        .filter(|l| local(*l) == "lambda")?;
+    let parts = ml_kids(lambda);
+    let [bound, body] = parts.as_slice() else { return None };
+    if local(*bound) != "boundVars" {
+        return None;
+    }
+    let vars = ml_kids(*bound);
+    let [v] = vars.as_slice() else { return None };
+    let v = unwrap_provenance(*v);
+    if local(v) != "id" {
+        return None;
+    }
+    let var = read_name(v);
+    let body = Box::new(read_expr(*body, lim, depth + 1));
+    match tag {
+        "integral" => {
+            let [_, lo, hi] = args else { return None };
+            if local(*lo) != "lowerBound" || local(*hi) != "upperBound" {
+                return None;
+            }
+            let (lo, hi) = (single(*lo)?, single(*hi)?);
+            if matches!(local(lo), "placeholder") || matches!(local(hi), "placeholder") {
+                return None;
+            }
+            Some(Expr::Integral {
+                var,
+                body,
+                lower: Box::new(read_expr(lo, lim, depth + 1)),
+                upper: Box::new(read_expr(hi, lim, depth + 1)),
+            })
+        }
+        _ => {
+            // The degree is an empty slot (first order) or the literal 1.
+            let [_, deg] = args else { return None };
+            if local(*deg) != "degree" {
+                return None;
+            }
+            match single(*deg) {
+                Some(d) if local(d) == "placeholder" => {}
+                Some(d) if local(d) == "real" && d.text().map(str::trim) == Some("1") => {}
+                _ => return None,
+            }
+            Some(Expr::Derivative { var, body })
+        }
+    }
+}
+
+/// The statements of a `program` element.
+fn read_program(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
+    if depth > lim.max_depth {
+        return vec![PStmt::Unsupported("nested too deeply".into())];
+    }
+    ml_kids(n)
+        .into_iter()
+        .map(|k| read_pstmt(unwrap_provenance(k), lim, depth))
+        .collect()
+}
+
+/// The statements of the `program` inside a `then`, `else` or loop body element.
+fn read_body(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
+    match ml_kids(n)
+        .into_iter()
+        .map(unwrap_provenance)
+        .find(|k| local(*k) == "program")
+    {
+        Some(p) => read_program(p, lim, depth + 1),
+        None => vec![PStmt::Unsupported("block without a program".into())],
+    }
+}
+
+fn read_pstmt(k: Node, lim: &Limits, depth: usize) -> PStmt {
+    let kids = ml_kids(k);
+    let bad = |what: &str| PStmt::Unsupported(what.to_string());
+    match local(k) {
+        "localDefine" => {
+            let [t, v] = kids.as_slice() else {
+                return bad("localDefine");
+            };
+            let t = unwrap_provenance(*t);
+            let value = read_expr(unwrap_provenance(*v), lim, depth + 1);
+            match local(t) {
+                "id" => PStmt::Local(PTarget::Var(read_name(t)), value),
+                "apply" => match read_target(t, lim) {
+                    Some(Target::Element {
+                        base: Some(base),
+                        index,
+                    }) => PStmt::Local(PTarget::Element { base, index }, value),
+                    _ => bad("local assignment target"),
+                },
+                _ => bad("local assignment target"),
+            }
+        }
+        "for" => {
+            let [v, range, body] = kids.as_slice() else {
+                return bad("for");
+            };
+            let v = unwrap_provenance(*v);
+            if local(v) != "id" || local(*body) != "program" {
+                return bad("for");
+            }
+            PStmt::For {
+                var: read_name(v),
+                range: read_expr(unwrap_provenance(*range), lim, depth + 1),
+                body: read_program(*body, lim, depth + 1),
+            }
+        }
+        "while" => {
+            let [cond, body] = kids.as_slice() else {
+                return bad("while");
+            };
+            if local(*body) != "program" {
+                return bad("while");
+            }
+            PStmt::While {
+                cond: read_expr(unwrap_provenance(*cond), lim, depth + 1),
+                body: read_program(*body, lim, depth + 1),
+            }
+        }
+        "if" => {
+            let mut branches = Vec::new();
+            let mut otherwise = None;
+            let mut pending: Option<Expr> = None;
+            // `if` holds `test`, `then`, any number of `elseif` (each `test`, `then`) and an `else`.
+            let mut items: Vec<Node> = kids;
+            let mut i = 0;
+            while i < items.len() {
+                let it = unwrap_provenance(items[i]);
+                match local(it) {
+                    "test" => match ml_kids(it).first() {
+                        Some(c) => pending = Some(read_expr(unwrap_provenance(*c), lim, depth + 1)),
+                        None => return bad("if"),
+                    },
+                    "then" => match pending.take() {
+                        Some(c) => branches.push((c, read_body(it, lim, depth))),
+                        None => return bad("if"),
+                    },
+                    "elseif" => {
+                        // Flatten its children into the list being walked.
+                        let inner = ml_kids(it);
+                        items.splice(i + 1..i + 1, inner);
+                    }
+                    "else" => otherwise = Some(read_body(it, lim, depth)),
+                    _ => return bad("if"),
+                }
+                i += 1;
+            }
+            if branches.is_empty() || pending.is_some() {
+                return bad("if");
+            }
+            PStmt::If { branches, otherwise }
+        }
+        "return" => match kids.as_slice() {
+            [v] => PStmt::Return(read_expr(unwrap_provenance(*v), lim, depth + 1)),
+            _ => bad("return"),
+        },
+        "break" => PStmt::Break,
+        "continue" => PStmt::Continue,
+        "tryCatch" => bad("tryCatch"),
+        "program" => bad("nested program"),
+        _ => PStmt::Expr(read_expr(k, lim, depth + 1)),
     }
 }
 
@@ -767,7 +1085,8 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
             }
         }
         "neg" => un(UnOp::Neg, &args),
-        "mult" => bin(BinOp::Mul, &args),
+        // The mcdx format writes a value followed by its unit as a `scale` application.
+        "mult" | "scale" => bin(BinOp::Mul, &args),
         "div" => bin(BinOp::Div, &args),
         "pow" => bin(BinOp::Pow, &args),
         "equal" => bin(BinOp::Eq, &args),
@@ -782,8 +1101,15 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
         "not" => un(UnOp::Not, &args),
         "absval" => un(UnOp::Abs, &args),
         "sqrt" => un(UnOp::Sqrt, &args),
+        // `nthRoot` with an empty degree slot is the square root; any other degree is not read
+        // (its operand order is unverified).
+        "nthRoot" if args.len() == 2 && local(args[0]) == "placeholder" => un(UnOp::Sqrt, &args[1..]),
         "factorial" => un(UnOp::Factorial, &args),
         "transpose" => un(UnOp::Transpose, &args),
+        "integral" | "derivative" => read_calculus(tag, &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
+            code: Code::CalculusOperator,
+            detail: Some(tag.to_string()),
+        }),
         "indexer" => {
             if args.len() < 2 {
                 return unsupported(Code::BadStructure, "indexer");

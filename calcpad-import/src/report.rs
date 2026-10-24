@@ -19,6 +19,7 @@ pub enum Code {
     MatrixOperator,
     StringValue,
     BareExpression,
+    ConstraintEquation,
     ElementAssignment,
     DisabledRegion,
     Plot,
@@ -27,6 +28,9 @@ pub enum Code {
     Component,
     WorksheetReference,
     OtherRegion,
+    HeaderFooter,
+    RichTextElement,
+    TextUnreadable,
     UnknownElement,
     UnmappedUnit,
     BuiltinMissing,
@@ -41,6 +45,8 @@ pub enum Code {
     TooDeep,
     // ---- notes: the region converted, with a caveat ----
     GlobalDefinition,
+    RangeLoop,
+    FrozenValue,
     AngleMode,
     ArrayOrigin,
     OriginAssigned,
@@ -81,6 +87,7 @@ impl Code {
         Code::MatrixOperator,
         Code::StringValue,
         Code::BareExpression,
+        Code::ConstraintEquation,
         Code::ElementAssignment,
         Code::DisabledRegion,
         Code::Plot,
@@ -89,6 +96,9 @@ impl Code {
         Code::Component,
         Code::WorksheetReference,
         Code::OtherRegion,
+        Code::HeaderFooter,
+        Code::RichTextElement,
+        Code::TextUnreadable,
         Code::UnknownElement,
         Code::UnmappedUnit,
         Code::BuiltinMissing,
@@ -102,6 +112,8 @@ impl Code {
         Code::BadStructure,
         Code::TooDeep,
         Code::GlobalDefinition,
+        Code::RangeLoop,
+        Code::FrozenValue,
         Code::AngleMode,
         Code::ArrayOrigin,
         Code::OriginAssigned,
@@ -131,6 +143,7 @@ impl Code {
             MatrixOperator => "matrix-operator",
             StringValue => "string-value",
             BareExpression => "bare-expression",
+            ConstraintEquation => "constraint-equation",
             ElementAssignment => "element-assignment",
             DisabledRegion => "disabled-region",
             Plot => "plot",
@@ -139,6 +152,9 @@ impl Code {
             Component => "component",
             WorksheetReference => "worksheet-reference",
             OtherRegion => "other-region",
+            HeaderFooter => "header-footer",
+            RichTextElement => "rich-text-element",
+            TextUnreadable => "text-unreadable",
             UnknownElement => "unknown-element",
             UnmappedUnit => "unmapped-unit",
             BuiltinMissing => "builtin-missing",
@@ -152,6 +168,8 @@ impl Code {
             BadStructure => "bad-structure",
             TooDeep => "too-deep",
             GlobalDefinition => "global-definition",
+            RangeLoop => "range-loop",
+            FrozenValue => "frozen-value",
             AngleMode => "angle-mode",
             ArrayOrigin => "array-origin",
             OriginAssigned => "origin-assigned",
@@ -172,8 +190,10 @@ impl Code {
     pub fn severity(self) -> Severity {
         use Code::*;
         match self {
-            GlobalDefinition | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits | AbsOfArray
-            | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
+            GlobalDefinition | RangeLoop | FrozenValue | AngleMode | ArrayOrigin | OriginAssigned | LogBase
+            | RoundDigits | AbsOfArray | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => {
+                Severity::Note
+            }
             XmlError | NotAWorksheet | InputTooLarge | UnsupportedContainer => Severity::Fatal,
             _ => Severity::Gap,
         }
@@ -194,6 +214,7 @@ impl Code {
             VectorizeOperator => "vectorize operator",
             MatrixOperator => "matrix column/row or vector sum operator",
             StringValue => "string value; Calcpad has no string variables",
+            ConstraintEquation => "equation written as a constraint (an unknown to solve for, or a check): shown, not solved",
             BareExpression => "expression without a definition or evaluation operator (documentation or constraint)",
             ElementAssignment => "assignment to a matrix element",
             DisabledRegion => "the region is disabled in the source worksheet",
@@ -203,6 +224,9 @@ impl Code {
             Component => "scripted or data component",
             WorksheetReference => "reference to another worksheet",
             OtherRegion => "region kind the importer does not know",
+            HeaderFooter => "page header or footer (not part of the calculation; not converted)",
+            RichTextElement => "element inside a text region that is not converted (table, picture or floating block)",
+            TextUnreadable => "the text of this region could not be read from the file",
             UnknownElement => "element the importer does not know",
             UnmappedUnit => "unit with no Calcpad equivalent in the mapping table",
             BuiltinMissing => "built-in function of the source tool that the engine lacks (no Calcpad equivalent in the table)",
@@ -215,6 +239,8 @@ impl Code {
             ArityMismatch => "function called with the wrong number of arguments",
             BadStructure => "expression tree with an unexpected shape",
             TooDeep => "expression nested too deeply",
+            FrozenValue => "value taken from the saved result of an input component the importer cannot run: it is frozen and does not follow a change of the input",
+            RangeLoop => "range variable read as the loop bounds of the element assignments that use it; any other use is reported",
             GlobalDefinition => "global definition converted as an ordinary definition at its reading-order position",
             AngleMode => "trigonometric functions: the output switches the sheet to radians (#rad), the source default",
             ArrayOrigin => "array origin differs from 1: indexes were shifted",
@@ -231,7 +257,7 @@ impl Code {
             XmlError => "the input is not well-formed XML (or uses a DTD, which is refused)",
             NotAWorksheet => "the XML is not a worksheet document",
             InputTooLarge => "the input exceeds the size limit",
-            UnsupportedContainer => "the file is a zip container (the newer worksheet format), which is not supported yet",
+            UnsupportedContainer => "the file is a zip package that cannot be read (damaged, encrypted or using an unsupported zip feature)",
         }
     }
 }
@@ -293,6 +319,8 @@ pub struct ImportReport {
     pub math_shapes: BTreeMap<String, KindStats>,
     pub issues: Vec<Issue>,
     pub page_breaks: usize,
+    /// Definitions whose value is the saved result of an input component (frozen, not live).
+    pub frozen_values: usize,
     pub pictures: PictureStats,
 }
 

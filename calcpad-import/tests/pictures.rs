@@ -3,8 +3,8 @@
 
 use std::time::{Duration, Instant};
 
-use calcpad_import_xmcd::picture::{base64_decode, metafile_to_svg, SvgError, SvgLimits};
-use calcpad_import_xmcd::{import_xmcd_opts, Code, ImportOptions, ImportResult, GAP_MARKER};
+use calcpad_import::picture::{base64_decode, metafile_to_svg, SvgError, SvgLimits};
+use calcpad_import::{import_xmcd_opts, Code, ImportOptions, ImportResult, GAP_MARKER};
 
 // ---- tiny files made by hand -------------------------------------------------------------------------
 
@@ -201,7 +201,7 @@ fn a_picture_with_nothing_usable_keeps_the_placeholder() {
     assert!(res
         .calcpad
         .lines()
-        .any(|l| l.starts_with(&format!("'{GAP_MARKER} R5 image]"))));
+        .any(|l| l.starts_with(&format!("'<!-- {GAP_MARKER} R5 image]"))));
     assert_eq!(res.report.regions_needing_attention(), 1);
     // A picture with no items at all, or a dangling reference, is the same.
     let res = run(&sheet(
@@ -331,7 +331,7 @@ fn unconverted_regions_show_their_saved_picture_with_a_caption() {
 #[test]
 fn without_a_rendering_the_placeholder_stays() {
     let res = run(&sheet(&ole_region(4, 0, None), ""));
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R4 ole-object]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R4 ole-object]")));
     assert!(res.assets.is_empty());
     assert_eq!(res.report.regions_showing(), 0);
 }
@@ -356,7 +356,7 @@ fn picture_switch_off_restores_placeholders() {
             ..ImportOptions::default()
         },
     );
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R4 ole-object]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R4 ole-object]")));
     assert!(res.assets.is_empty());
     assert!(!res.calcpad.contains("<img"));
 }
@@ -496,7 +496,7 @@ fn undefined_calls_split_into_addin_reference_and_builtin_missing() {
 
 #[test]
 fn builtin_tables_do_not_overlap() {
-    use calcpad_import_xmcd::tables::{is_builtin_missing, FUNCTIONS};
+    use calcpad_import::tables::{is_builtin_missing, FUNCTIONS};
     for (n, ..) in FUNCTIONS {
         assert!(!is_builtin_missing(n), "{n}");
     }
@@ -534,7 +534,7 @@ fn saved_results_are_counted_and_written_only_on_request() {
         "'<i>saved result from the original, not live (R12): 571.9381 International_BTU/(pound)</i>"
     );
     // The placeholder is still there: the saved result is an addition, not a conversion.
-    assert!(res.calcpad.contains(&format!("'{GAP_MARKER} R12 addin-function]")));
+    assert!(res.calcpad.contains(&format!("'<!-- {GAP_MARKER} R12 addin-function]")));
     assert_eq!(res.report.regions_needing_attention(), 1);
 }
 
@@ -575,7 +575,7 @@ fn saved_results_that_are_not_single_numbers_are_ignored() {
 
 #[test]
 fn precheck_accepts_the_good_file_and_bounds_records() {
-    use calcpad_import_xmcd::picture::{precheck_metafile, MAX_METAFILE_RECORDS};
+    use calcpad_import::picture::{precheck_metafile, MAX_METAFILE_RECORDS};
     assert_eq!(precheck_metafile(&tiny_wmf()), Ok(()));
 
     // Many tiny records: refused before conversion.
@@ -619,13 +619,13 @@ fn metafile_conversion_can_be_switched_off() {
 
 #[test]
 fn bytes_entry_refuses_zip_and_non_utf8() {
-    use calcpad_import_xmcd::import_xmcd_bytes;
+    use calcpad_import::import_bytes;
     let o = ImportOptions::default();
-    let r = import_xmcd_bytes(b"PK\x03\x04 and then a zip", &o);
+    let r = import_bytes(b"PK\x03\x04 and then a zip", &o);
     assert!(r.report.issues.iter().any(|i| i.code == Code::UnsupportedContainer));
-    let r = import_xmcd_bytes(&[0xFF, 0xFE, 0x00, 0x01], &o);
+    let r = import_bytes(&[0xFF, 0xFE, 0x00, 0x01], &o);
     assert!(r.report.issues.iter().any(|i| i.code == Code::XmlError));
     let mut ok = b"\xEF\xBB\xBF".to_vec();
     ok.extend(sheet("", "").as_bytes());
-    assert!(!import_xmcd_bytes(&ok, &o).report.is_fatal());
+    assert!(!import_bytes(&ok, &o).report.is_fatal());
 }

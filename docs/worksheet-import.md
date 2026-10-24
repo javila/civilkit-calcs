@@ -1,20 +1,20 @@
 # Importing foreign worksheets (spike)
 
-Crate: `calcpad-import-xmcd` (package `civilkit-calcs-import-xmcd`, not published). It reads the
-`.xmcd` worksheet files of a commercial calculation tool, the spreadsheet-like worksheet format with
+Crate: `calcpad-import` (package `civilkit-calcs-import`, not published). It reads the
+`.xmcd` and `.mcdx` worksheet files of a commercial calculation tool, the spreadsheet-like worksheet format with
 text, equations and plots placed freely on a page, and writes **Calcpad worksheet text** for the existing
 engine. It evaluates nothing itself: one engine, one language. Every number in the output is a literal
 that was in the source.
 
 It is a spike. It answers two questions: how much of real files converts, and which missing features
-come first. It is not wired into the web app.
+come first. The two file formats share one translator; see [The .mcdx front door](#the-mcdx-front-door).
 
 ## In the app
 
-`File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd`
-file, or dropping a `.xmcd` file anywhere on the page (a dashed hint shows while a file is dragged over it).
+`File > Import worksheet...`, the **Import worksheet** button on the Document tab, `File > Open...` with a `.xmcd` or
+`.mcdx` file, or dropping one anywhere on the page (a dashed hint shows while a file is dragged over it).
 
-1. The file is read in the page and converted by the importer module (`calcpad_import_xmcd_wasm`, in its own web
+1. The file is read in the page and converted by the importer module (`calcpad_import_wasm`, in its own web
    worker, loaded on first use; the engine module is not involved). **Nothing is uploaded**: the file never leaves
    the browser.
 2. The picture files go into the library under `/imported/<file name>/` (letters, digits, `_`, `-`; importing the
@@ -26,8 +26,8 @@ file, or dropping a `.xmcd` file anywhere on the page (a dashed hint shows while
    (default on) and **Show saved results as static values** (default off).
 
 Errors are messages, never crashes: a file that is not `.xmcd` ("... is not a worksheet this importer reads"),
-malformed XML or a DTD ("not well-formed XML"), text that is not UTF-8, and a `.mcdx` zip ("Prime (.mcdx) files are
-not supported yet.").
+malformed XML or a DTD ("not well-formed XML"), text that is not UTF-8, and a `.mcdx` zip that cannot be read
+("the file is a zip package that cannot be read").
 
 **Pictures and Save.** The `.cpd` text refers to pictures by library path (`<img src="imported/<name>/R12.svg">`).
 The report, the preview and the HTML, Word and Excel exports resolve those paths against the library and inline
@@ -42,16 +42,16 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,131,136 bytes raw, 464,060 bytes gzipped (`tools/build_wasm.sh import`).
+Size of the module: 1,233,543 bytes raw, 508,698 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
 
 ## Use
 
 ```text
-cargo run -p civilkit-calcs-import-xmcd --example import -- <file.xmcd>   # text on stdout, report on stderr
+cargo run -p civilkit-calcs-import --example import -- <file.xmcd>   # text on stdout, report on stderr
 ```
 
 ```rust
-let r = calcpad_import_xmcd::import_xmcd(&xml);      // r.calcpad: String, r.report: ImportReport
+let r = calcpad_import::import_xmcd(&xml);      // r.calcpad: String, r.report: ImportReport
 println!("{} of {} regions need attention",
          r.report.regions_needing_attention(), r.report.regions_total());
 ```
@@ -64,18 +64,26 @@ the number of regions they block.
 
 ### The placeholder rule
 
-A region that does not convert is never dropped and never guessed. The output gets one line for it:
+A region that does not convert is never dropped and never guessed. Its original maths is shown, as a
+typeset equation with the real names, and is never evaluated:
 
 ```text
-'[import-gap R41 range-variable] range variable (a..b) or an expression iterating over one; ... | i = 1 .. 10
+'<!-- [import-gap R41 undefined-variable,depends-on-gap] name used before it is defined ... --><small>not calculated: undefined-variable, depends-on-gap</small>
+#noc
+A = submatrix(N; 1; n_n; 3; 3)*cm^2
+#end noc
 ```
 
-The line starts with `'` (a Calcpad text line, so it shows in the report and runs as text), then
-`[import-gap`, the region id, the code(s), a fixed reason, and for math regions a bounded,
-escaped rendering of what the importer understood. Input text reaches the output only through three
-doors: escaped prose in a `'` line, names that pass the Calcpad identifier check, and numbers that
-parse as finite numbers (plus the mapping tables). A test plants a payload in every kind of
-unconverted region and checks that it only ever appears inside a placeholder line.
+The machine-readable marker (`[import-gap`, the region id, the code or codes, the full reason) is an HTML
+comment, followed by a small muted note; the equation is the visible thing. `#noc` renders a line without
+calculating it, so a name the sheet does not define, or a function the engine does not have, raises no error
+and nothing cascades. What cannot be Calcpad maths (a string, an indexed call result, an element assignment, a
+function with an unresolved call, a name Calcpad cannot spell) is shown as code text instead, so a block never
+makes the engine report an error. A program is shown as its statements: assignments as equations, `for`, `while`
+and `if` as indented text. A region with no maths (an embedded object, a plot) is a comment and a one-line note
+with the reason. Input text reaches the output only through the same doors as before: escaped prose, names that
+pass the Calcpad identifier check, and numbers that parse as finite numbers. A test plants a payload in every
+kind of unconverted region and checks that it only ever appears inside a marked gap.
 
 ## What converts
 
@@ -95,7 +103,14 @@ unconverted region and checks that it only ever appears inside a placeholder lin
 | Vector, matrix literal | `[a; b; c]`, `[a; b\|c; d]`, a row vector as `transp([a\|b\|c])`. The file stores matrices column by column; the importer reads them that way. |
 | `v[i]`, `M[i, j]` | `v.(i + 1)`, `M.(i + 1; j + 1)` for an array origin of 0; unchanged for 1; a literal index is folded. Note `array-origin`. |
 | `ORIGIN := n` (integer literal) | Later indexes use `n`. Note `origin-assigned`. |
-| Units | See below. |
+| Units | See below. A product written with a middle dot (`kN·m`, `N·m`) is a unit when every factor is: `(kN*m)`. |
+| Integral `∫ f dx` from a to b | `$Integral{f @ x = a : b}`. A bound written as a bare 0 becomes `0*(other bound)` so both bounds carry the same units. The bound variable is local to the body. A bound that uses the variable's own name, or an operand layout that is not `lambda`, `lowerBound`, `upperBound`, stays a `calculus-operator` gap with the reason. |
+| Range `i := a .. b` (integer literals, a <= b) with `v[i] := expr(i)` | The range line becomes a comment (note `range-loop`) and records the bounds. The element assignment becomes `#val`, `v = vector(n)`, `#for i = a : b`, `v.(i) = expr`, `#loop`, `#end val`: the vector is zero-filled, which is what the source has for the elements below `a`, and `expr` may carry units. `#for` and `vector(n)` were chosen over `range(...)` (a vector, not a loop variable) because an expression of `i` is evaluated one `i` at a time in the loop, as in the source, whereas Calcpad vectors do not combine element by element. Only this shape is read: the array must have no value yet, the value must not read the array, the indexes must be one or two different bare range variables (two fill a matrix with `matrix(m; n)`), and the first bound must not be below the array origin. The bounds are expressions the engine evaluates, so run-time bounds work; a range whose end is below its start counts down as the source does (a counted loop that derives the variable). The array is as large as the largest index any range reaches, and an element no iteration writes stays 0 where the source has no such element. Every other use of a range variable is a `range-variable` gap that says so; a range with a step (`a, a2 .. b`) stays a gap (`#for` has no step). |
+| Program that is local definitions (each name assigned once) and a final value | The final value with the locals substituted, so `f(x) := program` is an ordinary function. Refused (gap) if a substituted value would be captured by an integration variable. |
+| Program with loops, conditions or reassigned locals, as the value of a variable `name := program` | `#val`, the statements, `#end val`, then `name = value` (`#val` shows values only; `#hide` would also hide an engine error raised inside, which is why it is not used). `for` over a range becomes `#for` (literal ascending bounds) or a counted loop that derives the variable from a start and an end taken once, so it counts down when the end is below the start as the source does; `while` becomes `#while`; `if`/`elseif`/`else` become `#if`/`#else if`/`#else`/`#end if`; `break` and `continue` are the same in both. Every local gets a name of its own (`x_p1`), so nothing leaks into the sheet: `x <- 5` inside a program never changes the sheet's `x`, and the right side of a first assignment still reads the outer `x`. Arrays are written element by element when the program created them whole first (`v <- [..]`), or when every index is the variable of an enclosing `for` loop, the write is outside any condition and loop bounds are known ahead (they mention no local of the program): the array is then allocated just before the outermost of those loops, as large as the largest index each loop reaches. A `return` before the end sets a result variable and a done flag; the rest of the block is guarded by the flag and loops break out. |
+| A program that is not one of the above in a function body `f(x) := program` | The program is run symbolically: locals are substituted, an `if` becomes `if(c; a; b)` over the rest of the program, a `return` ends its path, and a `for` over a literal range of at most 64 values is unrolled. What cannot be (a loop with run-time bounds) is a gap that names the missing engine feature: a loop usable inside an expression block (`$Block` takes statements and keeps its locals private, but an assignment made inside `$While` or `$Repeat` is discarded). |
+| `lsolve(A, b)`, `augment` and `stack` with any number of arguments, `submatrix(A, ir, jr, ic, jc)` | The engine functions of the same name; the four `submatrix` indexes are shifted from the array origin. |
+| First derivative `d/dx f` | `$Slope{f @ x = x}`, taken at the current value of `x`. If `x` has no value in the sheet the source could not calculate it either: `calculus-operator` gap with that reason. Higher derivatives are not read. |
 | Trigonometric functions | The output starts with `#rad` (the source default is radians); note `angle-mode`. |
 | Numbers with an exponent (`1.5e-3`) | Plain digits (`0.0015`), by moving the decimal point; `(m*10^(e))` beyond 20 places. Calcpad does not read `e` notation. |
 | A variable applied like a function (`k(2)` where `k` is a variable) | `k*2`, note `call-as-multiplication` |
@@ -221,15 +236,17 @@ summary key on them.
 | Code | Meaning |
 | --- | --- |
 | `range-variable` | `i := 1..10`, and anything that iterates over one. **Not built in this spike**: the engine has no range variable. Names it defines block later regions (`depends-on-gap`, counted as downstream of this code). |
-| `program-block` | Multi-line programs (local definitions, loops, conditions) |
+| `program-block` | Programs outside the supported subset, each with its reason: a function body that is not one expression (a function cannot hold statements), an element assignment to an array the program did not create (the source grows it, the engine cannot), an early `return`, `tryCatch`, a loop over something other than a plain range, an expression statement before the end, a program inside an expression |
 | `solve-block` | Given/Find and relatives |
 | `symbolic-evaluation` | Symbolic evaluation |
-| `calculus-operator` | Derivative and integral operators (the engine has `$Derivative` and `$Integral`; a mapping needs a verified sample of the operand layout) |
+| `calculus-operator` | Derivative and integral operators that do not meet the conditions under What converts (the detail names which); other derivative forms |
 | `summation-operator`, `vectorize-operator`, `matrix-operator` | Sum/product/limit, vectorize, column/row/vector-sum operators |
 | `string-value` | Strings; Calcpad has no string variables |
-| `bare-expression` | An expression with no definition or evaluation operator (documentation, or a solve-block constraint) |
+| `bare-expression` | An expression with no definition or evaluation operator (documentation) |
+| `constraint-equation` | An equation on its own (`f_B = c*L + d`): a solve block's equation or a check. Shown with its real names, not solved |
 | `element-assignment`, `disabled-region` | `v[i] := x`; a region switched off in the source |
 | `plot`, `ole-object`, `component`, `worksheet-reference`, `other-region` | Counted only, never converted; shown as a static picture when the file has one (see Pictures) |
+| `header-footer`, `rich-text-element`, `text-unreadable` | `.mcdx` only: a page header or footer; an element of a text region that would hide content (a table, a picture, a floating block; the element name is the detail); a text region whose prose could not be read from the package |
 | `image` | A picture region with nothing usable (no metafile, no raster picture) |
 | `unknown-element` | An element name the reader does not know (the name is the detail) |
 | `unmapped-unit`, `builtin-missing`, `addin-function`, `reference-function`, `undefined-variable` | See above |
@@ -238,7 +255,8 @@ summary key on them.
 
 Notes (the region converted, with a caveat): `global-definition`, `angle-mode`, `array-origin`,
 `origin-assigned`, `log-base`, `round-digits`, `abs-of-array`, `call-as-multiplication`, `unit-override`.
-Whole-file problems: `xml-error`, `not-a-worksheet`, `input-too-large`.
+Whole-file problems: `xml-error`, `not-a-worksheet`, `input-too-large`, `unsupported-container` (a zip that is damaged,
+encrypted or uses a zip feature the reader refuses).
 
 ### Element names: seen in real files, or assumed
 
@@ -260,7 +278,7 @@ strong check and is the obvious next step for validating numbers.
 
 ```text
 cargo build --release -p calcpad-cli                       # the engine command line
-cargo run --release -p civilkit-calcs-import-xmcd --example batch -- \
+cargo run --release -p civilkit-calcs-import --example batch -- \
     <dir with .xmcd files> <output dir outside the repo> target/release/Cli
 ```
 
@@ -306,31 +324,99 @@ Apache-2.0) and `emf-core` 0.1.1 (MIT, default features off, so no `tracing`), w
 and `unicode-width` (all MIT or Apache-2.0 alternatives). Nothing non-permissive; `THIRD_PARTY_LICENSES.md`
 is regenerated. The importer never executes anything from the file.
 
-## Front doors: adding the `.mcdx` container later
+A `.mcdx` is a zip, which adds its own guards (`src/zip.rs`): the entry count (20 000) and the declared size of
+each entry are capped before anything is allocated; inflate stops at the declared size, so an entry that lies
+about it fails instead of growing; the total of decoded bytes is capped (192 MiB, the same budget as pictures);
+encryption, zip64 and compression methods other than stored and deflate are refused; entries are looked up by
+name inside the archive and never written to disk, and a relationship target is folded (`..` cannot climb out).
+The CRC is not checked. A flow document is a second, nested zip and gets the same treatment. The XML parts obey
+the same DTD, depth and node limits as an `.xmcd`.
 
-`.mcdx` (the newer format) is not covered. The design keeps it a new front door onto the same translator:
-the translator consumes the format-neutral `ir::Sheet` (regions with position, text paragraphs, math
-statements as a small expression tree), and `xmcd.rs` is the only code that knows XML. A reader for
-another container produces a `Sheet` and calls `import_sheet`.
+## The .mcdx front door
 
-What a `.mcdx` reader needs, from the seven sample files that were looked at (structure only):
+`.mcdx` is the newer container of the same worksheet language. `import_bytes` looks at the first bytes: a zip
+signature goes to `mcdx::read` (also callable as `import_mcdx`), anything else is read as the plain XML. Both
+produce the same `ir::Sheet`, so the translator, the report and the placeholder rule are shared. The mcdx
+reader is `src/mcdx.rs`; the zip walker `src/zip.rs`; the math reader of `xmcd.rs` is reused (namespaces are matched
+by family, so `math30` and `math50` are both `math`).
 
-1. A zip reader. The container is an OPC-style zip (`_rels/.rels`, the main worksheet XML part, relationship
-   parts, embedded objects). The repo already has `miniz_oxide` for inflate; a small central-directory
-   walker (stored and deflate entries) is enough, with the same size and entry-count limits as the XML.
-2. A second schema reader. `worksheet.xml` uses the next schema generation (namespaces ending
-   `worksheet50` and `math50`, plus the unchanged units and provenance ones). The math tree looks like
-   the old one but is not guaranteed to be the same; it needs its own verified element list and tests.
-3. Text from a different place. Text regions point at separate XAML flow-document packages instead of
-   carrying inline runs, so paragraphs and styles come from those parts.
-4. Embedded objects stay `ole-object` gaps.
+What the reader does with the package:
 
-Estimated at two to three days with the same corpus-driven approach.
+* The worksheet part is found through the package relationships (any part called `worksheet.xml` as a fallback).
+  Its siblings are read relative to it: `result.xml` (saved results, joined to a math region by `resultRef`),
+  `settings/calculation.xml` (the array origin; 0 when absent) and the header and footer parts.
+* **Text.** A text region names a XAML flow document through a relationship. That part is a nested zip holding
+  `Xaml/Document.xaml`. Older files carry the flow document inline, as a child of the text element; both forms are read. Paragraphs, runs, bold, italic, underline, sub and superscript, line breaks, hyperlinks
+  (the text stays, the address does not), bulleted lists and decimal lists (numbered "1. ", "2. ") convert.
+  Colours, fonts and sizes are dropped, as for `.xmcd`. Math nested in a text region becomes its own region at the
+  text's position, as before.
+* **Math.** The tree is the same family as `.xmcd`. What differs: a value followed by its unit is a `scale`
+  application (read as a product); an identifier's subscript is a styled span inside it (`T` + subscript `max`
+  reads as `T_max`); a call with one argument has no `sequence` wrapper; an empty slot is a `placeholder`
+  (an empty unit override means "no unit"; a placeholder anywhere else is an `unknown-element` gap). Matrices are
+  stored column by column, as in `.xmcd` (read off a 3 x 2 matrix in the sample files, a column of names then a column of numbers).
+* **Programs** (`if`, `for`, `while`, `return`, try/catch, local definitions) are `program-block` gaps, as in
+  `.xmcd`; `summation` is a `summation-operator` gap; derivatives and integrals are `calculus-operator` gaps.
+* **Collapsible areas** only group regions: their regions are read as if on the page, positioned relative to
+  the area.
+* **Pictures** with a PNG convert like `.xmcd` pictures (the PNG is stored in the library). The package carries no
+  cached rendering of a region, so an unconverted region is a placeholder line, never a static picture.
+
+Skipped, with a code and a visible placeholder line each (nothing is dropped silently):
+
+| Part | Code |
+| --- | --- |
+| Embedded object of another application (`oleObject`) | `ole-object` |
+| Spreadsheet and chart components, with the regions inside them | `component` |
+| Reference to another worksheet | `worksheet-reference` (and `reference-function` for calls it may define) |
+| Plot | `plot` |
+| Page header and footer (when they hold regions) | `header-footer` |
+| Table, picture or floating block inside a text region | `rich-text-element` (the element name is the detail) |
+| A text region whose flow document is missing or unreadable | `text-unreadable` |
+| Any other region kind | `other-region` |
+| Calls into an external library | `addin-function` (as in `.xmcd`) |
+
+Two wrong-number traps are closed for both formats: after an element assignment (`v[i] := x`) or a definition
+whose target is a matrix of names, the names involved are marked as defined by an unconverted region, so a later
+use is a `depends-on-gap` instead of the old value (or, for a name such as `L` that is also a unit, the unit).
+
+Spreadsheet components: a component defines names from ranges of a workbook it saves in the package
+(`Name := excel["Sheet1!C6:H16"]`). The workbook is read (`src/xls.rs`: a compound file, then the cell records of
+the sheet) and, when every cell of the range is a number (a cell nothing was written to reads as 0), the name is
+defined from them as a literal matrix, with a visible note and the report counts it under `frozenValues`: the
+value is what the file held, it does not follow a change of the input, and the import dialog says so. A range with
+text in it, a sheet that is not there or a file that is not a workbook leaves the component a gap. A definition
+that only fails on such a name takes the value the file saved for it, when that is complete (a number or a matrix
+of numbers with a unit of mapped names). The component itself stays a `component` gap, as does everything the
+component writes back.
+
+A name the file labels as a unit in one place and defines as a variable in another (a matrix `N` next to forces in
+`N`) is renamed `N_v` everywhere it is the variable; the engine would otherwise read every `N` as the variable.
+Indexing the result of a call goes through a temporary (`ix_n = f(x)` on the line before). A one-column `submatrix` is
+`col(submatrix(...); 1)`: the source indexes a column like a vector, the engine's vector is a different thing.
+
+Equality is written with the engine's sign (`≡`); `==` is a pair of assignments to it. A literal 0 in the source
+takes the units of what it is added to or compared with; the engine reports inconsistent units, so an array
+that starts from 0 and is accumulated into is not converted (the reason says so).
+
+Not read: the unit system setting, strings-use-origin and the other calculation settings; the regions inside a
+component (they belong to the skipped component); a definition whose target is a matrix of names
+(`bad-structure`).
+
+`cargo run --release -p civilkit-calcs-import --example engine_check -- file.mcdx out` imports a file, runs
+the result through the engine and writes the text, the engine's HTML and a list of saved results, so converted
+lines can be compared with the numbers the original stored.
+
+Checked against seven worksheets of a thermodynamic property handbook, which are mostly text and calls into an
+external library, so they exercise the reader and the skip reports far more than the maths. Their counts are kept
+out of the repository with the files. The synthetic packages in `tests/mcdx.rs` cover assignment, arithmetic with
+units, a function, a matrix, a program, a range variable, text, areas, skipped parts, saved results and zip abuse;
+each math case is built once and imported through both front doors, and the two must agree.
 
 ## Not covered
 
 Range variables (top engine gap to close, see the ranked list), programs, solve blocks, symbolic
 evaluation, plots, pictures, embedded objects, data tables and components, strings, derivative and integral
-operators, worksheet references and includes, `.mcdx`, text colours and fonts, tables of results. Types
+operators, worksheet references and includes, text colours and fonts, tables of results. Types
 are not tracked, so `|x|` of a vector or matrix is only noted when the operand was defined from a matrix
 literal.

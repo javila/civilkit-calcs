@@ -321,11 +321,13 @@ What it does not do, honestly:
 
 - It is not a security boundary against a determined attacker. The guard is a Python-level check on `import`; a way around it that
   we have not found would give a script the worker's global object. The worker is same-origin with the app, and the app page sets no
-  Content-Security-Policy, so a worker CSP is not there to back this up.
+  Content-Security-Policy, so a worker CSP is not there to back this up. The Cloudflare deployment adds one to the worker script itself
+  (`cloudflare/_headers`: same-origin `connect-src` and `script-src`), which stops a script that got past the guard from sending data to
+  another host or importing code from one. A worker keeps the policy of the response that served its script, so GitHub Pages, which
+  cannot set headers, and a local `vite preview` have no such backstop.
 - The existing CSP of the rendered worksheet is unchanged: inline SVG needs nothing from it. A Plotly chart adds one `<script src>` for the
   pinned Plotly.js file, which the policy already allows for the library list, and a small inline script that draws the figure. Worker and wasm are served from the app's
-  own origin, no CDN. A `Content-Security-Policy: default-src 'none'` response header on `py/*` and the worker chunk would add a
-  platform-level network block; that is a deployment setting and is not done.
+  own origin, no CDN.
 - A script can use the CPU for its time budget and the memory for its heap.
 
 ## Compatibility with typical calculation scripts

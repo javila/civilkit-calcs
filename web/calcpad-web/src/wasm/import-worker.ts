@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-// calcpad-rs: runs the calcpad-import-xmcd-wasm module (the foreign worksheet importer) off the main
+// calcpad-rs: runs the calcpad-import-wasm module (the foreign worksheet importer) off the main
 // thread. It is a separate wasm, loaded the first time a worksheet is imported; the engine module is
 // not involved. The importer reports bad input in its result and does not throw, so an exception here
 // means the module trapped: the caller then terminates this worker, starts a fresh one and retries
@@ -24,7 +24,7 @@ interface ImportOut {
 
 interface Importer {
     default: (input?: unknown) => Promise<unknown>;
-    import_xmcd: (bytes: Uint8Array, optionsJson: string) => ImportOut;
+    import_worksheet: (bytes: Uint8Array, optionsJson: string) => ImportOut;
 }
 
 let module_: Promise<Importer> | null = null;
@@ -32,8 +32,8 @@ let module_: Promise<Importer> | null = null;
 function load(base: string): Promise<Importer> {
     if (!module_) {
         module_ = (async () => {
-            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_import_xmcd_wasm.js`)) as Importer;
-            await mod.default({ module_or_path: `${base}wasm/calcpad_import_xmcd_wasm_bg.wasm` });
+            const mod = (await import(/* @vite-ignore */ `${base}wasm/calcpad_import_wasm.js`)) as Importer;
+            await mod.default({ module_or_path: `${base}wasm/calcpad_import_wasm_bg.wasm` });
             return mod;
         })();
         module_.catch(() => { module_ = null; });
@@ -45,7 +45,7 @@ self.onmessage = async (e: MessageEvent<{ id: number; base: string; bytes: Uint8
     const { id, base, bytes, options } = e.data;
     try {
         const mod = await load(base);
-        const out = mod.import_xmcd(bytes, options);
+        const out = mod.import_worksheet(bytes, options);
         const assets: ImportAsset[] = [];
         for (let i = 0, n = out.asset_count(); i < n; i++) {
             assets.push({ path: out.asset_path(i), mime: out.asset_mime(i), bytes: out.asset_bytes(i) });

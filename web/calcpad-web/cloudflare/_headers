@@ -11,3 +11,8 @@
 /calcs/py/micropython/*.wasm
   Content-Type: application/wasm
   Cache-Control: no-cache
+# The Python worker's own Content-Security-Policy (a worker takes its policy from the response that served its script,
+# not from the page). Same-origin loads only, so a script that escaped the import guard still cannot send data to another
+# host. 'wasm-unsafe-eval' is for MicroPython's wasm; there is no 'unsafe-eval'. See docs/python-blocks.md, "Consent and sandbox".
+/calcs/assets/python-worker-*
+  Content-Security-Policy: default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'

@@ -1,11 +1,11 @@
 //! The worksheet importer for the browser, as its own module: it is loaded only when the user
 //! imports a worksheet, and the engine module is unchanged.
 //!
-//! `import_xmcd(bytes, options_json)` returns an [`ImportOut`]: the Calcpad text, the report as JSON
+//! `import_worksheet(bytes, options_json)` returns an [`ImportOut`]: the Calcpad text, the report as JSON
 //! and the picture files. Options (all optional): `pictures`, `savedResults`, `assetPrefix`,
 //! `convertMetafiles`. There are no threads in the browser and no unwinding (`panic = "abort"`), so
 //! a worker that sees this module trap restarts it and retries with `convertMetafiles: false`.
-use calcpad_import_xmcd::{import_xmcd_bytes, Code, ImportOptions, ImportReport, Severity};
+use calcpad_import::{import_bytes, Code, ImportOptions, ImportReport, Severity};
 use serde_json::{json, Map, Value};
 use wasm_bindgen::prelude::*;
 
@@ -45,9 +45,9 @@ impl ImportOut {
 
 /// Imports the bytes of an `.xmcd` file.
 #[wasm_bindgen]
-pub fn import_xmcd(bytes: &[u8], options_json: &str) -> ImportOut {
+pub fn import_worksheet(bytes: &[u8], options_json: &str) -> ImportOut {
     let opts = parse_options(options_json);
-    let r = import_xmcd_bytes(bytes, &opts);
+    let r = import_bytes(bytes, &opts);
     ImportOut {
         calcpad: r.calcpad,
         report: report_json(&r.report).to_string(),
@@ -89,7 +89,7 @@ fn sev(s: Severity) -> &'static str {
 /// The report as JSON: counts per region kind, picture statistics, the ranked missing features
 /// (with their reasons) and the first 500 issues.
 pub fn report_json(r: &ImportReport) -> Value {
-    let kinds = |m: &std::collections::BTreeMap<String, calcpad_import_xmcd::KindStats>| {
+    let kinds = |m: &std::collections::BTreeMap<String, calcpad_import::KindStats>| {
         let mut o = Map::new();
         for (k, v) in m {
             o.insert(
@@ -132,6 +132,7 @@ pub fn report_json(r: &ImportReport) -> Value {
         "kinds": kinds(&r.kinds),
         "mathShapes": kinds(&r.math_shapes),
         "pageBreaks": r.page_breaks,
+        "frozenValues": r.frozen_values,
         "pictures": {
             "svgOk": p.svg_ok, "svgFailed": p.svg_failed, "pngUsed": p.png_used,
             "fallbackShown": p.fallback_shown, "svgBytes": p.svg_bytes, "pngBytes": p.png_bytes,
@@ -155,7 +156,7 @@ mod tests {
 
     #[test]
     fn import_reports_json_and_text() {
-        let out = import_xmcd(SHEET, r#"{"assetPrefix":"my sheet","pictures":false}"#);
+        let out = import_worksheet(SHEET, r#"{"assetPrefix":"my sheet","pictures":false}"#);
         assert!(out.calcpad().contains("x = 2"));
         let v: Value = serde_json::from_str(&out.report()).unwrap();
         assert_eq!(v["regionsTotal"], 2);
@@ -167,9 +168,9 @@ mod tests {
 
     #[test]
     fn fatal_and_zip_are_reported_not_thrown() {
-        let v: Value = serde_json::from_str(&import_xmcd(b"PK\x03\x04zzzz", "{}").report()).unwrap();
+        let v: Value = serde_json::from_str(&import_worksheet(b"PK\x03\x04zzzz", "{}").report()).unwrap();
         assert_eq!(v["fatal"], "unsupported-container");
-        let v: Value = serde_json::from_str(&import_xmcd(b"<not-xml", "not json").report()).unwrap();
+        let v: Value = serde_json::from_str(&import_worksheet(b"<not-xml", "not json").report()).unwrap();
         assert_eq!(v["fatal"], "xml-error");
     }
 }

@@ -1,9 +1,9 @@
 //! Tests on hand-written synthetic worksheets. None of the XML here comes from a real file.
 //! Namespaces use a reserved host: the reader matches them by their last path segment.
 
-use calcpad_import_xmcd::ir::{MathRegion, Region, RegionKind, Stmt};
-use calcpad_import_xmcd::translate::reading_order;
-use calcpad_import_xmcd::{import_xmcd, import_xmcd_with, Code, ImportResult, Limits, Severity, GAP_MARKER};
+use calcpad_import::ir::{MathRegion, Region, RegionKind, Stmt};
+use calcpad_import::translate::reading_order;
+use calcpad_import::{import_xmcd, import_xmcd_with, Code, ImportResult, Limits, Severity, GAP_MARKER};
 
 // ---- builders ---------------------------------------------------------------------------------
 
@@ -65,13 +65,39 @@ fn func(name: &str, params: &[&str], body: &str) -> String {
     )
 }
 
-/// The output lines without the banner.
+/// The output lines without the banner. A gap is one line again: its marker comment (as
+/// `'[import-gap Rn codes] reason`) and, after ` | `, the lines of its equation block.
 fn lines(res: &ImportResult) -> Vec<String> {
-    res.calcpad
-        .lines()
-        .filter(|l| !l.starts_with("'<!-- Imported"))
-        .map(|l| l.to_string())
-        .collect()
+    let mut out: Vec<String> = Vec::new();
+    let mut in_noc = false;
+    let mut in_gap = false;
+    for l in res.calcpad.lines().filter(|l| !l.starts_with("'<!-- Imported")) {
+        if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
+            let head = rest.split(" --><small>").next().unwrap_or(rest);
+            out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
+            in_gap = true;
+            continue;
+        }
+        if in_gap {
+            if l == "#noc" {
+                in_noc = true;
+                continue;
+            }
+            if l == "#end noc" {
+                in_noc = false;
+                continue;
+            }
+            if in_noc || l.starts_with("'<code>") || l.starts_with("'&emsp;") {
+                let last = out.last_mut().unwrap();
+                last.push_str(if last.contains(" | ") { " ; " } else { " | " });
+                last.push_str(l.trim_start_matches('\''));
+                continue;
+            }
+            in_gap = false;
+        }
+        out.push(l.to_string());
+    }
+    out
 }
 
 fn one(inner: &str) -> ImportResult {
@@ -157,7 +183,7 @@ fn roots_abs_factorial_and_comparison() {
     let res = one(&eval(&app("lessThan", &[r("1"), r("2")])));
     assert_eq!(lines(&res), vec!["1 < 2"]);
     let res = one(&eval(&app("equal", &[r("1"), r("2")])));
-    assert_eq!(lines(&res), vec!["1 == 2"]);
+    assert_eq!(lines(&res), vec!["1 ≡ 2"]);
 }
 
 #[test]
@@ -337,6 +363,70 @@ fn index(base: &str, idx: &[String]) -> String {
             idx.join("")
         )
     }
+}
+
+#[test]
+fn element_assignment_poisons_the_array_name() {
+    // After `v[1] := 9` (not converted) the earlier value of `v` is stale, and a name such as `L`
+    // that is also a unit must not quietly turn into the unit.
+    let regs = [
+        math(1, 0.0, 0.0, &define("v", &matrix(2, 1, &["1", "2"]))),
+        math(
+            2,
+            0.0,
+            20.0,
+            &format!("<ml:define>{}{}</ml:define>", index("v", &[r("1")]), r("9")),
+        ),
+        math(3, 0.0, 40.0, &eval(&n("v"))),
+        math(
+            4,
+            0.0,
+            60.0,
+            &format!("<ml:define>{}{}</ml:define>", index("L", &[r("1")]), r("9")),
+        ),
+        math(5, 0.0, 80.0, &eval(&n("L"))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    let dep: Vec<_> = res
+        .report
+        .gaps()
+        .filter(|i| i.code == Code::DependsOnGap)
+        .filter_map(|i| i.region_id.clone())
+        .collect();
+    assert_eq!(dep, vec!["3", "5"], "{:?}", res.report.issues);
+    assert!(!lines(&res).iter().any(|l| l == "v" || l == "L"));
+}
+
+#[test]
+fn matrix_of_names_target_poisons_each_name() {
+    // `[P, H] := f(...)` is not converted, and P and H must not keep an earlier value.
+    let regs = [
+        math(1, 0.0, 0.0, &define("P", &r("1200"))),
+        math(
+            2,
+            0.0,
+            20.0,
+            &format!(
+                "<ml:define><ml:matrix rows=\"2\" cols=\"1\">{}{}</ml:matrix>{}</ml:define>",
+                n("P"),
+                n("H"),
+                call("solver", &[r("1")])
+            ),
+        ),
+        math(3, 0.0, 40.0, &eval(&n("P"))),
+    ]
+    .concat();
+    let res = import_xmcd(&sheet(&regs));
+    assert!(res
+        .report
+        .gaps()
+        .any(|i| i.code == Code::BadStructure && i.region_id.as_deref() == Some("2")));
+    assert!(res
+        .report
+        .gaps()
+        .any(|i| i.code == Code::DependsOnGap && i.region_id.as_deref() == Some("3")));
+    assert!(!lines(&res).iter().any(|l| l == "P"));
 }
 
 #[test]
@@ -534,7 +624,7 @@ fn unmapped_units_are_listed() {
 #[test]
 fn every_mapped_unit_exists_in_the_engine() {
     use calcpad_core::base_types::unit::Unit;
-    use calcpad_import_xmcd::tables::{RENAMED_UNITS, SAME_UNITS};
+    use calcpad_import::tables::{RENAMED_UNITS, SAME_UNITS};
     for u in SAME_UNITS.iter().copied().chain(RENAMED_UNITS.iter().map(|(_, c)| *c)) {
         // `%` is parsed as a unit sign by the engine rather than stored in the table.
         if u == "%" {
@@ -546,12 +636,13 @@ fn every_mapped_unit_exists_in_the_engine() {
 
 #[test]
 fn every_mapped_function_runs_in_the_engine() {
-    use calcpad_import_xmcd::tables::{FnRule, FUNCTIONS};
+    use calcpad_import::tables::{FnRule, FUNCTIONS};
     for (src, rule, lo, _) in FUNCTIONS {
         let target = match rule {
             FnRule::Direct(t) | FnRule::Trig(t) => *t,
             FnRule::Log => "log",
             FnRule::Round => "round",
+            FnRule::Submatrix => "submatrix",
         };
         // Matrix functions take matrix arguments; give them one.
         let arg = match target {
@@ -559,6 +650,7 @@ fn every_mapped_function_runs_in_the_engine() {
             "det" | "rank" => "[1; 2|3; 4]",
             "identity" | "matrix" => "2",
             "augment" | "stack" => "[1; 2]",
+            "lsolve" => "[1; 2|3; 4]",
             "if" => "1",
             "acos" | "asin" | "atanh" => "0.5",
             "acosh" => "2",
@@ -568,6 +660,8 @@ fn every_mapped_function_runs_in_the_engine() {
             "if" => vec!["1 > 0", "2", "3"],
             "matrix" => vec!["2", "2"],
             "augment" | "stack" => vec![arg, arg],
+            "lsolve" => vec!["[1; 2|3; 4]", "[1; 2]"],
+            "submatrix" => vec!["[1; 2|3; 4]", "1", "2", "1", "2"],
             "mod" | "gcd" | "lcm" | "atan2" => vec!["4", "6"],
             _ => vec![arg; (*lo).max(1)],
         };
@@ -579,8 +673,9 @@ fn every_mapped_function_runs_in_the_engine() {
 
 // ---- gaps: ranges, programs, solve blocks, symbolic, plots, images ----------------------------------------
 
+/// A range with a step (`1, 2 .. last`): not read, so it is the standing example of a gap.
 fn range(first: &str, last: &str) -> String {
-    format!("<ml:range>{first}{last}</ml:range>")
+    format!("<ml:range><ml:sequence>{first}<ml:real>2</ml:real></ml:sequence>{last}</ml:range>")
 }
 
 #[test]
@@ -784,9 +879,11 @@ fn mk(id: &str, left: f64, top: f64, baseline: Option<f64>) -> Region {
         height: 0.0,
         rendering: None,
         kind: RegionKind::Math(MathRegion {
-            stmt: Stmt::Bare(calcpad_import_xmcd::ir::Expr::Num("1".into())),
+            stmt: Stmt::Bare(calcpad_import::ir::Expr::Num("1".into())),
             disabled: false,
             saved_result: None,
+            saved_expr: None,
+            frozen: false,
         }),
     }
 }
@@ -1096,7 +1193,7 @@ fn unconverted_regions_never_leak_text_without_the_marker() {
     .concat();
     let res = import_xmcd(&sheet(&regs));
     assert_eq!(res.report.regions_needing_attention(), 8);
-    for l in res.calcpad.lines() {
+    for l in lines(&res) {
         if l.contains(payload) {
             // Allowed only inside a marked placeholder, as a bounded, escaped attempt.
             assert!(
@@ -1108,9 +1205,9 @@ fn unconverted_regions_never_leak_text_without_the_marker() {
         assert!(!l.contains("#include"), "{l}");
     }
     // Exactly one placeholder per unconverted region, each carrying its (sanitised) region id.
-    let ph: Vec<&str> = res
-        .calcpad
-        .lines()
+    let all = lines(&res);
+    let ph: Vec<&String> = all
+        .iter()
         .filter(|l| l.starts_with(&format!("'{GAP_MARKER}")))
         .collect();
     assert_eq!(ph.len(), 8);
@@ -1132,13 +1229,13 @@ fn every_gap_in_the_report_has_a_placeholder_line() {
     for id in &gap_regions {
         let tag = format!("'{GAP_MARKER} R{id} ");
         assert!(
-            res.calcpad.lines().any(|l| l.starts_with(&tag)),
+            lines(&res).iter().any(|l| l.starts_with(&tag)),
             "no placeholder for region {id}"
         );
     }
     assert_eq!(
-        res.calcpad
-            .lines()
+        lines(&res)
+            .iter()
             .filter(|l| l.starts_with(&format!("'{GAP_MARKER}")))
             .count(),
         gap_regions.len()

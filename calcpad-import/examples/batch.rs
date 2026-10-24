@@ -2,7 +2,7 @@
 //! the engine command line, and prints a summary table and the ranked list of missing features.
 //!
 //! ```text
-//! cargo run --release -p civilkit-calcs-import-xmcd --example batch -- \
+//! cargo run --release -p civilkit-calcs-import --example batch -- \
 //!     <input dir> <output dir> <path to the Cli binary>
 //! ```
 //!
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
-use calcpad_import_xmcd::{import_xmcd_opts, ImportOptions, ImportReport};
+use calcpad_import::{import_xmcd_opts, ImportOptions, ImportReport};
 
 fn walk(dir: &Path, top: bool, out: &mut Vec<PathBuf>) {
     let Ok(rd) = std::fs::read_dir(dir) else { return };

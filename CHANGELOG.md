@@ -11,8 +11,15 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 
 ## [Unreleased]
 ### Added
+- Import worksheet: a region that does not convert is now shown as the original equation, typeset, with its real names (in a `#noc` block, so it is never evaluated and raises no error), with the reason in a small note, instead of a line of prose with stand-ins. An equation on its own is reported as a constraint. The numbers an input (spreadsheet) component read from its saved workbook define the names it defines, with a note and a count in the dialog ("values frozen from input components"); regions that depend on them now convert. Arrays built element by element are allocated first, functions with conditions and early returns become one expression, and a variable named like a unit is renamed so the unit keeps its name.
+- Import worksheet: units written with a middle dot (`kN·m`) are read as units; integrals become `$Integral` and first derivatives `$Slope`, with units and bounds checked against the engine; a range variable with literal bounds and the element assignments that fill an array from it become a `#for` loop over a zero vector.
+- Import worksheet: programs made of local definitions, `for`, `while`, `if`/`else`, `break`/`continue` and a final value become `#for`/`#while`/`#if` statements with private local names, or a single expression when they are straight-line; `lsolve`, `submatrix` and `augment`/`stack` with several arguments map to the engine's functions. A program that cannot be converted faithfully stays a gap that says why.
+- Import worksheet reads `.mcdx` files (the zipped container of the same worksheet language): File > Open, the Import button and drag and drop accept them. Text comes from the package's flow documents, maths goes through the same translator as `.xmcd`, and embedded objects, spreadsheet and chart components, worksheet references, page headers and footers and tables or pictures inside text are listed as skipped with a reason and a placeholder line. The importer module grows by about 100 KB (1.23 MB, 0.51 MB gzipped). Details in docs/worksheet-import.md.
 - Installable and offline: a web app manifest, icons and a service worker that caches the whole build (about 19 MB, 417 files). "Add to home screen" or "Install" works on phones and desktops, and the app opens and calculates without a network. Plotly charts need the CDN script to have been loaded once while online. `web/e2e/pwa-check.mjs` checks it.
 - `#python` blocks and sheet python fences are coloured with the Python grammar.
+
+### Changed
+- The worksheet importer crate and its WebAssembly module are renamed to be format-neutral, since they read both `.xmcd` and `.mcdx`: `calcpad-import` (package `civilkit-calcs-import`, not published) and `calcpad-import-wasm` (`calcpad_import_wasm.js` / `_bg.wasm`). Earlier entries below use the old names.
 
 ## [26.10.6] - 2026-10-24
 

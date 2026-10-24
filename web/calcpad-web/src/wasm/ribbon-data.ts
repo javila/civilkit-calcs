@@ -531,7 +531,7 @@ export const RIBBON: RibbonTab[] = [
                 action('d-export', 'Export tab', 'export', 'HTML, PDF, Word and #write: the Export tab', 'exportTab'),
             ] },
             { name: 'Import', buttons: [
-                action('d-import', 'Import worksheet', 'open', 'Bring in a worksheet from another calculation tool (.xmcd); it opens as a new worksheet', 'importWorksheet'),
+                action('d-import', 'Import worksheet', 'open', 'Bring in a worksheet from another calculation tool (.xmcd or .mcdx); it opens as a new worksheet', 'importWorksheet'),
             ] },
             { name: 'Page', buttons: [
                 action('d-saveas', 'Save As', 'saveas', 'Save As', 'saveas'),

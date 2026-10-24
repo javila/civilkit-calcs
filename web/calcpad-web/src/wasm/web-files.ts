@@ -46,7 +46,7 @@ export interface WebFilesOptions {
     exportXlsx?: () => void;
     /** Saves the report as a Word document. */
     exportDocx?: () => void;
-    /** Imports foreign worksheets (.xmcd); see xmcd-import.ts. */
+    /** Imports foreign worksheets (.xmcd, .mcdx); see worksheet-import.ts. */
     importer?: { pick(): Promise<void>; importFile(file: File): Promise<void> };
 }
 
@@ -161,7 +161,7 @@ export class WebFiles {
         d.style.cssText = 'position:fixed;inset:8px;z-index:3000;pointer-events:none;display:flex;align-items:center;justify-content:center;' +
             'border:3px dashed var(--vscode-focusBorder,#0060c0);border-radius:10px;background:rgba(0,96,192,.10);' +
             'font:600 18px system-ui,sans-serif;color:var(--vscode-foreground,#222)';
-        d.textContent = this.o.importer ? 'Drop to open a worksheet (.cpd) or import one (.xmcd)' : 'Drop to open a worksheet';
+        d.textContent = this.o.importer ? 'Drop to open a worksheet (.cpd) or import one (.xmcd, .mcdx)' : 'Drop to open a worksheet';
         document.body.appendChild(d);
         this.dropHint = d;
     }

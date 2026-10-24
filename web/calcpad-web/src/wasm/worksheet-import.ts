@@ -1,4 +1,4 @@
-// calcpad-rs: "Import worksheet...". Reads a foreign `.xmcd` worksheet in the page, converts it with the
+// calcpad-rs: "Import worksheet...". Reads a foreign `.xmcd` or `.mcdx` worksheet in the page, converts it with the
 // importer module (import-worker.ts, its own wasm, loaded on first use), stores the picture files in the
 // library under /imported/<name>/, opens the converted sheet as a new unsaved tab, and tells the user
 // what converted and what did not. Everything runs locally; nothing is uploaded.
@@ -12,6 +12,8 @@ export interface ImportReportJson {
     regionsConverted: number;
     regionsShowing: number;
     regionsNeedingAttention: number;
+    /** Definitions whose value was taken from the saved data of an input component (frozen). */
+    frozenValues?: number;
     kinds: Record<string, { total: number; converted: number; withNotes: number; attention: number; pictured: number }>;
     pictures: { svgOk: number; svgFailed: number; pngUsed: number; fallbackShown: number; savedResultAvailable: number; savedResultEmitted: number };
     ranked: { code: string; reason: string; direct: number; downstream: number; blocked: number; topDetails: [string, number][] }[];
@@ -33,7 +35,8 @@ const WORDING: Record<string, string> = {
     'builtin-missing': 'built-in functions the engine does not have yet',
     'ole-object': 'embedded objects',
     'string-value': 'text (string) values',
-    'bare-expression': 'equations that are shown but not calculated',
+    'bare-expression': 'expressions that are shown but not calculated',
+    'constraint-equation': 'equations written as constraints (shown, not solved)',
     'undefined-variable': 'names used before they are defined',
     'range-variable': 'range variables (i = 1..10) and what iterates over them',
     'program-block': 'multi-line programs',
@@ -52,6 +55,9 @@ const WORDING: Record<string, string> = {
     'depends-on-gap': 'regions that use something that did not convert',
     'element-assignment': 'assignments to matrix elements',
     'disabled-region': 'regions that are switched off in the original',
+    'header-footer': 'page headers and footers',
+    'rich-text-element': 'tables, pictures and floating blocks inside text',
+    'text-unreadable': 'text that could not be read from the file',
 };
 
 export function wording(code: string, reason: string): string {
@@ -67,7 +73,7 @@ export function slug(fileName: string): string {
 interface Pending { resolve: (r: ImportResult) => void; reject: (e: Error & { trap?: boolean }) => void }
 
 /** The importer worker, started on first use and replaced if the module traps. */
-export class XmcdImporter {
+export class WorksheetImporter {
     private worker: Worker | null = null;
     private seq = 0;
     private pending = new Map<number, Pending>();
@@ -158,13 +164,13 @@ export function summarise(rep: ImportReportJson): { live: number; total: number;
     };
 }
 
-export class XmcdImport {
-    private readonly importer: XmcdImporter;
+export class WorksheetImport {
+    private readonly importer: WorksheetImporter;
     private session: Session | null = null;
     private busy = false;
 
     constructor(private readonly host: ImportHost) {
-        this.importer = new XmcdImporter(new URL(import.meta.env.BASE_URL || './', document.baseURI).href);
+        this.importer = new WorksheetImporter(new URL(import.meta.env.BASE_URL || './', document.baseURI).href);
     }
 
     /** True for the file names this importer handles (or refuses with a message). */
@@ -190,12 +196,8 @@ export class XmcdImport {
 
     async importFile(file: File): Promise<void> {
         const name = file.name;
-        if (/\.mcdx$/i.test(name)) {
-            this.message('Import worksheet', 'Prime (.mcdx) files are not supported yet.');
-            return;
-        }
-        if (!/\.xmcd$/i.test(name)) {
-            this.message('Import worksheet', `${name} is not a worksheet this importer reads. Choose a .xmcd file.`);
+        if (!/\.(xmcd|mcdx)$/i.test(name)) {
+            this.message('Import worksheet', `${name} is not a worksheet this importer reads. Choose a .xmcd or .mcdx file.`);
             return;
         }
         if (this.busy) {
@@ -232,7 +234,7 @@ export class XmcdImport {
         s.paths = next;
         const tabs = this.host.tabs();
         if (first) {
-            s.tabId = tabs.newUntitled(result.calcpad, `${s.name.replace(/\.xmcd$/i, '')}.cpd`);
+            s.tabId = tabs.newUntitled(result.calcpad, `${s.name.replace(/\.(xmcd|mcdx)$/i, '')}.cpd`);
         } else {
             tabs.activate(s.tabId);
             tabs.activeModel?.setValue?.(result.calcpad);
@@ -295,6 +297,14 @@ export class XmcdImport {
         line.style.margin = '6px 0';
         line.textContent = `Imported ${s.name}: ${sum.live} of ${sum.total} regions converted live, ${sum.pictures} shown as static pictures, ${sum.attention} need attention.`;
         box.append(line);
+
+        if ((rep.frozenValues ?? 0) > 0) {
+            const fz = document.createElement('p');
+            fz.setAttribute('data-cprs-import-frozen', '');
+            fz.style.margin = '6px 0';
+            fz.textContent = `${rep.frozenValues} ${rep.frozenValues === 1 ? 'value' : 'values'} frozen from input components: taken from what the file saved, so they do not follow a change of the input.`;
+            box.append(fz);
+        }
 
         const gaps = rep.ranked.filter(r => r.code !== 'depends-on-gap' && r.blocked > 0).slice(0, 5);
         if (gaps.length) {
