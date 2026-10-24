@@ -1386,3 +1386,177 @@ fn last_is_the_index_of_the_final_element() {
     let res = convert(&[v(), eval(&call("last", &[n("v")]))]);
     assert_close(last(&res.calcpad), 3.0);
 }
+
+// ---- 4. loop blocks print nothing of their own, and an error inside one is still reported --------------
+
+/// Runs `code` as the app does for the editor (`debug` on) and returns the printed page and the
+/// errors the engine recorded, hidden or not.
+fn run_with_errors(code: &str) -> (String, Vec<String>) {
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.debug = true;
+    parser.parse(code, true);
+    let errors = parser.errors_list.iter().map(|e| e.message.clone()).collect();
+    (parser.html_result.clone(), errors)
+}
+
+fn fill_loop_sheet() -> ImportResult {
+    // i = 1..3, h[i] = i * 2 m, then h shown.
+    convert(&[
+        define("i", &range("1", "3")),
+        set_element("h", &n("i"), &app("mult", &[n("i"), app("mult", &[r("2"), n("m")])])),
+        eval(&n("h")),
+    ])
+}
+
+#[test]
+fn a_fill_loop_is_hidden_so_its_raw_values_are_not_printed() {
+    let res = fill_loop_sheet();
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let code = &res.calcpad;
+    assert!(code.contains("#hide\n"), "{code}");
+    assert!(code.contains("#end hide"), "{code}");
+    assert!(!code.contains("#val"), "{code}");
+    let (html, errors) = run_with_errors(code);
+    assert!(errors.is_empty(), "{errors:?}\n{code}");
+    assert!(!html.contains("class=\"err\""), "{html}");
+    // No bare text from the loop: the raw vector, zero-filled before the loop ran, would show as [0, 0, 0].
+    assert!(!html.contains("[0, 0, 0]"), "{html}");
+    // The result of the sheet is still shown, with the right numbers.
+    let lines = engine_lines(code);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains('2') && l.contains('4') && l.contains('6')),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn an_error_inside_a_hidden_fill_loop_is_still_reported() {
+    let res = fill_loop_sheet();
+    // The importer never writes a name the sheet lacks, so break the loop body by hand.
+    let broken = res.calcpad.replace("h.(i) = ", "h.(i) = missing_name + ");
+    assert_ne!(broken, res.calcpad);
+    let (_, errors) = run_with_errors(&broken);
+    assert!(
+        errors.iter().any(|e| e.contains("missing_name")),
+        "the engine did not report the error inside the loop: {errors:?}\n{broken}"
+    );
+}
+
+#[test]
+fn a_program_block_is_hidden_and_its_errors_are_still_reported() {
+    let prog = format!(
+        "<ml:define>{}<ml:program><ml:localDefine>{}{}</ml:localDefine><ml:for>{}<ml:range>{}{}</ml:range><ml:program><ml:localDefine>{}{}</ml:localDefine></ml:program></ml:for>{}</ml:program></ml:define>",
+        n("y"),
+        n("s"),
+        r("0"),
+        n("k"),
+        r("1"),
+        r("4"),
+        n("s"),
+        app("plus", &[n("s"), n("k")]),
+        n("s")
+    );
+    let res = convert(&[prog, eval(&n("y"))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let code = &res.calcpad;
+    assert!(code.contains("#hide\n") && code.contains("#end hide"), "{code}");
+    assert!(!code.contains("#val"), "{code}");
+    let (html, errors) = run_with_errors(code);
+    assert!(
+        errors.is_empty() && !html.contains("class=\"err\""),
+        "{errors:?}\n{code}"
+    );
+    assert_close(last_number(engine_lines(code).last().unwrap()), 10.0);
+    let broken = code.replace("s_p1 = s_p1 + k_p1", "s_p1 = s_p1 + missing_name");
+    assert_ne!(&broken, code, "{code}");
+    let (_, errors) = run_with_errors(&broken);
+    assert!(
+        errors.iter().any(|e| e.contains("missing_name")),
+        "{errors:?}\n{broken}"
+    );
+}
+
+// ---- 5. an array started from 0 and then added to takes the units of what is added -------------------------------
+
+fn zero_filled_then_accumulated(addend: &str, extra: &[String]) -> ImportResult {
+    // A[i, j] <- 0 over i, j = 1..2, then for e = 1..3: A[1, 1] <- A[1, 1] + addend.
+    let mut stmts = vec![for_in(
+        "i",
+        &r("1"),
+        &r("2"),
+        &[for_in(
+            "j",
+            &r("1"),
+            &r("2"),
+            &[local_el2("A", &n("i"), &n("j"), &r("0"))],
+        )],
+    )];
+    stmts.extend(extra.iter().cloned());
+    stmts.push(for_in(
+        "e",
+        &r("1"),
+        &r("3"),
+        &[local_el2(
+            "A",
+            &r("1"),
+            &r("1"),
+            &plus(&index_n("A", &[r("1"), r("1")]), addend),
+        )],
+    ));
+    stmts.push(n("A"));
+    convert(&[
+        define("L", &app("mult", &[r("2"), n("m")])),
+        func(
+            "g",
+            &["a"],
+            &times(&n("a"), &times(&mat(2, 2, &["1", "2", "3", "4"]), &n("L"))),
+        ),
+        define("Q", &program(&stmts)),
+        eval(&index2("Q", &r("1"), &r("1"))),
+        eval(&index2("Q", &r("2"), &r("2"))),
+    ])
+}
+
+#[test]
+fn a_zero_filled_array_that_is_added_to_takes_the_units_of_the_first_value_added() {
+    // Q[1,1] = L + L + L = 6 m; the entries nothing was added to stay 0 (a zero in metres).
+    let res = zero_filled_then_accumulated(&n("L"), &[]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("0*getunits(L)"), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 6.0);
+    assert_close(nums[nums.len() - 1], 0.0);
+}
+
+#[test]
+fn the_units_are_read_from_the_first_term_with_the_loop_variable_at_its_first_value() {
+    // The term is an element of a call result that depends on the loop variable e: g(e)[1, 1] = e L,
+    // so Q[1,1] = (1 + 2 + 3) * 2 m = 12 m.
+    let term = format!(
+        "<ml:apply><ml:indexer/>{}<ml:sequence>{}{}</ml:sequence></ml:apply>",
+        call("g", &[n("e")]),
+        r("1"),
+        r("1")
+    );
+    let res = zero_filled_then_accumulated(&term, &[]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("0*getunits("), "{}", res.calcpad);
+    assert!(
+        !res.calcpad.contains("0*getunits(ix_") || res.calcpad.contains("= g(1)"),
+        "{}",
+        res.calcpad
+    );
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 12.0);
+}
+
+#[test]
+fn units_that_depend_on_something_the_program_sets_are_a_reported_gap() {
+    // t is set by the program, so the units of the first term are not known before the loops run.
+    let res = zero_filled_then_accumulated(&n("t"), &[local("t", &n("L"))]);
+    let g = res.report.gaps().find(|i| i.code == Code::ProgramBlock).expect("gap");
+    let d = g.detail.clone().unwrap_or_default();
+    assert!(d.contains("not known before the loops run") && d.contains('t'), "{d}");
+}

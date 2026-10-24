@@ -472,6 +472,128 @@ fn has_break(st: &PStmt) -> bool {
     }
 }
 
+/// Names a program assigns or loops over: the only names whose value is not known before it runs.
+fn program_locals(stmts: &[PStmt], out: &mut HashSet<String>) {
+    for st in stmts {
+        match st {
+            PStmt::Local(PTarget::Var(n), _) => {
+                out.insert(tables::normalise_name(&n.flat()));
+            }
+            PStmt::Local(PTarget::Element { base, .. }, _) => {
+                out.insert(tables::normalise_name(&base.flat()));
+            }
+            PStmt::For { var, body, .. } => {
+                out.insert(tables::normalise_name(&var.flat()));
+                program_locals(body, out);
+            }
+            PStmt::While { body, .. } => program_locals(body, out),
+            PStmt::If { branches, otherwise } => {
+                for (_, b) in branches {
+                    program_locals(b, out);
+                }
+                if let Some(o) = otherwise {
+                    program_locals(o, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Array names that the program sets to a literal 0 element by element.
+fn zero_assigned(stmts: &[PStmt], out: &mut Vec<String>) {
+    for st in stmts {
+        match st {
+            PStmt::Local(PTarget::Element { base, .. }, Expr::Num(s)) if s.trim().parse::<f64>() == Ok(0.0) => {
+                let b = tables::normalise_name(&base.flat());
+                if !out.contains(&b) {
+                    out.push(b);
+                }
+            }
+            PStmt::For { body, .. } | PStmt::While { body, .. } => zero_assigned(body, out),
+            PStmt::If { branches, otherwise } => {
+                for (_, b) in branches {
+                    zero_assigned(b, out);
+                }
+                if let Some(o) = otherwise {
+                    zero_assigned(o, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The first value added to (or taken from) an element of `base` in program order, `a[i] <- a[i] + x`,
+/// with the loop variables above the statement replaced by the first value of their range. `None`
+/// when the array is never accumulated into. The value's units are then those of the first term.
+fn first_accumulated(
+    stmts: &[PStmt],
+    base: &str,
+    env: &mut HashMap<String, Expr>,
+    locals: &HashSet<String>,
+) -> Option<Result<Expr, String>> {
+    let reads_base = |e: &Expr| matches!(e, Expr::Index(b, _) if matches!(&**b, Expr::Name(n) if tables::normalise_name(&n.flat()) == base));
+    for st in stmts {
+        let found = match st {
+            PStmt::Local(PTarget::Element { base: b, .. }, e)
+                if tables::normalise_name(&b.flat()) == base && mentions(e, base) =>
+            {
+                let term = match e {
+                    Expr::Bin(BinOp::Add | BinOp::Sub, a, c) if reads_base(a) && !mentions(c, base) => Some(&**c),
+                    Expr::Bin(BinOp::Add, a, c) if reads_base(c) && !mentions(a, base) => Some(&**a),
+                    _ => None,
+                };
+                Some(match term {
+                    None => Err(format!("{base} is added to in a form that is not a plain sum")),
+                    Some(t) => match subst(t, env) {
+                        None => Err("the first value added cannot be rewritten".to_string()),
+                        Some(t) => {
+                            let blockers: Vec<&String> = {
+                                let mut v: Vec<&String> = locals.iter().filter(|l| mentions(&t, l)).collect();
+                                v.sort();
+                                v
+                            };
+                            if blockers.is_empty() {
+                                Ok(t)
+                            } else {
+                                Err(format!(
+                                    "the first value added to {base} reads {}, which the program sets, so its units are not known before the loops run",
+                                    blockers.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                                ))
+                            }
+                        }
+                    },
+                })
+            }
+            PStmt::For { var, range, body } => {
+                let v = tables::normalise_name(&var.flat());
+                let prev = env.get(&v).cloned();
+                if let Expr::Range { first, .. } = range {
+                    env.insert(v.clone(), (**first).clone());
+                }
+                let r = first_accumulated(body, base, env, locals);
+                match prev {
+                    Some(p) => env.insert(v, p),
+                    None => env.remove(&v),
+                };
+                r
+            }
+            PStmt::While { body, .. } => first_accumulated(body, base, env, locals),
+            PStmt::If { branches, otherwise } => branches
+                .iter()
+                .map(|(_, b)| b.as_slice())
+                .chain(otherwise.iter().map(|o| o.as_slice()))
+                .find_map(|b| first_accumulated(b, base, env, locals)),
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
 struct Tr {
     origin: i64,
     defined: HashSet<String>,
@@ -491,6 +613,10 @@ struct Tr {
     local_arrays: HashSet<String>,
     /// Output names of local arrays whose elements were set to a unitless 0 literal.
     zero_started: HashSet<String>,
+    /// For a local array started from a literal 0 and later added to (source name): the first value
+    /// added, with the loop variables above it replaced by their first values, or why that value's
+    /// units cannot be known before the loops run.
+    zero_units: HashMap<String, Result<Expr, String>>,
     /// Arrays made by assigning one element at a literal index (name, engine index of that element).
     elem_built: HashMap<String, usize>,
     prog_n: usize,
@@ -1081,7 +1207,7 @@ impl Tr {
         } else {
             format!("{f} = matrix({}; {})", sizes[0], sizes[1])
         };
-        let mut out = vec!["#val".to_string()];
+        let mut out = vec!["#hide".to_string()];
         out.extend(head);
         out.push(alloc);
         for (d, l) in loops.iter().enumerate() {
@@ -1100,7 +1226,7 @@ impl Tr {
         for d in (0..loops.len()).rev() {
             out.push(format!("{}#loop", "    ".repeat(d)));
         }
-        out.push("#end val".to_string());
+        out.push("#end hide".to_string());
         Ok(out.join("\n"))
     }
 
@@ -1129,7 +1255,7 @@ impl Tr {
             format!("tbl_{n}"),
         );
         let mut out = vec![
-            "#val".to_string(),
+            "#hide".to_string(),
             format!("{lo} = {a}"),
             format!("{hi} = {z}"),
             format!("{tbl} = vector(abs({hi} - {lo}) + 1)"),
@@ -1139,7 +1265,7 @@ impl Tr {
         out.extend(pre.iter().map(|p| format!("    {p}")));
         out.push(format!("    {tbl}.({k} + 1) = {rhs}"));
         out.push("#loop".to_string());
-        out.push("#end val".to_string());
+        out.push("#end hide".to_string());
         out.push(format!("{tbl}{tail}"));
         out.join("\n")
     }
@@ -1299,6 +1425,18 @@ impl Tr {
         let saved_locals = std::mem::take(&mut self.locals);
         let saved_arrays = std::mem::take(&mut self.local_arrays);
         self.zero_started.clear();
+        let saved_zero_units = std::mem::take(&mut self.zero_units);
+        {
+            let mut locals = HashSet::new();
+            program_locals(body, &mut locals);
+            let mut zeroed = Vec::new();
+            zero_assigned(body, &mut zeroed);
+            for b in zeroed {
+                if let Some(r) = first_accumulated(body, &b, &mut HashMap::new(), &locals) {
+                    self.zero_units.insert(b, r);
+                }
+            }
+        }
         let mut lines = Vec::new();
         // A `return` before the end is a result variable and a done flag, so nothing after it runs.
         let early = body.iter().any(may_return);
@@ -1328,13 +1466,14 @@ impl Tr {
                 if lines.is_empty() {
                     Ok((def, is_array))
                 } else {
-                    Ok((format!("#val\n{}\n#end val\n{}", lines.join("\n"), def), is_array))
+                    Ok((format!("#hide\n{}\n#end hide\n{}", lines.join("\n"), def), is_array))
                 }
             }
             Err(e) => Err(e),
         };
         self.locals = saved_locals;
         self.local_arrays = saved_arrays;
+        self.zero_units = saved_zero_units;
         self.ret = saved_ret;
         out
     }
@@ -1424,17 +1563,36 @@ impl Tr {
                         return Err("an element index that is not one or two numbers".into());
                     }
                     // The source lets a literal 0 take the units of what is added to it; the engine does
-                    // not, so an array started from 0 and then accumulated into is not converted.
+                    // not. A 0 that is later added to gets the units of the first value added (`0*getunits(x)`
+                    // is a zero in those units), so the sums are consistent; the units are read from the first
+                    // term with the loop variables at their first values, which is only possible when that term
+                    // reads nothing the program sets.
                     let is_zero = matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+                    let mut zero_rhs = None;
                     if is_zero {
                         self.zero_started.insert(mapped.clone());
-                    } else if self.zero_started.contains(&mapped) && mentions(e, &flat) {
+                        match self.zero_units.get(&flat).cloned() {
+                            Some(Ok(term)) => zero_rhs = Some(format!("0*getunits({})", self.expr(&term).s)),
+                            Some(Err(why)) => {
+                                return Err(format!(
+                                    "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, and here {why}"
+                                ))
+                            }
+                            None => {}
+                        }
+                    } else if self.zero_started.contains(&mapped)
+                        && mentions(e, &flat)
+                        && !self.zero_units.contains_key(&flat)
+                    {
                         return Err(format!(
                             "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, the engine reports inconsistent units"
                         ));
                     }
                     let parts: Vec<String> = index.iter().map(|i| self.index_expr(i)).collect();
-                    let rhs = self.expr(e).s;
+                    let rhs = match zero_rhs {
+                        Some(z) => z,
+                        None => self.expr(e).s,
+                    };
                     out.push(format!("{pad}{mapped}.({}) = {rhs}", parts.join("; ")));
                 }
                 PStmt::For { var, range, body } => {
@@ -3045,6 +3203,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
         zero_started: HashSet::new(),
+        zero_units: HashMap::new(),
         elem_built: HashMap::new(),
         prog_n: 0,
         hoisted: Vec::new(),

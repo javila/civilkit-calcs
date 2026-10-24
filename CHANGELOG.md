@@ -21,6 +21,8 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 - Import worksheet: sums and products (`$Sum`, `$Product`) with bounds or over a range variable; an expression of a range variable is shown as a table (a loop collects the steps in a vector); a transposed row literal is a column vector the engine can count and index; `vectorSum`, `last`, `vectorize` over scalar arithmetic and `[A, B] := [1, 2]` convert; an element assigned to a vector that has no value (or past its end) creates or grows it; constant global definitions hold from the top of the sheet; a variable named like a unit under another spelling is renamed; primes in names work. Two worksheets of a structural handbook went from 70 % and 65 % of regions converted to 95 % with no engine errors; the computed values match the saved reference printouts.
 - Import worksheet: regions that share a row are laid out side by side (a table for rows of symbol and description text, a wrapping row for everything else) while keeping the order they are evaluated in.
 
+- Import worksheet: loop blocks no longer print raw engine values as plain text in the preview (they are hidden; errors inside are still recorded by the engine). An array started from 0 and then accumulated into takes the units of the first value added, which converts the stiffness-assembly style of program.
+
 ### Changed
 - The worksheet importer crate and its WebAssembly module are renamed to be format-neutral, since they read both `.xmcd` and `.mcdx`: `calcpad-import` (package `civilkit-calcs-import`, not published) and `calcpad-import-wasm` (`calcpad_import_wasm.js` / `_bg.wasm`). Earlier entries below use the old names.
 
