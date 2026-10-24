@@ -17,6 +17,24 @@ pub struct Sheet {
     /// Names that components the reader does not run (spreadsheet and similar input components)
     /// define in the file.
     pub component_names: Vec<Name>,
+    /// Named paragraph styles the file defines (empty when it has none or the reader does not read them).
+    pub text_styles: std::collections::HashMap<String, TextStyle>,
+    /// The number of decimal places the file shows results with unless a region says otherwise.
+    pub default_precision: Option<i32>,
+}
+
+/// What a named paragraph style says about its text. `None` and `false` mean "not stated".
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TextStyle {
+    pub font: Option<String>,
+    /// Size in points.
+    pub size: Option<f64>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    /// `#rrggbb`.
+    pub color: Option<String>,
+    pub align: Option<String>,
 }
 
 /// A picture region: a vector metafile (WMF or EMF bytes) and/or a PNG.
@@ -63,11 +81,16 @@ pub enum RegionKind {
     Other(String),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Paragraph {
     /// The paragraph style name as the file spells it ("Heading 1", "Normal", ...).
     pub style: String,
     pub pieces: Vec<Piece>,
+    /// `left`, `right`, `center` or `justify` when the paragraph says so.
+    pub align: Option<String>,
+    /// Left margin and first-line indent in points (0 when none).
+    pub margin_left: f64,
+    pub text_indent: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -84,6 +107,10 @@ pub struct Run {
     pub underline: bool,
     pub sub: bool,
     pub sup: bool,
+    /// Font family name, size in points and colour (`#rrggbb`), when the run states them.
+    pub font: Option<String>,
+    pub size: Option<f64>,
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,6 +126,8 @@ pub struct MathRegion {
     /// The value is data the reader took from an input component's saved workbook: a definition
     /// that is live from here on, but frozen at what the file held.
     pub frozen: bool,
+    /// The decimal places the file shows this region's result with (its own result format).
+    pub precision: Option<i32>,
 }
 
 /// A stored scalar result: the number (or string) as written, and its unit in the source's spelling.
@@ -142,6 +171,8 @@ pub struct Name {
     /// The file labels the identifier as a unit (so `N` is the newton even when a variable `N`
     /// exists).
     pub unit: bool,
+    /// The file labels the identifier as a variable: it is never read as a unit label.
+    pub var: bool,
 }
 
 impl Name {
@@ -150,6 +181,7 @@ impl Name {
             base: base.to_string(),
             sub: None,
             unit: false,
+            var: false,
         }
     }
     /// The Calcpad spelling: `base_sub`.
@@ -187,6 +219,8 @@ pub enum UnOp {
     Sqrt,
     Factorial,
     Transpose,
+    /// The elementwise operator over an expression (`vectorize`).
+    Vectorize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -221,6 +255,14 @@ pub enum Expr {
         body: Box<Expr>,
         lower: Box<Expr>,
         upper: Box<Expr>,
+    },
+    /// `sum (or product) of body over var`, from `bounds` or, without bounds, over the range
+    /// variable `var` that an earlier region defined.
+    Series {
+        product: bool,
+        var: Name,
+        body: Box<Expr>,
+        bounds: Option<(Box<Expr>, Box<Expr>)>,
     },
     /// First derivative of `body` with respect to `var`, at the current value of `var`.
     Derivative {
@@ -314,6 +356,14 @@ impl Expr {
                 body.for_each_name_mut(f);
                 lower.for_each_name_mut(f);
                 upper.for_each_name_mut(f);
+            }
+            Expr::Series { var, body, bounds, .. } => {
+                f(var);
+                body.for_each_name_mut(f);
+                if let Some((lo, hi)) = bounds {
+                    lo.for_each_name_mut(f);
+                    hi.for_each_name_mut(f);
+                }
             }
             Expr::Derivative { var, body } => {
                 f(var);

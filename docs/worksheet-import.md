@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,233,543 bytes raw, 508,698 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
+Size of the module: 1,316,704 bytes raw, 534,343 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features, the workbook reader and the equation display added about 100 KB.
 
 ## Use
 
@@ -61,6 +61,88 @@ The report has, per region kind (`text`, `math`, `plot`, `image`, `ole`, `compon
 Page breaks are layout and are not counted. `report.issues` lists every issue with a stable code, a
 short reason, the `region-id` and the source line. `report.ranked_gaps()` ranks the missing features by
 the number of regions they block.
+
+### Text, pictures and layout
+
+- **Text styles.** The named paragraph styles of an `.xmcd` file (font family, size in points, weight, slant, underline, colour,
+  alignment) and the per-run font and colour elements are read. Each styled paragraph is written as `<p style="...">` (a heading
+  style stays `<h1>`/`<h2>`) with the family as a CSS stack (the file's name, then metric-compatible and generic fallbacks, with
+  no quote characters because a `'` inside a text line would switch the engine to maths), the size in `pt`, and a run that differs
+  from its paragraph's style gets a `<span>` of its own. Alignment other than left, the left margin and the first-line indent are
+  kept. A `.mcdx` file carries these on the XAML elements (`FontFamily`, `FontSize` in pixels, `Foreground`, `TextAlignment`,
+  `TextIndent`, `Margin`) and has no named style table here. Maths keeps the app's own styling. The file's alignment is what is
+  written: the source of the seismic sample says `left` everywhere, so the importer does not justify text the original page shows justified.
+- **Colours and the dark page.** A colour becomes a class (`imp-c-rrggbb`) whose rules are written once, in a `<style>` line at the
+  top: the source colour on a light page and, under `.dark-theme`, the same hue lightened to about 70 % lightness with its
+  saturation held between 0.35 and 0.6, so dark red and teal headings stay readable on the dark preview. A very light colour is
+  darkened on the light page. Black, white and greys carry no hue and are left to the app's text colour.
+- **Pictures.** A `<png>` or `<metafile>` written straight into a region is a picture region like any other: it keeps its size and
+  position and carries no caption. The italic "static picture of the original" caption is only for a picture that stands in for
+  something that did not convert (maths, plots, components).
+- **Picture beside text.** A picture with text regions to its right that overlap its vertical extent is one flex block: the picture on the left and
+  those texts stacked beside it in reading order, whatever baselines the texts sit on (a title picture with a chapter line and a
+  title line). Text below the picture is not pulled in.
+
+### Equations as the author wrote them
+
+### MathML display
+
+By default the author's equation is written as MathML (`<math>` inside `<div class="imp-eq">`), built from the parsed source
+tree by `calcpad-import/src/mathml.rs`: stacked fractions, `munderover` sums and products with bounds, integrals,
+subscripts (`C_(v,i)`, `V_1`), a vector arrow over the whole product, a transpose superscript, bracketed matrices,
+`:=` for a definition (`≡` for a global one) and `=` for an evaluation, original names (`SIUnitsOf`, a variable renamed
+for the engine shows under its own name). One rule sets names: the tool's own functions (`sin`, `if`, `SIUnitsOf`) are upright;
+every other name is an italic variable, a function the page defines included, so `V_AB(x) := ...` and a later call
+`V_AB(L_AB)` look the same. A one-letter name the file does not label as a unit is a variable. Units are bold, blue
+italic (a number before its unit has no dot, `100 ft`), and the keywords `if` and `otherwise` and the `=` of a check are
+bold; these use a text face because the math face has no bold weight. The vector arrow is drawn by the stylesheet as a line
+and a head across the whole operand (the `mo` stays for the Office Math export). Text colours follow the theme: units
+have a light and a dark blue, everything else is `currentColor`. The computation is the unchanged hidden code.
+
+An expression of a range variable (`s_i / ft =`) is typeset the same way: the author's left side, then the collected
+column of values as a bracketed table in the file's decimal places. A quotient of units in a result is a stacked
+fraction and a fractional power is a small fraction (`ft^(3/4)`).
+
+An evaluation is `<math>` with the left side typeset, then the engine's value through `#val`: the page switches on
+`#settings {"valMathml": true}`, an opt-in engine setting under which `#val` writes the value as MathML (bracketed table,
+unit once after it, the file's decimal places through `#round`). Nothing in the engine changes unless the setting is on.
+A region whose equation has a node without a MathML spelling (a program body, for example) keeps the typeset-Calcpad
+display below. The editor accepts `valMathml` as a known setting, and the sheet carries a `LintIgnore` comment for the
+unused-name hint (a name used only by a picture or an unconverted region is not a finding). `ImportOptions::mathml = false` (the wasm option `mathml`) uses it everywhere.
+
+Exports: the Word export converts each `<math>` to Office Math (fractions, sub and superscripts, sums, brackets,
+matrices, accents) and the Excel export writes a linear text form with the matrix cells apart. Print and PDF use the
+browser's own rendering. Source that is not maths (a program body, an unreadable string) is never shown as code; the
+region keeps its quiet "not calculated" note.
+
+A converted math region is shown as the author's equation and computed out of sight, so the page reads like the source.
+
+- **A definition** (`:=`) is computed inside `#hide` ... `#end hide` and shown as a typeset `#noc` block that carries the
+  source's own names, subscripts, operators and matrix orientation: `s = [16; 12; 13.5]^(T)*ft` (a row transposed, a
+  superscript T, a dot product), with **no result after it**, as in the source. The computation is still in the text, so the
+  engine records its errors as before. An element definition over a range variable (`h[i] := ...`) is shown the same way
+  (`h.(i) = ...`, indexes as written, no shift to the engine's origin). A definition that cannot be written faithfully
+  (a program block, a range, a call result that is indexed, a gap) keeps the earlier form, computed and visible.
+- **An evaluation** (`=`) is the expression and its result, to the precision the file used (below), under a document-wide
+  `#nosub` so the substituted step the engine normally prints is left out, as in the source. When a name in it was renamed
+  (a variable that has the name of a unit, `s_v` for `s`), the author's expression is typeset first in a `#noc` block and
+  the engine's result line follows, so the original name is on the page and the engine name is too. A result that is an
+  array is wrapped in a scrolling box (`imp-scroll`) instead of wrapping over several lines.
+- **Names without the engine's marks.** The engine draws an arrow over the name of a vector, writes a matrix name in bold
+  and marks a power of an array with a small circle. The source has none of these, and they cannot be turned off in a
+  `#noc` block (they follow what the name holds), so the page carries a small `<style>` that hides them
+  (`.vec`, `b>var`, `sup>small.nth`). The same rules hide them in the worksheet's own results.
+- **Precision.** The file stores the decimal places per result (`precision`, with a document default). The importer writes
+  a `#format 0.###` (as many `#` as places) before the results that use it, only when it changes. `#format` is display
+  only: every value is computed in full (a test checks that `2/3` shown with three places still gives 1000 when
+  multiplied by 1500). It is used instead of `#round` because `#round` keeps one more digit for values below 1
+  (`0.6667` for three places) and the source shows `0.667`. Numbers written inside a typeset equation follow the format
+  in force too, so a shown equation is always preceded by `#format default` (and a `#round 12` at the top of the sheet
+  keeps the literals as typed). Trailing zeros and the source's exponent threshold are not reproduced.
+
+Differences that remain: the engine spells some units differently (`s` for `sec`), prints a unit after every element of a
+vector (the source prints it once after the brackets), writes a transposed result as `transp(h)` (the engine has no
+transpose operator), shows `≡` for an equality and typesets a row of a matrix literal with `;` and a column with `|`.
 
 ### The placeholder rule
 
@@ -92,7 +174,7 @@ kind of unconverted region and checks that it only ever appears inside a marked 
 | Text region | One `'` text line per paragraph. Styles `Heading 1..3` become `<h1>..<h3>`; bold, italic, underline, sub and superscript are kept; colour and font are dropped. Text is HTML-escaped and quote marks doubled, so prose cannot start a directive. Empty paragraphs are skipped. |
 | Math nested inside a text region | Becomes its own region, ordered by its own position. |
 | `x := expr` | `x = expr` |
-| `x ≡ expr` (global) | `x = expr` at its reading-order position, with note `global-definition` |
+| `x ≡ expr` (global) | `x = expr` at its reading-order position, with note `global-definition`. A global whose value is only numbers and units is also defined first, in a `#hide` block at the top, because a global holds wherever it is written (a use above it reads it). Other globals are not hoisted. |
 | `expr =` | the bare expression |
 | `x := expr =` | `x = expr` (a display unit on the result is dropped) |
 | `expr = ` with a display unit | `(expr)\|unit`, note `unit-override` |
@@ -100,14 +182,23 @@ kind of unconverted region and checks that it only ever appears inside a marked 
 | `+ - * /`, powers, unary minus, factorial, comparison, and/or/xor | the same operators, with parentheses added from the tree, never from the source |
 | `sqrt`, `\|x\|` | `sqrt(x)`, `abs(x)` (note `abs-of-array` when the operand is a known matrix or vector) |
 | `x_i`, `ρ_tp` (literal subscripts), Greek names | `x_i`, `ρ_tp` |
-| Vector, matrix literal | `[a; b; c]`, `[a; b\|c; d]`, a row vector as `transp([a\|b\|c])`. The file stores matrices column by column; the importer reads them that way. |
+| Vector, matrix literal | `[a; b; c]`, `[a; b\|c; d]`, a row vector as `transp([a\|b\|c])`. The file stores matrices column by column; the importer reads them that way. The engine keeps vectors and matrices apart (`len`, `max` and one-index access want a vector), so the transpose of a row literal is written as the column vector `[a; b; c]` and a double transpose is the operand. |
+| `[A, B] := [1, 2]` (a matrix of names) | One definition per name, each from the item in its place; the matrix must be a literal of the same size. |
 | `v[i]`, `M[i, j]` | `v.(i + 1)`, `M.(i + 1; j + 1)` for an array origin of 0; unchanged for 1; a literal index is folded. Note `array-origin`. |
 | `ORIGIN := n` (integer literal) | Later indexes use `n`. Note `origin-assigned`. |
 | Units | See below. A product written with a middle dot (`kN·m`, `N·m`) is a unit when every factor is: `(kN*m)`. |
 | Integral `∫ f dx` from a to b | `$Integral{f @ x = a : b}`. A bound written as a bare 0 becomes `0*(other bound)` so both bounds carry the same units. The bound variable is local to the body. A bound that uses the variable's own name, or an operand layout that is not `lambda`, `lowerBound`, `upperBound`, stays a `calculus-operator` gap with the reason. |
-| Range `i := a .. b` (integer literals, a <= b) with `v[i] := expr(i)` | The range line becomes a comment (note `range-loop`) and records the bounds. The element assignment becomes `#val`, `v = vector(n)`, `#for i = a : b`, `v.(i) = expr`, `#loop`, `#end val`: the vector is zero-filled, which is what the source has for the elements below `a`, and `expr` may carry units. `#for` and `vector(n)` were chosen over `range(...)` (a vector, not a loop variable) because an expression of `i` is evaluated one `i` at a time in the loop, as in the source, whereas Calcpad vectors do not combine element by element. Only this shape is read: the array must have no value yet, the value must not read the array, the indexes must be one or two different bare range variables (two fill a matrix with `matrix(m; n)`), and the first bound must not be below the array origin. The bounds are expressions the engine evaluates, so run-time bounds work; a range whose end is below its start counts down as the source does (a counted loop that derives the variable). The array is as large as the largest index any range reaches, and an element no iteration writes stays 0 where the source has no such element. Every other use of a range variable is a `range-variable` gap that says so; a range with a step (`a, a2 .. b`) stays a gap (`#for` has no step). |
+| Range `i := a .. b` (integer literals, a <= b) with `v[i] := expr(i)` | The range line becomes a comment (note `range-loop`) and records the bounds. The element assignment becomes `#hide`, `v = vector(n)`, `#for i = a : b`, `v.(i) = expr`, `#loop`, `#end hide`: the vector is zero-filled, which is what the source has for the elements below `a`, and `expr` may carry units. `#for` and `vector(n)` were chosen over `range(...)` (a vector, not a loop variable) because an expression of `i` is evaluated one `i` at a time in the loop, as in the source, whereas Calcpad vectors do not combine element by element. Only this shape is read for a range: the array must have no value yet, the value must not read the array, the indexes must be one or two different bare range variables (two fill a matrix with `matrix(m; n)`), and the first bound must not be below the array origin. The bounds are expressions the engine evaluates, so run-time bounds work; a range whose end is below its start counts down as the source does (a counted loop that derives the variable). The array is as large as the largest index any range reaches, and an element no iteration writes stays 0 where the source has no such element. Other reads of a range variable (outside a sum, a table or an element assignment) are a `range-variable` gap that says so; a range with a step (`a, a2 .. b`) stays a gap (`#for` has no step). |
+| Sum or product `Σ f(k)` with bounds, or over a range variable | `$Sum{f @ k = lo : hi}` / `$Product{...}`. Without bounds the operator runs over the range variable of the bound name, using the bounds that variable was given (the index of an array shifts with the origin as everywhere else). The bound name is local to the body, so a sum over `i` inside an element assignment over `i` is read correctly. A bound that uses the bound name's own spelling, or a name that is not a range variable with bounds, is a `summation-operator` gap that says so. Only the sum and the product are read; limits stay gaps. The `product` operator is read in the same shape as the sum (seen in files for the sum only). |
+| An evaluation that reads a range variable (`i =`, `h[i =`, `2 i =`) | The values for every step of the range are collected in a new vector by a counted loop (`#hide`, `tbl_n = vector(...)`, `#for`, `#loop`, `#end hide`) and the vector is shown (with its `\|unit` if one was asked for). One range variable only; the range runs from its first to its last value in either direction. Note `range-loop`. |
+| `v[k] := x` on a vector that has no value yet, `k` a literal | The vector is created without being shown, `vector(k)` (zeros below `k`), and the element is set and shown. A later fill loop over a range that starts at the array origin replaces a vector that was made this way from its first element only (anything else is the `element-assignment` gap, since a fill does not keep older elements). |
+| `v[e] := x` on a vector that has a value, `e` not a range variable | The vector is grown with `resize(v; max(len(v); idx))` (zeros) when `e` is past its end, then the element is set and shown. |
+| `vectorSum(v)`, `last(v)`, `length(v)` | `sum(v)`; `len(v) + origin - 1`; `len(v)`. |
+| `vectorize(e)` | `e` itself when `+`, `-`, a scalar product or a division by a scalar are all it contains (the engine does those element by element). An element-by-element product or quotient of two arrays, or a power or call over an array, has no operator: `vectorize-operator` gap. |
+| `SIUnitsOf(x)` | `getunits(x)`, note `si-unit-scale`. The engine has no function for the SI unit of a quantity, only for the unit it is held in, so `x / SIUnitsOf(x)` is the number in the unit `x` has, which is the number in SI units only when that unit is an SI one or the scale cancels in the result. |
+| Rows of the worksheet that hold more than one region | See Layout. |
 | Program that is local definitions (each name assigned once) and a final value | The final value with the locals substituted, so `f(x) := program` is an ordinary function. Refused (gap) if a substituted value would be captured by an integration variable. |
-| Program with loops, conditions or reassigned locals, as the value of a variable `name := program` | `#val`, the statements, `#end val`, then `name = value` (`#val` shows values only; `#hide` would also hide an engine error raised inside, which is why it is not used). `for` over a range becomes `#for` (literal ascending bounds) or a counted loop that derives the variable from a start and an end taken once, so it counts down when the end is below the start as the source does; `while` becomes `#while`; `if`/`elseif`/`else` become `#if`/`#else if`/`#else`/`#end if`; `break` and `continue` are the same in both. Every local gets a name of its own (`x_p1`), so nothing leaks into the sheet: `x <- 5` inside a program never changes the sheet's `x`, and the right side of a first assignment still reads the outer `x`. Arrays are written element by element when the program created them whole first (`v <- [..]`), or when every index is the variable of an enclosing `for` loop, the write is outside any condition and loop bounds are known ahead (they mention no local of the program): the array is then allocated just before the outermost of those loops, as large as the largest index each loop reaches. A `return` before the end sets a result variable and a done flag; the rest of the block is guarded by the flag and loops break out. |
+| Program with loops, conditions or reassigned locals, as the value of a variable `name := program` | `#hide`, the statements, `#end hide`, then `name = value`. `#hide` keeps the loop from printing every intermediate value as plain text (`#val` did). The engine still evaluates the block and records any error raised inside it, so the editor lists it with its line, but the error text is not printed inline in the preview or the printed report; a test checks that the error is recorded. A local array that starts from a literal 0 and is then added to (`K[i,j] <- 0`, later `K[i,j] <- K[i,j] + x`) is started from `0*getunits(x)`, where `x` is the first value added with the loop variables at their first values, so the sums have consistent units; when that value reads something the program itself sets, its units are not known before the loops run and the program stays a `program-block` gap that says so. `for` over a range becomes `#for` (literal ascending bounds) or a counted loop that derives the variable from a start and an end taken once, so it counts down when the end is below the start as the source does; `while` becomes `#while`; `if`/`elseif`/`else` become `#if`/`#else if`/`#else`/`#end if`; `break` and `continue` are the same in both. Every local gets a name of its own (`x_p1`), so nothing leaks into the sheet: `x <- 5` inside a program never changes the sheet's `x`, and the right side of a first assignment still reads the outer `x`. Arrays are written element by element when the program created them whole first (`v <- [..]`), or when every index is the variable of an enclosing `for` loop, the write is outside any condition and loop bounds are known ahead (they mention no local of the program): the array is then allocated just before the outermost of those loops, as large as the largest index each loop reaches. A `return` before the end sets a result variable and a done flag; the rest of the block is guarded by the flag and loops break out. |
 | A program that is not one of the above in a function body `f(x) := program` | The program is run symbolically: locals are substituted, an `if` becomes `if(c; a; b)` over the rest of the program, a `return` ends its path, and a `for` over a literal range of at most 64 values is unrolled. What cannot be (a loop with run-time bounds) is a gap that names the missing engine feature: a loop usable inside an expression block (`$Block` takes statements and keeps its locals private, but an assignment made inside `$While` or `$Repeat` is discarded). |
 | `lsolve(A, b)`, `augment` and `stack` with any number of arguments, `submatrix(A, ir, jr, ic, jc)` | The engine functions of the same name; the four `submatrix` indexes are shifted from the array origin. |
 | First derivative `d/dx f` | `$Slope{f @ x = x}`, taken at the current value of `x`. If `x` has no value in the sheet the source could not calculate it either: `calculus-operator` gap with that reason. Higher derivatives are not read. |
@@ -124,6 +215,25 @@ sit on, then by their left edge; position is used only for this and then dropped
   A tall region next to a short one shares the short one's baseline while its top edge is higher, so
   sorting by top alone puts a use before the definition to its left. Real files do this.
 * Regions whose keys are within 4 points of the first region of a row are one row.
+
+### Layout
+
+The rows found for the reading order are kept. Regions that share a row, do not overlap across
+and wrote something are put side by side; the order they are translated in, and so evaluated in,
+is unchanged (left to right within a row).
+
+* A run of consecutive rows that each hold 2 to 4 text regions (a legend of symbol and description)
+  is one `<table class="imported-grid">`, one `<tr>` per row, one `<td>` per region.
+* Any other row with two or more regions is a wrapping flex row, `<div class="imported-row">`, one
+  `<div>` per region. A region that only wrote a comment (a range line) takes no part.
+* Regions of a row sit where the file puts them: each block after the first is moved right by the gap the file leaves
+  between the regions (when it gives widths), and the blocks of a row share their last baseline, so a value written
+  beside a label that wraps lines up with the label's last line. A value to the right of a text region whose baseline
+  falls inside the text's height is on the text's row even when the baselines differ.
+* An equation on its own is indented by its distance from the page margin (the smallest `left` of the sheet), in points.
+* A region that starts inside the previous one (math nested in a text region) is stacked, not placed beside it.
+
+The Calcpad lines of a region are inside the cell, so equations are typeset by the engine in the cell.
 
 ### Array origin
 
@@ -235,12 +345,12 @@ summary key on them.
 
 | Code | Meaning |
 | --- | --- |
-| `range-variable` | `i := 1..10`, and anything that iterates over one. **Not built in this spike**: the engine has no range variable. Names it defines block later regions (`depends-on-gap`, counted as downstream of this code). |
+| `range-variable` | `i := 1..10` with a step or bounds that do not convert, and a read of a range variable that is not a sum, a table or an element assignment (more than one range variable in one evaluation, a range variable in a function body). The engine has no range variable; the supported uses are listed under What converts. Names it defines block later regions (`depends-on-gap`, counted as downstream of this code). |
 | `program-block` | Programs outside the supported subset, each with its reason: a function body that is not one expression (a function cannot hold statements), an element assignment to an array the program did not create (the source grows it, the engine cannot), an early `return`, `tryCatch`, a loop over something other than a plain range, an expression statement before the end, a program inside an expression |
 | `solve-block` | Given/Find and relatives |
 | `symbolic-evaluation` | Symbolic evaluation |
 | `calculus-operator` | Derivative and integral operators that do not meet the conditions under What converts (the detail names which); other derivative forms |
-| `summation-operator`, `vectorize-operator`, `matrix-operator` | Sum/product/limit, vectorize, column/row/vector-sum operators |
+| `summation-operator`, `vectorize-operator`, `matrix-operator` | A sum or product that does not meet the conditions under What converts, limits; vectorize over an element-by-element product or quotient of arrays; column/row, dot, cross and magnitude operators |
 | `string-value` | Strings; Calcpad has no string variables |
 | `bare-expression` | An expression with no definition or evaluation operator (documentation) |
 | `constraint-equation` | An equation on its own (`f_B = c*L + d`): a solve block's equation or a check. Shown with its real names, not solved |
@@ -254,7 +364,7 @@ summary key on them.
 | `invalid-name`, `bad-number`, `arity-mismatch`, `bad-structure`, `too-deep` | Structure the importer will not guess |
 
 Notes (the region converted, with a caveat): `global-definition`, `angle-mode`, `array-origin`,
-`origin-assigned`, `log-base`, `round-digits`, `abs-of-array`, `call-as-multiplication`, `unit-override`.
+`origin-assigned`, `log-base`, `round-digits`, `abs-of-array`, `call-as-multiplication`, `unit-override`, `si-unit-scale`, `range-loop`.
 Whole-file problems: `xml-error`, `not-a-worksheet`, `input-too-large`, `unsupported-container` (a zip that is damaged,
 encrypted or uses a zip feature the reader refuses).
 
@@ -356,7 +466,7 @@ What the reader does with the package:
   (an empty unit override means "no unit"; a placeholder anywhere else is an `unknown-element` gap). Matrices are
   stored column by column, as in `.xmcd` (read off a 3 x 2 matrix in the sample files, a column of names then a column of numbers).
 * **Programs** (`if`, `for`, `while`, `return`, try/catch, local definitions) are `program-block` gaps, as in
-  `.xmcd`; `summation` is a `summation-operator` gap; derivatives and integrals are `calculus-operator` gaps.
+  `.xmcd`; `summation` is read like the `.xmcd` sum; derivatives and integrals are `calculus-operator` gaps.
 * **Collapsible areas** only group regions: their regions are read as if on the page, positioned relative to
   the area.
 * **Pictures** with a PNG convert like `.xmcd` pictures (the PNG is stored in the library). The package carries no

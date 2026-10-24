@@ -55,6 +55,7 @@ pub enum Code {
     AbsOfArray,
     CallAsMultiplication,
     UnitOverride,
+    SiUnitScale,
     StaticPicture,
     SvgFallback,
     // ---- whole-file problems ----
@@ -122,6 +123,7 @@ impl Code {
         Code::AbsOfArray,
         Code::CallAsMultiplication,
         Code::UnitOverride,
+        Code::SiUnitScale,
         Code::StaticPicture,
         Code::SvgFallback,
         Code::XmlError,
@@ -178,6 +180,7 @@ impl Code {
             AbsOfArray => "abs-of-array",
             CallAsMultiplication => "call-as-multiplication",
             UnitOverride => "unit-override",
+            SiUnitScale => "si-unit-scale",
             StaticPicture => "static-picture",
             SvgFallback => "svg-fallback",
             XmlError => "xml-error",
@@ -191,9 +194,8 @@ impl Code {
         use Code::*;
         match self {
             GlobalDefinition | RangeLoop | FrozenValue | AngleMode | ArrayOrigin | OriginAssigned | LogBase
-            | RoundDigits | AbsOfArray | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => {
-                Severity::Note
-            }
+            | RoundDigits | AbsOfArray | CallAsMultiplication | UnitOverride | SiUnitScale | StaticPicture
+            | SvgFallback => Severity::Note,
             XmlError | NotAWorksheet | InputTooLarge | UnsupportedContainer => Severity::Fatal,
             _ => Severity::Gap,
         }
@@ -252,6 +254,7 @@ impl Code {
                 "name applied like a function but defined as a variable: converted as multiplication"
             }
             UnitOverride => "result shown in a unit: converted to a `|unit` conversion",
+            SiUnitScale => "the SI unit of a quantity is read as the unit it is held in: the same number only when that unit is the SI one or the scale cancels in the result",
             StaticPicture => "shown as a static picture of the original (not live, not editable)",
             SvgFallback => "metafile could not be converted to SVG (failed or too large): the raster picture is used",
             XmlError => "the input is not well-formed XML (or uses a DTD, which is refused)",

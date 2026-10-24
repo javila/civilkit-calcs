@@ -189,6 +189,21 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         }
     }
 
+    // The number of decimal places results are shown with, from the presentation settings.
+    let mut default_precision = None;
+    if let Ok(Some(b)) = zip.read(&format!("{base}settings/presentation.xml"), limits.max_item_bytes) {
+        if let Ok(t) = utf8(&b) {
+            if let Ok(d) = parse(t, &limits) {
+                default_precision = d
+                    .descendants()
+                    .find(|n| n.is_element() && local(*n) == "general")
+                    .and_then(|g| g.attribute("precision"))
+                    .and_then(|v| v.trim().parse::<i32>().ok())
+                    .filter(|v| (0..=15).contains(v));
+            }
+        }
+    }
+
     // Saved results, keyed by result id.
     let result_bytes = zip
         .read(&format!("{base}result.xml"), limits.max_item_bytes)
@@ -248,6 +263,8 @@ pub fn read(bytes: &[u8], limits: Limits) -> Result<Sheet, McdxError> {
         origin,
         regions,
         component_names,
+        text_styles: Default::default(),
+        default_precision,
     })
 }
 
@@ -465,6 +482,7 @@ impl Ctx<'_, '_> {
                 saved_result: None,
                 saved_expr: None,
                 frozen: true,
+                precision: None,
             }),
         })
     }
@@ -519,6 +537,30 @@ fn format_of(n: Node, base: &Run) -> Run {
                 "DemiBold",
             ],
         );
+    }
+    if let Some(v) = n.attribute("FontFamily").map(str::trim).filter(|v| !v.is_empty()) {
+        // A font list (`Arial, Helvetica`): the first name.
+        f.font = Some(v.split(',').next().unwrap_or(v).trim().to_string());
+    }
+    // Device-independent pixels, 96 to the inch: 4/3 pixels to the point.
+    if let Some(px) = n
+        .attribute("FontSize")
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+    {
+        f.size = Some((px * 0.75 * 100.0).round() / 100.0);
+    }
+    if let Some(v) = n.attribute("Foreground") {
+        // `#AARRGGBB` or `#RRGGBB`; a fully transparent colour is not a colour.
+        let h = v.trim().trim_start_matches('#');
+        let rgb = match h.len() {
+            8 if !h.starts_with("00") => Some(&h[2..]),
+            6 => Some(h),
+            _ => None,
+        };
+        if let Some(rgb) = rgb.and_then(|c| crate::xmcd::parse_hex_color(&format!("#{c}"))) {
+            f.color = Some(rgb);
+        }
     }
     if let Some(v) = n.attribute("FontStyle") {
         f.italic = flag(v, &["Italic", "Oblique"]);
@@ -588,9 +630,19 @@ fn blocks(
                     }
                     None => {}
                 }
+                let margin_left = c
+                    .attribute("Margin")
+                    .and_then(|m| m.split(',').next().and_then(|v| v.trim().parse::<f64>().ok()))
+                    .map_or(0.0, |px| px * 0.75);
                 paras.push(Paragraph {
                     style: style.to_string(),
                     pieces,
+                    align: c.attribute("TextAlignment").and_then(crate::xmcd::parse_align),
+                    margin_left,
+                    text_indent: c
+                        .attribute("TextIndent")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .map_or(0.0, |px| px * 0.75),
                 });
             }
             "List" => {
@@ -620,7 +672,16 @@ fn inline(n: Node, fmt: &Run, pieces: &mut Vec<Piece>, skipped: &mut Vec<String>
         if c.is_text() {
             let t = c.text().unwrap_or("");
             if !t.is_empty() {
-                push_text(pieces, t, fmt);
+                if fmt.font.as_deref().is_some_and(|f| f.eq_ignore_ascii_case("symbol")) {
+                    // The run is in the symbol font: its letters are Greek ones.
+                    let plain = Run {
+                        font: None,
+                        ..fmt.clone()
+                    };
+                    push_text(pieces, &symbol_font_to_unicode(t), &plain);
+                } else {
+                    push_text(pieces, t, fmt);
+                }
             }
         } else if c.is_element() {
             match c.tag_name().name() {
@@ -638,4 +699,17 @@ fn inline(n: Node, fmt: &Run, pieces: &mut Vec<Piece>, skipped: &mut Vec<String>
             }
         }
     }
+}
+
+/// Text typed in the symbol font, where the letter `S` is the capital sigma, as Unicode.
+fn symbol_font_to_unicode(t: &str) -> String {
+    const UPPER: &str = "ΑΒΧΔΕΦΓΗΙϑΚΛΜΝΟΠΘΡΣΤΥςΩΞΨΖ";
+    const LOWER: &str = "αβχδεφγηιϕκλμνοπθρστυϖωξψζ";
+    t.chars()
+        .map(|c| match c {
+            'A'..='Z' => UPPER.chars().nth((c as u8 - b'A') as usize).unwrap_or(c),
+            'a'..='z' => LOWER.chars().nth((c as u8 - b'a') as usize).unwrap_or(c),
+            c => c,
+        })
+        .collect()
 }

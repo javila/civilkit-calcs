@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::ir::*;
+use crate::mathml::{self, MathMl};
 use crate::picture::{self, SvgError};
 use crate::report::{Code, ImportReport, Issue, KindStats, Severity};
 use crate::tables::{self, Constant, FnRule};
@@ -179,6 +180,26 @@ fn subst(e: &Expr, env: &HashMap<String, Expr>) -> Option<Expr> {
                 upper: b(upper)?,
             }
         }
+        Expr::Series {
+            product,
+            var,
+            body,
+            bounds,
+        } => {
+            let v = tables::normalise_name(&var.flat());
+            if env.values().any(|x| mentions(x, &v)) {
+                return None;
+            }
+            Expr::Series {
+                product: *product,
+                var: var.clone(),
+                body: Box::new(subst(body, &without(&v))?),
+                bounds: match bounds {
+                    Some((lo, hi)) => Some((b(lo)?, b(hi)?)),
+                    None => None,
+                },
+            }
+        }
         Expr::Derivative { var, body } => {
             let v = tables::normalise_name(&var.flat());
             if env.values().any(|x| mentions(x, &v)) {
@@ -215,6 +236,12 @@ fn mentions(e: &Expr, name: &str) -> bool {
                 || mentions(upper, name)
                 || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
         }
+        Expr::Series { var, body, bounds, .. } => {
+            bounds
+                .as_ref()
+                .is_some_and(|(lo, hi)| mentions(lo, name) || mentions(hi, name))
+                || (tables::normalise_name(&var.flat()) != name && mentions(body, name))
+        }
         Expr::Derivative { var, body } => tables::normalise_name(&var.flat()) != name && mentions(body, name),
         Expr::Num(_) | Expr::Str(_) | Expr::Unsupported { .. } => false,
         Expr::Program(_) => true,
@@ -239,6 +266,12 @@ struct Pending {
 /// that row. The baseline (not the top edge) is used because a tall region next to a short one
 /// sits on the same line while their top edges differ.
 pub fn reading_order(regions: &mut Vec<Region>) {
+    let rows = reading_rows(std::mem::take(regions));
+    regions.extend(rows.into_iter().flatten());
+}
+
+/// The same order as [`reading_order`], kept as the rows it was found in (each row left to right).
+pub fn reading_rows(regions: Vec<Region>) -> Vec<Vec<Region>> {
     let key = |r: &Region| r.baseline.unwrap_or(r.top);
     let mut idx: Vec<usize> = (0..regions.len()).collect();
     idx.sort_by(|&a, &b| {
@@ -248,7 +281,7 @@ pub fn reading_order(regions: &mut Vec<Region>) {
             .then(a.cmp(&b))
     });
     // Group into rows, then order each row by left edge.
-    let mut ordered: Vec<usize> = Vec::with_capacity(idx.len());
+    let mut rows_idx: Vec<Vec<usize>> = Vec::new();
     let mut i = 0;
     while i < idx.len() {
         let anchor = key(&regions[idx[i]]);
@@ -264,11 +297,54 @@ pub fn reading_order(regions: &mut Vec<Region>) {
                 .unwrap_or(std::cmp::Ordering::Equal)
                 .then(a.cmp(&b))
         });
-        ordered.extend(row);
+        rows_idx.push(row);
         i = j;
     }
-    let mut old: Vec<Option<Region>> = std::mem::take(regions).into_iter().map(Some).collect();
-    regions.extend(ordered.iter().filter_map(|&src| old[src].take()));
+    // A value written beside a label that wraps (the label's baseline is its first line, the
+    // value sits on a later one) is on the label's row: it lies to the right of the whole row
+    // and its baseline falls inside the label's height.
+    let mut k = 0;
+    while k + 1 < rows_idx.len() {
+        let text = rows_idx[k]
+            .iter()
+            .filter(|&&a| matches!(regions[a].kind, RegionKind::Text(_)) && regions[a].width > 0.0)
+            .max_by(|&&a, &&b| {
+                regions[a]
+                    .left
+                    .partial_cmp(&regions[b].left)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .copied();
+        let merge = text.is_some_and(|t| {
+            let t = &regions[t];
+            let right_of_row = rows_idx[k]
+                .iter()
+                .map(|&a| regions[a].left + regions[a].width)
+                .fold(f64::MIN, f64::max);
+            rows_idx[k + 1].iter().all(|&b| {
+                let r = &regions[b];
+                !matches!(r.kind, RegionKind::Text(_)) && r.left >= right_of_row - 1.0 && key(r) <= t.top + t.height
+            })
+        });
+        if merge {
+            let next = rows_idx.remove(k + 1);
+            rows_idx[k].extend(next);
+            rows_idx[k].sort_by(|&a, &b| {
+                regions[a]
+                    .left
+                    .partial_cmp(&regions[b].left)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(a.cmp(&b))
+            });
+        } else {
+            k += 1;
+        }
+    }
+    let mut old: Vec<Option<Region>> = regions.into_iter().map(Some).collect();
+    rows_idx
+        .into_iter()
+        .map(|row| row.into_iter().filter_map(|src| old[src].take()).collect())
+        .collect()
 }
 
 /// Calcpad identifiers: a letter, then letters, digits, `_` and primes.
@@ -397,7 +473,7 @@ fn plausible_calcpad(s: &str) -> bool {
 
 /// A range variable `i := a .. z` (no step): its bounds as Calcpad text, and as integers when both
 /// are literals and `a <= z`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct RangeInfo {
     a: String,
     z: String,
@@ -437,6 +513,128 @@ fn has_break(st: &PStmt) -> bool {
     }
 }
 
+/// Names a program assigns or loops over: the only names whose value is not known before it runs.
+fn program_locals(stmts: &[PStmt], out: &mut HashSet<String>) {
+    for st in stmts {
+        match st {
+            PStmt::Local(PTarget::Var(n), _) => {
+                out.insert(tables::normalise_name(&n.flat()));
+            }
+            PStmt::Local(PTarget::Element { base, .. }, _) => {
+                out.insert(tables::normalise_name(&base.flat()));
+            }
+            PStmt::For { var, body, .. } => {
+                out.insert(tables::normalise_name(&var.flat()));
+                program_locals(body, out);
+            }
+            PStmt::While { body, .. } => program_locals(body, out),
+            PStmt::If { branches, otherwise } => {
+                for (_, b) in branches {
+                    program_locals(b, out);
+                }
+                if let Some(o) = otherwise {
+                    program_locals(o, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Array names that the program sets to a literal 0 element by element.
+fn zero_assigned(stmts: &[PStmt], out: &mut Vec<String>) {
+    for st in stmts {
+        match st {
+            PStmt::Local(PTarget::Element { base, .. }, Expr::Num(s)) if s.trim().parse::<f64>() == Ok(0.0) => {
+                let b = tables::normalise_name(&base.flat());
+                if !out.contains(&b) {
+                    out.push(b);
+                }
+            }
+            PStmt::For { body, .. } | PStmt::While { body, .. } => zero_assigned(body, out),
+            PStmt::If { branches, otherwise } => {
+                for (_, b) in branches {
+                    zero_assigned(b, out);
+                }
+                if let Some(o) = otherwise {
+                    zero_assigned(o, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// The first value added to (or taken from) an element of `base` in program order, `a[i] <- a[i] + x`,
+/// with the loop variables above the statement replaced by the first value of their range. `None`
+/// when the array is never accumulated into. The value's units are then those of the first term.
+fn first_accumulated(
+    stmts: &[PStmt],
+    base: &str,
+    env: &mut HashMap<String, Expr>,
+    locals: &HashSet<String>,
+) -> Option<Result<Expr, String>> {
+    let reads_base = |e: &Expr| matches!(e, Expr::Index(b, _) if matches!(&**b, Expr::Name(n) if tables::normalise_name(&n.flat()) == base));
+    for st in stmts {
+        let found = match st {
+            PStmt::Local(PTarget::Element { base: b, .. }, e)
+                if tables::normalise_name(&b.flat()) == base && mentions(e, base) =>
+            {
+                let term = match e {
+                    Expr::Bin(BinOp::Add | BinOp::Sub, a, c) if reads_base(a) && !mentions(c, base) => Some(&**c),
+                    Expr::Bin(BinOp::Add, a, c) if reads_base(c) && !mentions(a, base) => Some(&**a),
+                    _ => None,
+                };
+                Some(match term {
+                    None => Err(format!("{base} is added to in a form that is not a plain sum")),
+                    Some(t) => match subst(t, env) {
+                        None => Err("the first value added cannot be rewritten".to_string()),
+                        Some(t) => {
+                            let blockers: Vec<&String> = {
+                                let mut v: Vec<&String> = locals.iter().filter(|l| mentions(&t, l)).collect();
+                                v.sort();
+                                v
+                            };
+                            if blockers.is_empty() {
+                                Ok(t)
+                            } else {
+                                Err(format!(
+                                    "the first value added to {base} reads {}, which the program sets, so its units are not known before the loops run",
+                                    blockers.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                                ))
+                            }
+                        }
+                    },
+                })
+            }
+            PStmt::For { var, range, body } => {
+                let v = tables::normalise_name(&var.flat());
+                let prev = env.get(&v).cloned();
+                if let Expr::Range { first, .. } = range {
+                    env.insert(v.clone(), (**first).clone());
+                }
+                let r = first_accumulated(body, base, env, locals);
+                match prev {
+                    Some(p) => env.insert(v, p),
+                    None => env.remove(&v),
+                };
+                r
+            }
+            PStmt::While { body, .. } => first_accumulated(body, base, env, locals),
+            PStmt::If { branches, otherwise } => branches
+                .iter()
+                .map(|(_, b)| b.as_slice())
+                .chain(otherwise.iter().map(|o| o.as_slice()))
+                .find_map(|b| first_accumulated(b, base, env, locals)),
+            _ => None,
+        };
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
 struct Tr {
     origin: i64,
     defined: HashSet<String>,
@@ -456,7 +654,16 @@ struct Tr {
     local_arrays: HashSet<String>,
     /// Output names of local arrays whose elements were set to a unitless 0 literal.
     zero_started: HashSet<String>,
+    /// For a local array started from a literal 0 and later added to (source name): the first value
+    /// added, with the loop variables above it replaced by their first values, or why that value's
+    /// units cannot be known before the loops run.
+    zero_units: HashMap<String, Result<Expr, String>>,
+    /// Arrays made by assigning one element at a literal index (name, engine index of that element).
+    elem_built: HashMap<String, usize>,
     prog_n: usize,
+    /// The file's named paragraph styles, and the colours the text used.
+    text_styles: HashMap<String, TextStyle>,
+    colors: std::collections::BTreeSet<String>,
     /// Assignments to temporaries that an expression needs before the line it is on (the engine
     /// cannot index the result of a call: `t = f(x)` then `t.(1; 2)`).
     hoisted: Vec<String>,
@@ -470,6 +677,19 @@ struct Tr {
     readable: bool,
     /// Set while rendering for the reader when something written cannot be Calcpad maths.
     readable_bad: bool,
+    /// Rendering the author's own equation for display (never computed): the original names, the
+    /// transpose as a superscript, a row as a row. Set only around `display_*`.
+    display: bool,
+    /// A math region was written to the page (the page then carries the maths styling).
+    maths_shown: bool,
+    /// Set while displaying when a name was written as the author's name instead of the engine's.
+    display_renamed: bool,
+    /// Engine name -> the author's name, for the names renamed to keep a variable apart from a unit.
+    renamed: HashMap<String, String>,
+    /// The decimal places the file shows results with, and the `#format` currently in force.
+    default_precision: Option<i32>,
+    /// The `#format` in force (`None`: the default).
+    fmt_cur: Option<String>,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -480,6 +700,10 @@ struct Tr {
     used_paths: HashSet<String>,
     asset_total: usize,
     has_references: bool,
+    /// A result was written for the engine to typeset as MathML (the page then turns that on).
+    uses_val_ml: bool,
+    /// The typeset form of the unconverted region being shown, when it has one.
+    pending_ml: Option<String>,
 }
 
 const MAX_RENDER_DEPTH: usize = 300;
@@ -546,6 +770,12 @@ impl Tr {
                 lower,
                 upper,
             } => self.integral(var, body, lower, upper),
+            Expr::Series {
+                product,
+                var,
+                body,
+                bounds,
+            } => self.series(*product, var, body, bounds.as_ref()),
             Expr::Program(stmts) if self.readable => {
                 let t = self.program_outline(stmts);
                 atom(format!("?program {{ {t} }}?"))
@@ -625,6 +855,51 @@ impl Tr {
         }
     }
 
+    /// True when the expression holds an array: a name known to be one, a matrix literal, or a
+    /// transpose or sum of those.
+    fn holds_array(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Name(n) => {
+                let f = tables::normalise_name(&n.flat());
+                self.arrays.contains(&f) || self.local_arrays.contains(&f)
+            }
+            Expr::Matrix { .. } => true,
+            Expr::Un(_, a) => self.holds_array(a),
+            Expr::Bin(_, a, b) => self.holds_array(a) || self.holds_array(b),
+            _ => false,
+        }
+    }
+
+    /// True when the value of `e` is an array: a matrix literal, a function that makes one, a
+    /// known array, or arithmetic on one.
+    fn yields_array(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Matrix { .. } => true,
+            Expr::Call(f, _) => {
+                matches!(
+                    f.base.as_str(),
+                    "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"
+                )
+            }
+            Expr::Name(_) | Expr::Un(..) | Expr::Bin(..) => self.holds_array(e),
+            _ => false,
+        }
+    }
+
+    /// True when `vectorize(e)` is just `e` in the engine.
+    fn elementwise_ok(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Bin(BinOp::Add | BinOp::Sub, a, b) => self.elementwise_ok(a) && self.elementwise_ok(b),
+            Expr::Bin(BinOp::Mul, a, b) => {
+                self.elementwise_ok(a) && self.elementwise_ok(b) && !(self.holds_array(a) && self.holds_array(b))
+            }
+            Expr::Bin(BinOp::Div, a, b) => self.elementwise_ok(a) && self.elementwise_ok(b) && !self.holds_array(b),
+            Expr::Un(UnOp::Transpose, a) => self.elementwise_ok(a),
+            Expr::Name(_) | Expr::Num(_) | Expr::Str(_) | Expr::Matrix { .. } | Expr::Postfix(..) => true,
+            other => !self.holds_array(other),
+        }
+    }
+
     fn unary(&mut self, op: UnOp, x: &Expr) -> R {
         match op {
             UnOp::Neg => {
@@ -652,8 +927,40 @@ impl Tr {
                 atom(format!("{}!", inner))
             }
             UnOp::Transpose => {
+                // The engine keeps vectors and matrices apart (`len`, `max`, indexing with one
+                // index and `vector(..)` want a vector), so a transposed row literal is the
+                // column vector itself and a double transpose is the operand.
+                if let Expr::Un(UnOp::Transpose, y) = x {
+                    return self.expr(y);
+                }
+                if self.display {
+                    // The author's form: the operand with a superscript T (the engine has no transpose
+                    // operator, so this is typeset only, never computed).
+                    let inner = self.operand(x, P_ATOM, true);
+                    return R {
+                        s: format!("{inner}^(T)"),
+                        prec: P_POW,
+                    };
+                }
+                if let Expr::Matrix { rows: 1, cols, items } = x {
+                    if *cols > 1 {
+                        return self.matrix(*cols, 1, items);
+                    }
+                }
                 let inner = self.expr(x).s;
                 atom(format!("transp({})", inner))
+            }
+            UnOp::Vectorize => {
+                // The engine's `+`, `-`, scalar `*` and `/` already work element by element; an
+                // element-by-element product or quotient of two arrays has no operator.
+                if !self.elementwise_ok(x) {
+                    self.issue(
+                        Code::VectorizeOperator,
+                        Some("an element-by-element product, quotient, power or call of arrays".into()),
+                    );
+                    return self.stand_in("vectorize(...)", "?vectorize?");
+                }
+                self.expr(x)
             }
             UnOp::Not => {
                 let _ = self.expr(x);
@@ -697,6 +1004,95 @@ impl Tr {
 
     fn render_args(&mut self, args: &[Expr]) -> Vec<String> {
         args.iter().map(|a| self.expr(a).s).collect()
+    }
+
+    /// The `#format` line that puts the number format in force (`None`: the default), or nothing when it already is.
+    /// Numbers written in an equation shown for reading are rounded by the format like any other, so a
+    /// displayed equation is always shown under the default one.
+    fn format_line(&mut self, want: Option<String>) -> Option<String> {
+        if self.fmt_cur == want {
+            return None;
+        }
+        self.fmt_cur = want.clone();
+        Some(match want {
+            Some(f) => format!("#format {f}"),
+            None => "#format default".to_string(),
+        })
+    }
+
+    /// The author's name for an engine name (the same name unless it was renamed to stay apart from a unit).
+    fn author_name(&self, flat: &str) -> String {
+        self.renamed.get(flat).cloned().unwrap_or_else(|| flat.to_string())
+    }
+
+    /// Runs `f` in display mode (the author's own equation, typeset and never computed) with the
+    /// issue list, parameters and temporaries left as they were. Returns what `f` made, and whether
+    /// the rendering is clean: nothing the engine could not convert, nothing hoisted.
+    fn displaying<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> (T, bool) {
+        let saved_cur = std::mem::take(&mut self.cur);
+        let saved_params = std::mem::take(&mut self.params);
+        let saved_hoisted = std::mem::take(&mut self.hoisted);
+        self.display = true;
+        self.display_renamed = false;
+        let out = f(self);
+        let clean = self.cur.iter().all(|p| p.code.severity() != Severity::Gap) && self.hoisted.is_empty();
+        self.display = false;
+        self.params = saved_params;
+        self.hoisted = saved_hoisted;
+        self.cur = saved_cur;
+        (out, clean)
+    }
+
+    /// `name = value` as the author wrote the definition, for a `#noc` block; `None` when it cannot
+    /// be shown faithfully (then the computed form is shown as before).
+    fn display_define(&mut self, target: &Target, value: &Expr) -> Option<String> {
+        let (text, clean) = self.displaying(|t| {
+            let head = match target {
+                Target::Var(n) => t.author_name(&tables::normalise_name(&n.flat())),
+                Target::Func(n, ps) => {
+                    let plist: Vec<String> = ps.iter().map(|p| tables::normalise_name(&p.flat())).collect();
+                    t.params = plist.clone();
+                    let shown: Vec<String> = plist.iter().map(|p| t.author_name(p)).collect();
+                    format!(
+                        "{}({})",
+                        t.author_name(&tables::normalise_name(&n.flat())),
+                        shown.join("; ")
+                    )
+                }
+                _ => return None,
+            };
+            Some(format!("{head} = {}", t.expr(value).s))
+        });
+        text.filter(|t| clean && plausible_calcpad(t))
+    }
+
+    /// `name.(index) = value` for the definition of one element or of every element over range variables.
+    fn display_element(&mut self, base: &Name, index: &[Expr], value: &Expr) -> Option<String> {
+        let (text, clean) = self.displaying(|t| {
+            let idx: Vec<String> = index.iter().map(|i| t.expr(i).s).collect();
+            let head = format!(
+                "{}.({})",
+                t.author_name(&tables::normalise_name(&base.flat())),
+                idx.join("; ")
+            );
+            format!("{head} = {}", t.expr(value).s)
+        });
+        Some(text).filter(|t| clean && plausible_calcpad(t))
+    }
+
+    /// An evaluation's expression as the author wrote it, for a `#noc` block, and whether any name in
+    /// it differs from the engine's.
+    fn display_eval(&mut self, expr: &Expr, unit: Option<&Expr>) -> Option<(String, bool)> {
+        let ((text, renamed), clean) = self.displaying(|t| {
+            let e = t.expr(expr);
+            let mut s = e.s.clone();
+            if let Some(u) = unit {
+                let inner = if e.prec >= P_ATOM { e.s } else { format!("({})", e.s) };
+                s = format!("{}|{}", inner, t.expr(u).s);
+            }
+            (s, t.display_renamed)
+        });
+        (clean && plausible_calcpad(&text)).then_some((text, renamed))
     }
 
     /// The statement of an unconverted region as the reader should see it: Calcpad-style maths
@@ -953,10 +1349,10 @@ impl Tr {
                     );
                     head.push(format!("{lo} = {a}"));
                     head.push(format!("{hi} = {z}"));
-                    let size = if o == 1 {
-                        format!("max({lo}; {hi})")
-                    } else {
-                        format!("max({lo}; {hi}) - {}", o - 1)
+                    let size = match o {
+                        1 => format!("max({lo}; {hi})"),
+                        o if o > 1 => format!("max({lo}; {hi}) - {}", o - 1),
+                        o => format!("max({lo}; {hi}) + {}", 1 - o),
                     };
                     sizes.push(size);
                     loops.push(format!(
@@ -970,7 +1366,7 @@ impl Tr {
         } else {
             format!("{f} = matrix({}; {})", sizes[0], sizes[1])
         };
-        let mut out = vec!["#val".to_string()];
+        let mut out = vec!["#hide".to_string()];
         out.extend(head);
         out.push(alloc);
         for (d, l) in loops.iter().enumerate() {
@@ -989,8 +1385,262 @@ impl Tr {
         for d in (0..loops.len()).rev() {
             out.push(format!("{}#loop", "    ".repeat(d)));
         }
-        out.push("#end val".to_string());
+        out.push("#end hide".to_string());
         Ok(out.join("\n"))
+    }
+
+    /// The one range variable an expression reads (not as a function argument or a bound name),
+    /// when it reads exactly one.
+    fn table_range(&self, e: &Expr) -> Option<(String, RangeInfo)> {
+        let mut hit: Vec<(String, RangeInfo)> = self
+            .ranges
+            .iter()
+            .filter(|(k, _)| !self.params.contains(k) && !self.locals.contains_key(*k) && mentions(e, k))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        (hit.len() == 1).then(|| hit.remove(0))
+    }
+
+    /// Loops over a range variable, in the range's own order, collecting `rhs` into a new array
+    /// that is then shown (`tail` is a `|unit` conversion).
+    fn table_loops(&mut self, iv: &str, info: &RangeInfo, rhs: &str, pre: &[String], tail: &str) -> String {
+        self.prog_n += 1;
+        let n = self.prog_n;
+        let (a, z) = (&info.a, &info.z);
+        let (lo, hi, k, tbl) = (
+            format!("{iv}_a{n}"),
+            format!("{iv}_z{n}"),
+            format!("{iv}_k{n}"),
+            format!("tbl_{n}"),
+        );
+        let mut out = vec![
+            "#hide".to_string(),
+            format!("{lo} = {a}"),
+            format!("{hi} = {z}"),
+            format!("{tbl} = vector(abs({hi} - {lo}) + 1)"),
+            format!("#for {k} = 0 : abs({hi} - {lo})"),
+            format!("{iv} = {lo} + {k}*if({hi} ≥ {lo}; 1; -1)"),
+        ];
+        out.extend(pre.iter().map(|p| format!("    {p}")));
+        out.push(format!("    {tbl}.({k} + 1) = {rhs}"));
+        out.push("#loop".to_string());
+        out.push("#end hide".to_string());
+        out.push(format!("{tbl}{tail}"));
+        out.join("\n")
+    }
+
+    /// A global definition (`x == 5`) holds from the top of the worksheet, wherever it is written.
+    /// Those that are plain constants (numbers and units) are defined first, out of sight; the
+    /// definition itself still appears, and is converted, where it stands.
+    fn hoist_globals(&mut self, rows: &[Vec<Region>]) {
+        fn constant(e: &Expr) -> bool {
+            match e {
+                Expr::Num(_) => true,
+                Expr::Un(UnOp::Neg, a) => constant(a),
+                Expr::Bin(op, a, b) => {
+                    matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Pow)
+                        && constant(a)
+                        && constant(b)
+                }
+                Expr::Name(n) => n.sub.is_none() && tables::map_unit(&n.base).is_some(),
+                Expr::Postfix(_, a) => constant(a),
+                _ => false,
+            }
+        }
+        let mut lines = Vec::new();
+        for r in rows.iter().flatten() {
+            let RegionKind::Math(m) = &r.kind else { continue };
+            let Stmt::Define {
+                target: Target::Var(n),
+                value,
+                global: true,
+            } = &m.stmt
+            else {
+                continue;
+            };
+            let flat = tables::normalise_name(&n.flat());
+            if m.disabled || !valid_ident(&flat) || flat == "ORIGIN" || !constant(value) {
+                continue;
+            }
+            self.cur.clear();
+            let rhs = self.expr(value);
+            if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                lines.push(format!("{flat} = {}", rhs.s));
+                self.defined.insert(flat);
+            }
+            self.cur.clear();
+        }
+        if !lines.is_empty() {
+            self.lines.push("#hide".to_string());
+            self.lines.extend(lines);
+            self.lines.push("#show".to_string());
+        }
+    }
+
+    /// Translates the regions row by row, in reading order. Regions that share a row are put side
+    /// by side: a run of rows that each hold the same number of text regions (a legend of symbol and
+    /// description) becomes a table, any other row with two or more regions that wrote something
+    /// becomes a wrapping flex row with one block per region. The order the regions are translated
+    /// in, and so the order the engine evaluates them in, is the reading order either way.
+    fn layout_rows(&mut self, rows: &[Vec<Region>]) {
+        self.hoist_globals(rows);
+        struct Cell {
+            text: bool,
+            lines: Vec<String>,
+        }
+        impl Cell {
+            /// Something shows: a cell of comments only does not take part in the layout.
+            fn visible(&self) -> bool {
+                self.lines.iter().any(|l| !l.starts_with("'<!--"))
+            }
+        }
+        // A picture with text to its right that spans the picture's height is one block: the picture
+        // on the left and those texts stacked beside it, whatever baselines the texts sit on.
+        let mut beside: HashMap<(usize, usize), Vec<(usize, usize)>> = HashMap::new();
+        let mut taken: HashSet<(usize, usize)> = HashSet::new();
+        for (ri, row) in rows.iter().enumerate() {
+            for (ci, p) in row.iter().enumerate() {
+                if !matches!(p.kind, RegionKind::Picture(_))
+                    || p.width <= 0.0
+                    || p.height <= 0.0
+                    || taken.contains(&(ri, ci))
+                {
+                    continue;
+                }
+                let bottom = p.top + p.height;
+                let mut stack = Vec::new();
+                for (rj, other) in rows.iter().enumerate().skip(ri) {
+                    if other
+                        .iter()
+                        .all(|q| q.baseline.unwrap_or(q.top) > bottom + ROW_TOLERANCE)
+                    {
+                        break;
+                    }
+                    for (cj, q) in other.iter().enumerate() {
+                        if (rj, cj) != (ri, ci)
+                            && matches!(q.kind, RegionKind::Text(_))
+                            && q.left >= p.left + p.width - 1.0
+                            && q.top < bottom
+                            && q.top + q.height > p.top
+                            && !taken.contains(&(rj, cj))
+                        {
+                            stack.push((rj, cj));
+                        }
+                    }
+                }
+                if !stack.is_empty() {
+                    taken.extend(stack.iter().copied());
+                    beside.insert((ri, ci), stack);
+                }
+            }
+        }
+        let mut done: Vec<Vec<Cell>> = Vec::new();
+        for row in rows {
+            let mut cells = Vec::new();
+            for r in row {
+                let start = self.lines.len();
+                self.region(r);
+                let lines = self.lines.split_off(start);
+                cells.push(Cell {
+                    text: matches!(r.kind, RegionKind::Text(_)),
+                    lines,
+                });
+            }
+            done.push(cells);
+        }
+        for (&(ri, ci), stack) in &beside {
+            let mut block = vec![
+                "'<div class=\"imported-side\" style=\"display:flex;gap:1em;align-items:flex-start\">".to_string(),
+                "'<div style=\"flex:none\">".to_string(),
+            ];
+            block.extend(done[ri][ci].lines.iter().cloned());
+            block.push("'</div>".to_string());
+            block.push("'<div>".to_string());
+            for &(rj, cj) in stack {
+                block.extend(std::mem::take(&mut done[rj][cj].lines));
+            }
+            block.push("'</div>".to_string());
+            block.push("'</div>".to_string());
+            done[ri][ci].lines = block;
+        }
+        // Side by side only when the regions of the row do not overlap across (a region nested in a
+        // text region sits inside it, not beside it).
+        let apart: Vec<bool> = rows
+            .iter()
+            .map(|row| {
+                row.windows(2)
+                    .all(|w| w[0].width > 0.0 && w[1].left >= w[0].left + w[0].width - 1.0)
+            })
+            .collect();
+        let page_left = rows.iter().flatten().map(|r| r.left).fold(f64::INFINITY, f64::min);
+        let page_left = if page_left.is_finite() { page_left } else { 0.0 };
+        let shown = |row: &Vec<Cell>| row.iter().filter(|c| c.visible()).count();
+        let text_pair = |k: usize| {
+            let row = &done[k];
+            let n = shown(row);
+            apart[k] && (2..=4).contains(&n) && row.iter().filter(|c| c.visible()).all(|c| c.text) && n == row.len()
+        };
+        let mut i = 0;
+        while i < done.len() {
+            if text_pair(i) {
+                let n = done[i].len();
+                let mut j = i;
+                while j < done.len() && text_pair(j) && done[j].len() == n {
+                    j += 1;
+                }
+                self.lines.push("'<table class=\"imported-grid\">".to_string());
+                for row in &done[i..j] {
+                    self.lines.push("'<tr>".to_string());
+                    for c in row {
+                        self.lines.push("'<td>".to_string());
+                        self.lines.extend(c.lines.iter().cloned());
+                        self.lines.push("'</td>".to_string());
+                    }
+                    self.lines.push("'</tr>".to_string());
+                }
+                self.lines.push("'</table>".to_string());
+                i = j;
+            } else if apart[i] && shown(&done[i]) >= 2 {
+                for c in done[i].iter().filter(|c| !c.visible()) {
+                    self.lines.extend(c.lines.iter().cloned());
+                }
+                self.lines.push(
+                    "'<div class=\"imported-row\" style=\"display:flex;flex-wrap:wrap;gap:0 2em;align-items:baseline;align-items:last baseline\">"
+                        .to_string(),
+                );
+                // Each block sits where the source puts it: the gap to the block before it, when the
+                // file gives widths.
+                let mut prev_right: Option<f64> = None;
+                for (c, r) in done[i].iter().zip(rows[i].iter()).filter(|(c, _)| c.visible()) {
+                    let style = match prev_right {
+                        Some(pr) if r.left - pr > 16.0 => {
+                            format!(" style=\"margin-left:{:.0}pt\"", (r.left - pr - 24.0).clamp(0.0, 600.0))
+                        }
+                        _ => String::new(),
+                    };
+                    prev_right = (r.width > 0.0).then_some(r.left + r.width);
+                    self.lines.push(format!("'<div{style}>"));
+                    self.lines.extend(c.lines.iter().cloned());
+                    self.lines.push("'</div>".to_string());
+                }
+                self.lines.push("'</div>".to_string());
+                i += 1;
+            } else {
+                for (c, r) in done[i].iter().zip(rows[i].iter()) {
+                    // An equation keeps the indent the source gives it from the page margin.
+                    let indent = r.left - page_left;
+                    let typeset = c.lines.iter().any(|l| l.contains("class=\"imp-eq\""));
+                    if matches!(r.kind, RegionKind::Math(_)) && typeset && indent >= 3.0 {
+                        let with = format!("class=\"imp-eq\" style=\"margin-left:{indent:.0}pt\"");
+                        self.lines
+                            .extend(c.lines.iter().map(|l| l.replace("class=\"imp-eq\"", &with)));
+                    } else {
+                        self.lines.extend(c.lines.iter().cloned());
+                    }
+                }
+                i += 1;
+            }
+        }
     }
 
     /// Lowers a program that is the value of `name := program` to Calcpad statements and the
@@ -1010,6 +1660,18 @@ impl Tr {
         let saved_locals = std::mem::take(&mut self.locals);
         let saved_arrays = std::mem::take(&mut self.local_arrays);
         self.zero_started.clear();
+        let saved_zero_units = std::mem::take(&mut self.zero_units);
+        {
+            let mut locals = HashSet::new();
+            program_locals(body, &mut locals);
+            let mut zeroed = Vec::new();
+            zero_assigned(body, &mut zeroed);
+            for b in zeroed {
+                if let Some(r) = first_accumulated(body, &b, &mut HashMap::new(), &locals) {
+                    self.zero_units.insert(b, r);
+                }
+            }
+        }
         let mut lines = Vec::new();
         // A `return` before the end is a result variable and a done flag, so nothing after it runs.
         let early = body.iter().any(may_return);
@@ -1039,13 +1701,14 @@ impl Tr {
                 if lines.is_empty() {
                     Ok((def, is_array))
                 } else {
-                    Ok((format!("#val\n{}\n#end val\n{}", lines.join("\n"), def), is_array))
+                    Ok((format!("#hide\n{}\n#end hide\n{}", lines.join("\n"), def), is_array))
                 }
             }
             Err(e) => Err(e),
         };
         self.locals = saved_locals;
         self.local_arrays = saved_arrays;
+        self.zero_units = saved_zero_units;
         self.ret = saved_ret;
         out
     }
@@ -1135,17 +1798,36 @@ impl Tr {
                         return Err("an element index that is not one or two numbers".into());
                     }
                     // The source lets a literal 0 take the units of what is added to it; the engine does
-                    // not, so an array started from 0 and then accumulated into is not converted.
+                    // not. A 0 that is later added to gets the units of the first value added (`0*getunits(x)`
+                    // is a zero in those units), so the sums are consistent; the units are read from the first
+                    // term with the loop variables at their first values, which is only possible when that term
+                    // reads nothing the program sets.
                     let is_zero = matches!(e, Expr::Num(s) if s.trim().parse::<f64>() == Ok(0.0));
+                    let mut zero_rhs = None;
                     if is_zero {
                         self.zero_started.insert(mapped.clone());
-                    } else if self.zero_started.contains(&mapped) && mentions(e, &flat) {
+                        match self.zero_units.get(&flat).cloned() {
+                            Some(Ok(term)) => zero_rhs = Some(format!("0*getunits({})", self.expr(&term).s)),
+                            Some(Err(why)) => {
+                                return Err(format!(
+                                    "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, and here {why}"
+                                ))
+                            }
+                            None => {}
+                        }
+                    } else if self.zero_started.contains(&mapped)
+                        && mentions(e, &flat)
+                        && !self.zero_units.contains_key(&flat)
+                    {
                         return Err(format!(
                             "{flat} starts from a unitless 0 and is then added to: the source lets 0 take the units of what is added, the engine reports inconsistent units"
                         ));
                     }
                     let parts: Vec<String> = index.iter().map(|i| self.index_expr(i)).collect();
-                    let rhs = self.expr(e).s;
+                    let rhs = match zero_rhs {
+                        Some(z) => z,
+                        None => self.expr(e).s,
+                    };
                     out.push(format!("{pad}{mapped}.({}) = {rhs}", parts.join("; ")));
                 }
                 PStmt::For { var, range, body } => {
@@ -1359,6 +2041,48 @@ impl Tr {
         atom(format!("$Integral{{{b} @ {v} = {lo} : {hi}}}"))
     }
 
+    /// `$Sum{body @ i = lo : hi}` (or `$Product`). Without bounds the operator runs over the range
+    /// variable of the same name, whose bounds are those the earlier region gave it.
+    fn series(&mut self, product: bool, var: &Name, body: &Expr, bounds: Option<&(Box<Expr>, Box<Expr>)>) -> R {
+        let v = tables::normalise_name(&var.flat());
+        if !valid_ident(&v) {
+            self.issue(Code::InvalidName, Some(v));
+            return atom("?name?");
+        }
+        let (lo, hi) = match bounds {
+            Some((lo, hi)) => {
+                if mentions(lo, &v) || mentions(hi, &v) {
+                    self.issue(
+                        Code::SummationOperator,
+                        Some("a bound uses the summation variable's name".into()),
+                    );
+                    if !self.readable {
+                        return atom("?summation?");
+                    }
+                }
+                (self.expr(lo).s, self.expr(hi).s)
+            }
+            None => match self.ranges.get(&v).cloned() {
+                Some(info) if !self.params.contains(&v) => (info.a, info.z),
+                _ => {
+                    self.issue(
+                        Code::SummationOperator,
+                        Some(format!("{v} is not a range variable with bounds")),
+                    );
+                    if !self.readable {
+                        return atom("?summation?");
+                    }
+                    ("?".into(), "?".into())
+                }
+            },
+        };
+        self.params.push(v.clone());
+        let b = self.expr(body).s;
+        self.params.pop();
+        let op = if product { "Product" } else { "Sum" };
+        atom(format!("${op}{{{b} @ {v} = {lo} : {hi}}}"))
+    }
+
     /// `$Slope{body @ x = x}`: the derivative at the value `x` has now. If `x` has no value in the
     /// sheet the source would not have calculated it either, so that is reported as such.
     fn derivative(&mut self, var: &Name, body: &Expr) -> R {
@@ -1395,6 +2119,24 @@ impl Tr {
     }
 
     fn name_ref(&mut self, n: &Name) -> R {
+        if self.display {
+            // A range variable is a name like any other on the page.
+            let flat = tables::normalise_name(&n.flat());
+            if self.ranges.contains_key(&flat) && !n.unit {
+                return atom(self.author_name(&flat));
+            }
+        }
+        let r = self.name_ref_engine(n);
+        if self.display {
+            if let Some(orig) = self.renamed.get(&r.s) {
+                self.display_renamed = true;
+                return atom(orig.clone());
+            }
+        }
+        r
+    }
+
+    fn name_ref_engine(&mut self, n: &Name) -> R {
         let flat = tables::normalise_name(&n.flat());
         // The file says this identifier is a unit: it is, whatever variables exist.
         if n.unit && n.sub.is_none() {
@@ -1478,6 +2220,28 @@ impl Tr {
         }
         let rendered = self.render_args(args);
         let shown_call = format!("{}({})", flat, rendered.join("; "));
+        // `x / SIUnitsOf(x)` is the number of `x` in SI base units. The engine holds SI values but
+        // has no function for their unit, only `getunits` for the unit a value is shown in.
+        if flat == "SIUnitsOf" && n.sub.is_none() && !self.funcs.contains_key(&flat) && args.len() == 1 {
+            self.issue(Code::SiUnitScale, None);
+            return atom(format!("getunits({})", rendered[0]));
+        }
+        // `last(v)` is the index of the last element: the array origin plus the length less one.
+        if flat == "last" && n.sub.is_none() && !self.funcs.contains_key(&flat) && args.len() == 1 {
+            let o = self.origin - 1;
+            let len = format!("len({})", rendered[0]);
+            return match o {
+                0 => atom(len),
+                o if o > 0 => R {
+                    s: format!("{len} + {o}"),
+                    prec: P_ADD,
+                },
+                o => R {
+                    s: format!("{len} - {}", -o),
+                    prec: P_ADD,
+                },
+            };
+        }
         if let Some(&arity) = self.funcs.get(&flat) {
             if arity != args.len() {
                 self.issue(Code::ArityMismatch, Some(flat.clone()));
@@ -1558,7 +2322,8 @@ impl Tr {
 
     /// An array index shifted from the sheet's origin to Calcpad's 1.
     fn index_expr(&mut self, e: &Expr) -> String {
-        let delta = 1 - self.origin;
+        // The author's own index is shown as written; only the computed form is shifted to the engine's origin.
+        let delta = if self.display { 0 } else { 1 - self.origin };
         if delta != 0 {
             self.issue(Code::ArrayOrigin, None);
         }
@@ -1617,10 +2382,16 @@ impl Tr {
         }
         if cols == 1 {
             let v: Vec<String> = (0..rows).map(|r| at(r, 0)).collect();
-            return atom(format!("[{}]", v.join("; ")));
+            // Displayed, a column has one item per row (`|` starts a row).
+            let sep = if self.display { " | " } else { "; " };
+            return atom(format!("[{}]", v.join(sep)));
         }
         if rows == 1 {
             let v: Vec<String> = (0..cols).map(|c| at(0, c)).collect();
+            if self.display {
+                // Displayed, a row is the items side by side.
+                return atom(format!("[{}]", v.join("; ")));
+            }
             return atom(format!("transp([{}])", v.join("|")));
         }
         let body: Vec<String> = (0..rows)
@@ -1702,11 +2473,18 @@ impl Tr {
             note
         ));
         let Some(lines) = body else { return };
+        if let Some(ml) = self.pending_ml.take() {
+            self.lines.push(ml);
+            return;
+        }
         let mut in_noc = false;
         for (eq, text) in lines {
             let one_line: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
             if *eq {
                 if !in_noc {
+                    if let Some(l) = self.format_line(None) {
+                        self.lines.push(l);
+                    }
                     self.lines.push("#noc".to_string());
                     in_noc = true;
                 }
@@ -1716,11 +2494,7 @@ impl Tr {
                     self.lines.push("#end noc".to_string());
                     in_noc = false;
                 }
-                // Leading `&emsp;` indents are markup already; the rest is text.
-                let indent_len = one_line.len() - one_line.trim_start_matches("&emsp;").len();
-                let (indent, rest) = one_line.split_at(indent_len);
-                let rest: String = rest.chars().take(600).collect();
-                self.lines.push(format!("'{indent}<code>{}</code>", escape_text(&rest)));
+                // Source that is not maths is not shown: the reader sees the note, never code.
             }
         }
         if in_noc {
@@ -1880,7 +2654,7 @@ impl Tr {
             RegionKind::PageBreak => self.report.page_breaks += 1,
             RegionKind::Text(paras) => {
                 for p in paras {
-                    if let Some(l) = text_line(p) {
+                    if let Some(l) = text_line(p, &self.text_styles, &mut self.colors) {
                         self.lines.push(l);
                     }
                 }
@@ -1911,6 +2685,204 @@ impl Tr {
         }
     }
 
+    /// The lines a converted math region puts on the page. A plain definition is computed out of
+    /// sight and shows the author's equation only (a definition shows no result in the source). An
+    /// evaluation shows the expression and its result at the precision the file used; when the
+    /// engine would show a renamed variable, the author's expression is typeset first.
+    fn present(
+        &mut self,
+        m: &MathRegion,
+        shape: &str,
+        plain_def: bool,
+        elem_def: bool,
+        multi_def: bool,
+        line: String,
+    ) -> String {
+        if multi_def {
+            if let Stmt::Define { target, value, global } = &m.stmt {
+                if let Some(typeset) = self.typeset_define(target, value, *global) {
+                    return format!("#hide\n{line}\n#end hide\n{typeset}");
+                }
+            }
+            return line;
+        }
+        if plain_def {
+            if let Stmt::Define { target, value, global } = &m.stmt {
+                if let Some(shown) = self.display_define(target, value) {
+                    if let Some(typeset) = self.typeset_define(target, value, *global) {
+                        return format!("#hide\n{line}\n#end hide\n{typeset}");
+                    }
+                    let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
+                    return format!("{fmt}#hide\n{line}\n#end hide\n#noc\n{shown}\n#end noc");
+                }
+            }
+            return line;
+        }
+        if elem_def {
+            if let Stmt::Define {
+                target: target @ Target::Element { base: Some(b), index },
+                value,
+                global,
+            } = &m.stmt
+            {
+                if let Some(shown) = self.display_element(b, index, value) {
+                    // The whole computation goes out of sight, the author's equation is shown.
+                    let hidden = match line.split_once("\n#show\n") {
+                        Some((alloc, assign)) if line.starts_with("#hide\n") => {
+                            format!("{alloc}\n#show\n#hide\n{assign}\n#end hide")
+                        }
+                        _ => line,
+                    };
+                    if let Some(typeset) = self.typeset_define(target, value, *global) {
+                        return format!("{hidden}\n{typeset}");
+                    }
+                    let fmt = self.format_line(None).map(|l| format!("{l}\n")).unwrap_or_default();
+                    return format!("{fmt}{hidden}\n#noc\n{shown}\n#end noc");
+                }
+            }
+            return line;
+        }
+        if shape != "evaluation" {
+            return line;
+        }
+        let mut out = String::new();
+        // The file's decimal places (three when it says nothing, the tool's own default), as a number
+        // format: fixed decimals without trailing zeros. Display only: every value is computed in full.
+        let places = m.precision.or(self.default_precision).unwrap_or(3);
+        let fmt = if places == 0 {
+            "0".to_string()
+        } else {
+            format!("0.{}", "#".repeat(places as usize))
+        };
+        let mut scroll = false;
+        // An expression of a range variable: the loop that collects the values stays out of sight,
+        // and the author's left side is shown with the collected column as its value.
+        if let Stmt::Eval { expr, .. } = &m.stmt {
+            if self.table_range(expr).is_some() {
+                if let Some((hide, last)) = line.rsplit_once('\n').filter(|(h, _)| h.ends_with("#end hide")) {
+                    if let Some(head) = self.typeset_eval_head(expr) {
+                        self.uses_val_ml = true;
+                        return format!(
+                            "{hide}\n#round {places}\n'<div class=\"imp-eq\"><math class=\"imp-m\">{head}\n#val\n{last}\n#end val\n'</math></div>\n#round 12"
+                        );
+                    }
+                }
+            }
+        }
+        if let Stmt::Eval { expr, unit } = &m.stmt {
+            let shown = self.display_eval(expr, unit.as_ref());
+            // The author's left side typeset, and the engine's own value after it (with its unit once).
+            if let (Some(_), false) = (&shown, line.contains('\n')) {
+                if let Some(head) = self.typeset_eval_head(expr) {
+                    self.uses_val_ml = true;
+                    return format!(
+                        "#round {places}\n'<div class=\"imp-eq\"><math class=\"imp-m\">{head}\n#val\n{line}\n#end val\n'</math></div>\n#round 12"
+                    );
+                }
+            }
+            if let Some((shown, renamed)) = shown {
+                if renamed {
+                    if let Some(l) = self.format_line(None) {
+                        out.push_str(&format!("{l}\n"));
+                    }
+                    out.push_str(&format!("#noc\n{shown}\n#end noc\n"));
+                }
+            }
+            // A matrix result is one row of the page in the source, and scrolls there when long.
+            scroll = self.yields_array(expr);
+        }
+        if let Some(l) = self.format_line(Some(fmt)) {
+            out.push_str(&format!("{l}\n"));
+        }
+        if scroll {
+            out.push_str(&format!("'<div class=\"imp-scroll\">\n{line}\n'</div>"));
+        } else {
+            out.push_str(&line);
+        }
+        out
+    }
+
+    /// Whether an identifier is read as a unit label where the equation sits.
+    fn is_unit_name(&self, n: &Name) -> bool {
+        if n.sub.is_some() || tables::map_unit(&n.base).is_none() {
+            return false;
+        }
+        if n.unit {
+            return true;
+        }
+        if n.var {
+            return false;
+        }
+        // A one-letter name the file does not label as a unit is a variable (an unknown of a
+        // solve block); longer unlabelled names such as `ft` are units where nothing defines them.
+        if n.base.chars().count() == 1 {
+            return false;
+        }
+        let flat = tables::normalise_name(&n.flat());
+        !(self.defined.contains(&flat)
+            || self.params.contains(&flat)
+            || self.funcs.contains_key(&flat)
+            || self.ranges.contains_key(&flat)
+            || self.locals.contains_key(&flat)
+            || self.gap_names.contains_key(&flat))
+    }
+
+    /// A definition as MathML, as an output line; `None` when the option is off or the equation has a
+    /// part this module does not typeset.
+    fn typeset_define(&self, target: &Target, value: &Expr, global: bool) -> Option<String> {
+        if !self.opts.mathml {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
+            original: &original,
+        };
+        ml.define(target, value, global).map(|m| mathml::line(&m))
+    }
+
+    /// An unconverted region's statement as MathML (a constraint, a check, an evaluation or a
+    /// definition that the engine could not run), as an output line.
+    fn typeset_gap(&self, stmt: &Stmt) -> Option<String> {
+        if !self.opts.mathml {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
+            original: &original,
+        };
+        let m = match stmt {
+            Stmt::Bare(e) => ml.bare(e)?,
+            Stmt::Eval { expr, .. } => mathml::wrap(&ml.eval_head(expr)?),
+            Stmt::Define { target, value, global } => ml.define(target, value, *global)?,
+            _ => return None,
+        };
+        Some(mathml::line(&m))
+    }
+
+    /// The left side of an evaluation (`expr =`) as MathML.
+    fn typeset_eval_head(&self, expr: &Expr) -> Option<String> {
+        if !self.opts.mathml {
+            return None;
+        }
+        let is_unit = |n: &Name| self.is_unit_name(n);
+        let is_user_fn = |n: &Name| self.funcs.contains_key(&tables::normalise_name(&n.flat()));
+        let original = |b: &str| self.renamed.get(b).cloned();
+        let ml = MathMl {
+            is_unit: &is_unit,
+            is_user_fn: &is_user_fn,
+            original: &original,
+        };
+        ml.eval_head(expr)
+    }
+
     fn math(&mut self, r: &Region, m: &MathRegion) {
         self.cur.clear();
         self.params.clear();
@@ -1927,6 +2899,9 @@ impl Tr {
         let mut poison: Vec<String> = Vec::new();
         let mut origin_assign: Option<i64> = None;
         let mut range_def: Option<(String, RangeInfo)> = None;
+        let mut multi_names: Vec<String> = Vec::new();
+        let mut plain_def = false;
+        let mut elem_def = false;
         let shape: &str;
 
         match &m.stmt {
@@ -2029,8 +3004,7 @@ impl Tr {
                         } else {
                             self.expr(value)
                         };
-                        let is_array = matches!(value, Expr::Matrix { .. })
-                            || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack" | "lsolve" | "submatrix"));
+                        let is_array = self.yields_array(value);
                         if let Some((_, info)) = &range_def {
                             let (a, z) = (&info.a, &info.z);
                             self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
@@ -2039,9 +3013,11 @@ impl Tr {
                             ));
                         } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                             emitted = Some(format!("{} = {}", flat, rhs.s));
+                            plain_def = true;
                         } else {
                             attempt = Some(format!("{} = {}", flat, rhs.s));
                         }
+                        self.elem_built.remove(&flat);
                         define_name = Some((flat, None, is_array));
                         if *global {
                             self.issue(Code::GlobalDefinition, None);
@@ -2066,6 +3042,7 @@ impl Tr {
                         let head = format!("{}({})", flat, plist.join("; "));
                         if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                             emitted = Some(format!("{} = {}", head, rhs.s));
+                            plain_def = true;
                         } else {
                             attempt = Some(format!("{} = {}", head, rhs.s));
                         }
@@ -2075,10 +3052,31 @@ impl Tr {
                         }
                     }
                     Target::Multi(names) => {
-                        self.issue(
-                            Code::BadStructure,
-                            Some("matrix of names as a definition target".into()),
-                        );
+                        let flats: Vec<String> = names.iter().map(|b| tables::normalise_name(&b.flat())).collect();
+                        let distinct = flats.iter().enumerate().all(|(k, f)| !flats[..k].contains(f));
+                        match value {
+                            // `[A, B] := [1, 2]` defines each name from the item in its place.
+                            Expr::Matrix { items, .. }
+                                if items.len() == flats.len() && distinct && flats.iter().all(|f| valid_ident(f)) =>
+                            {
+                                let mut out = Vec::new();
+                                for (f, it) in flats.iter().zip(items) {
+                                    let rhs = self.expr(it);
+                                    out.push(format!("{f} = {}", rhs.s));
+                                }
+                                let text = out.join("\n");
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    emitted = Some(text);
+                                    multi_names = flats.clone();
+                                } else {
+                                    attempt = Some(text);
+                                }
+                            }
+                            _ => self.issue(
+                                Code::BadStructure,
+                                Some("matrix of names as a definition target".into()),
+                            ),
+                        }
                         poison.extend(
                             names
                                 .iter()
@@ -2122,43 +3120,150 @@ impl Tr {
                             (Some(_), Some(r)) if r.is_empty() || r.len() > 2 || !distinct => {
                                 Some("the index is not one or two different range variables")
                             }
-                            (Some(f), Some(_))
-                                if self.defined.contains(f)
+                            (Some(f), Some(r))
+                                if (self.defined.contains(f)
                                     || self.funcs.contains_key(f)
-                                    || self.gap_names.contains_key(f) =>
+                                    || self.gap_names.contains_key(f))
+                                    && !(self.elem_built.get(f) == Some(&1)
+                                        && r.len() == 1
+                                        && !self.funcs.contains_key(f)
+                                        && !self.gap_names.contains_key(f)
+                                        && r[0].1.a == self.origin.to_string()) =>
                             {
                                 Some("the array already has a value, so growing or overwriting it element by element is not read")
                             }
                             (Some(f), Some(_)) if mentions(value, f) => Some("the value reads the array it is filling"),
                             _ => None,
                         };
-                        match (why, flat, ranges) {
-                            (None, Some(f), Some(rs)) => {
-                                for (iv, _) in &rs {
-                                    self.params.push(iv.clone());
+                        let lits: Option<Vec<i64>> = index
+                            .iter()
+                            .map(|e| match e {
+                                Expr::Num(s) => is_int_literal(s),
+                                _ => None,
+                            })
+                            .collect();
+                        let fresh = flat.as_ref().is_some_and(|f| {
+                            !self.defined.contains(f) && !self.funcs.contains_key(f) && !self.gap_names.contains_key(f)
+                        });
+                        // One element of a vector that has a value, at an index that is not a loop: the
+                        // vector grows (zeros) when the index is past its end, then the element is set.
+                        let grow = match (&flat, &ranges) {
+                            (Some(f), None) if index.len() == 1 && self.arrays.contains(f) => Some(f.clone()),
+                            _ => None,
+                        };
+                        if let Some(f) = grow {
+                            let idx = self.index_expr(&index[0]);
+                            let rhs = self.expr(value);
+                            let pre = std::mem::take(&mut self.hoisted);
+                            if !pre.is_empty() {
+                                self.issue(
+                                    Code::ElementAssignment,
+                                    Some("the value indexes the result of a call".to_string()),
+                                );
+                            } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                emitted = Some(format!(
+                                    "#hide\n{f} = resize({f}; max(len({f}); {idx}))\n#show\n{f}.({idx}) = {}",
+                                    rhs.s
+                                ));
+                                elem_def = true;
+                                self.elem_built.remove(&f);
+                            } else {
+                                attempt = Some(format!("{f}.({idx}) = {}", rhs.s));
+                            }
+                        } else {
+                            let literal = match (&flat, &lits) {
+                                (Some(f), Some(l))
+                                    if fresh && (l.len() == 1 || l.len() == 2) && !mentions(value, f) =>
+                                {
+                                    Some((f.clone(), l.clone()))
                                 }
+                                _ => None,
+                            };
+                            if let Some((f, l)) = literal {
+                                // One element of an array that has no value yet: the array is created
+                                // (zeros) just large enough, without being shown, and the element set.
+                                let idx: Vec<String> = index.iter().map(|e| self.index_expr(e)).collect();
                                 let rhs = self.expr(value);
-                                let idx: Vec<String> = rs
-                                    .iter()
-                                    .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
-                                    .collect();
-                                for _ in &rs {
-                                    self.params.pop();
-                                }
                                 let pre = std::mem::take(&mut self.hoisted);
-                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
-                                    match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
-                                        Ok(t) => emitted = Some(t),
-                                        Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                let ok = idx.iter().all(|s| s.parse::<i64>().is_ok_and(|v| v >= 1));
+                                if !ok || !pre.is_empty() {
+                                    self.issue(
+                                        Code::ElementAssignment,
+                                        Some("the index is below the array origin".to_string()),
+                                    );
+                                } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    let alloc = if idx.len() == 1 {
+                                        format!("{f} = vector({})", idx[0])
+                                    } else {
+                                        format!("{f} = matrix({}; {})", idx[0], idx[1])
+                                    };
+                                    emitted =
+                                        Some(format!("#hide\n{alloc}\n#show\n{f}.({}) = {}", idx.join("; "), rhs.s));
+                                    elem_def = true;
+                                    if idx.len() == 1 {
+                                        self.elem_built.insert(f.clone(), idx[0].parse().unwrap_or(0));
                                     }
                                 } else {
                                     attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
                                 }
+                                let _ = l;
+                            } else {
+                                match (why, flat, ranges) {
+                                    (None, Some(f), Some(rs)) => {
+                                        for (iv, _) in &rs {
+                                            self.params.push(iv.clone());
+                                        }
+                                        let rhs = self.expr(value);
+                                        let idx: Vec<String> = rs
+                                            .iter()
+                                            .map(|(iv, _)| self.index_expr(&Expr::Name(Name::new(iv))))
+                                            .collect();
+                                        for _ in &rs {
+                                            self.params.pop();
+                                        }
+                                        let pre = std::mem::take(&mut self.hoisted);
+                                        if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                            match self.fill_loops(&f, &rs, &idx, &rhs.s, &pre) {
+                                                Ok(t) => {
+                                                    self.elem_built.remove(&f);
+                                                    emitted = Some(t);
+                                                    elem_def = true;
+                                                }
+                                                Err(w) => self.issue(Code::ElementAssignment, Some(w)),
+                                            }
+                                        } else {
+                                            attempt = Some(format!("{f}.({}) = {}", idx.join("; "), rhs.s));
+                                        }
+                                    }
+                                    (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
+                                    (None, ..) => {}
+                                }
                             }
-                            (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
-                            (None, ..) => {}
                         }
                     }
+                }
+            }
+            Stmt::Eval { expr, unit } if self.table_range(expr).is_some() => {
+                // An expression of a range variable shows one value per step of the range: the
+                // values are collected in an array by a loop and the array is shown.
+                shape = "evaluation";
+                let (iv, info) = self.table_range(expr).unwrap_or_default();
+                self.params.push(iv.clone());
+                let e = self.expr(expr);
+                self.params.pop();
+                let pre = std::mem::take(&mut self.hoisted);
+                let mut tail = String::new();
+                if let Some(u) = unit {
+                    let ur = self.expr(u);
+                    tail = format!("|{}", ur.s);
+                    self.issue(Code::UnitOverride, None);
+                }
+                self.issue(
+                    Code::RangeLoop,
+                    Some(format!("{iv} = {} .. {}: shown as a table", info.a, info.z)),
+                );
+                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                    emitted = Some(self.table_loops(&iv, &info, &e.s, &pre, &tail));
                 }
             }
             Stmt::Eval { expr, unit } => {
@@ -2210,6 +3315,7 @@ impl Tr {
                 sanitize_id(&r.id)
             );
             emitted = emitted.map(|e| format!("{note}\n{e}"));
+            plain_def = false;
         }
 
         // Temporaries the line needs first (a call result that is indexed).
@@ -2263,6 +3369,7 @@ impl Tr {
                         v.s
                     ));
                     attempt = None;
+                    plain_def = false;
                     define_name = Some((flat, None, is_array));
                 } else {
                     self.cur = stash;
@@ -2287,7 +3394,18 @@ impl Tr {
                 self.lines
                     .push(format!("'<!-- ORIGIN assigned {} in the source -->", v));
             } else if let Some(line) = emitted.take() {
-                self.lines.push(line);
+                self.maths_shown = true;
+                let multi_def = !multi_names.is_empty();
+                let text = self.present(m, shape, plain_def, elem_def, multi_def, line);
+                self.lines.push(text);
+            }
+            for name in &multi_names {
+                self.ranges.remove(name);
+                self.gap_names.remove(name);
+                self.funcs.remove(name);
+                self.arrays.remove(name);
+                self.elem_built.remove(name);
+                self.defined.insert(name.clone());
             }
             if let Some((name, info)) = &range_def {
                 self.defined.remove(name);
@@ -2339,9 +3457,13 @@ impl Tr {
                 let _ = arity;
                 self.gap_names.insert(name, root);
             }
-            let shown: Option<Vec<GapLine>> = self
+            let mut shown: Option<Vec<GapLine>> = self
                 .readable_stmt(&m.stmt)
                 .or_else(|| attempt.map(|a| vec![(false, a)]));
+            self.pending_ml = self.typeset_gap(&m.stmt);
+            if self.pending_ml.is_some() {
+                shown = Some(Vec::new());
+            }
             pictured = self.show_gap(r, &gap_codes, shown.as_deref(), m.saved_result.as_ref());
         }
         self.flush_issues(&r.id, r.line, None);
@@ -2350,8 +3472,157 @@ impl Tr {
     }
 }
 
-/// One output line for a paragraph, or `None` if it holds no text.
-fn text_line(p: &Paragraph) -> Option<String> {
+/// A font family as a CSS stack: the file's name first, then the metric-compatible and generic fallbacks
+/// a browser on any platform has. Only plain name characters are kept.
+fn font_stack(name: &str) -> String {
+    // No quote characters anywhere: a `'` inside a text line would switch the engine to maths. A family
+    // name is written as the plain run of words CSS allows, and one that is not (a word that starts with
+    // a digit) is left out.
+    let clean: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+        .collect();
+    let clean = if clean
+        .split_whitespace()
+        .all(|w| !w.starts_with(|c: char| c.is_ascii_digit() || c == '-'))
+    {
+        clean.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        String::new()
+    };
+    let clean = clean.as_str();
+    let lower = clean.to_ascii_lowercase();
+    let fallback = match lower.as_str() {
+        "times new roman" | "times" | "cambria" | "georgia" | "garamond" | "book antiqua" | "palatino linotype" => {
+            "Times New Roman,Times,Liberation Serif,serif"
+        }
+        "arial" | "helvetica" | "arial narrow" | "calibri" | "verdana" | "tahoma" | "segoe ui" | "trebuchet ms" => {
+            "Arial,Helvetica,Liberation Sans,sans-serif"
+        }
+        "courier new" | "courier" | "consolas" | "lucida console" => "Courier New,Courier,Liberation Mono,monospace",
+        _ => "sans-serif",
+    };
+    if clean.is_empty() {
+        return fallback.to_string();
+    }
+    let first = clean.to_string();
+    if fallback.split(',').next() == Some(first.as_str()) || fallback.contains(&first) {
+        fallback.to_string()
+    } else {
+        format!("{first},{fallback}")
+    }
+}
+
+fn pt(v: f64) -> String {
+    format!("{}", (v * 100.0).round() / 100.0)
+}
+
+/// `#rrggbb` as hue, saturation and lightness in 0..=1.
+fn to_hsl(hex: &str) -> (f64, f64, f64) {
+    let c = |i: usize| f64::from(u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0)) / 255.0;
+    let (r, g, b) = (c(1), c(3), c(5));
+    let (mx, mn) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (mx + mn) / 2.0;
+    if (mx - mn).abs() < 1e-9 {
+        return (0.0, 0.0, l);
+    }
+    let d = mx - mn;
+    let s = if l > 0.5 { d / (2.0 - mx - mn) } else { d / (mx + mn) };
+    let h = if (mx - r).abs() < 1e-9 {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if (mx - g).abs() < 1e-9 {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h / 6.0, s, l)
+}
+
+fn from_hsl(h: f64, s: f64, l: f64) -> String {
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    let ch = |t: f64| {
+        let t = t.rem_euclid(1.0);
+        let v = if t < 1.0 / 6.0 {
+            p + (q - p) * 6.0 * t
+        } else if t < 0.5 {
+            q
+        } else if t < 2.0 / 3.0 {
+            p + (q - p) * (2.0 / 3.0 - t) * 6.0
+        } else {
+            p
+        };
+        (v * 255.0).round() as u8
+    };
+    format!("#{:02x}{:02x}{:02x}", ch(h + 1.0 / 3.0), ch(h), ch(h - 1.0 / 3.0))
+}
+
+/// The colour a source colour is shown in on a light page and on a dark one. A dark colour is
+/// lightened on the dark page (keeping its hue) and a very light one is darkened on the light page.
+/// Black, white and greys carry no hue and are left to the app's own text colour (`None`).
+fn theme_colors(hex: &str) -> Option<(String, String)> {
+    let (h, s, l) = to_hsl(hex);
+    if s < 0.1 && (l < 0.2 || l > 0.9) {
+        return None;
+    }
+    let light = if l > 0.85 {
+        from_hsl(h, s, 0.35)
+    } else {
+        hex.to_string()
+    };
+    let dark = if l < 0.65 {
+        from_hsl(h, s.clamp(0.35, 0.6), 0.72)
+    } else {
+        hex.to_string()
+    };
+    Some((light, dark))
+}
+
+/// The class a colour is given; its rules are written once at the top of the output.
+fn color_class(hex: &str, colors: &mut std::collections::BTreeSet<String>) -> Option<String> {
+    theme_colors(hex)?;
+    colors.insert(hex.to_string());
+    Some(format!("imp-c-{}", &hex[1..]))
+}
+
+fn style_block(colors: &std::collections::BTreeSet<String>, maths: bool) -> Option<String> {
+    // The source draws a vector's name plain (no arrow, no bold) and a transpose as a plain
+    // superscript; the engine marks array names and powers of arrays, which the page leaves out.
+    if colors.is_empty() && !maths {
+        return None;
+    }
+    let mut css = String::new();
+    if maths {
+        css.push_str(
+            ".vec{display:none}b>var{font-weight:normal}sup>small.nth:first-child{display:none}.imp-scroll{overflow-x:auto;white-space:nowrap}\
+.imp-eq{overflow-x:auto;padding:.2em 0;margin:.3em 0}.imp-m{font-size:1.15em;math-style:normal;font-family:Cambria Math,STIX Two Math,Latin Modern Math,Noto Sans Math,math}\
+.imp-m mi.v{font-style:italic}\
+.imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-family:STIX Two Text,Times New Roman,Times,serif}\
+.imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-weight:bold}.imp-m .ru{font-style:italic}\
+.imp-m .ru{color:rgb(28,61,153)}.dark-theme .imp-m .ru{color:rgb(143,176,255)}\
+.imp-m munderover>:nth-child(2),.imp-m munder>:nth-child(2){margin-top:-.12em}.imp-m munderover>:nth-child(3){margin-bottom:-.12em}\
+.imp-m mover.va>mo{visibility:hidden}.imp-m mover.va{background:linear-gradient(currentColor,currentColor) 0 .2em/100% 1.3px no-repeat,\
+linear-gradient(to top right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .08em/.22em .12em no-repeat,\
+linear-gradient(to bottom right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .2em/.22em .12em no-repeat}",
+        );
+    }
+    for c in colors {
+        if let Some((light, dark)) = theme_colors(c) {
+            let cls = format!(".imp-c-{}", &c[1..]);
+            css.push_str(&format!("{cls}{{color:{light}}}.dark-theme {cls}{{color:{dark}}}"));
+        }
+    }
+    Some(format!("'<style>{css}</style>"))
+}
+
+/// One output line for a paragraph, or `None` if it holds no text. `styles` are the file's named
+/// paragraph styles; the colours used are collected in `colors`.
+fn text_line(
+    p: &Paragraph,
+    styles: &HashMap<String, TextStyle>,
+    colors: &mut std::collections::BTreeSet<String>,
+) -> Option<String> {
+    let st = styles.get(&p.style).cloned().unwrap_or_default();
     let heading = match p.style.as_str() {
         "Heading 1" => Some(1),
         "Heading 2" => Some(2),
@@ -2389,7 +3660,9 @@ fn text_line(p: &Paragraph) -> Option<String> {
                 match segs.last_mut() {
                     Some(Seg::Text(prev))
                         if (prev.bold, prev.italic, prev.underline, prev.sub, prev.sup)
-                            == (r.bold, r.italic, r.underline, r.sub, r.sup) =>
+                            == (r.bold, r.italic, r.underline, r.sub, r.sup)
+                            && (&prev.font, prev.size.map(f64::to_bits), &prev.color)
+                                == (&r.font, r.size.map(f64::to_bits), &r.color) =>
                     {
                         prev.text.push_str(&r.text);
                     }
@@ -2462,27 +3735,97 @@ fn text_line(p: &Paragraph) -> Option<String> {
                 if r.sup {
                     s = format!("<sup>{}</sup>", s);
                 }
+                // Only what differs from the paragraph's own style gets a span of its own.
+                let mut css = Vec::new();
+                if r.font.is_some() && r.font != st.font {
+                    css.push(format!("font-family:{}", font_stack(r.font.as_deref().unwrap_or(""))));
+                }
+                if r.size.is_some() && r.size != st.size {
+                    css.push(format!("font-size:{}pt", pt(r.size.unwrap_or(0.0))));
+                }
+                let cls = match &r.color {
+                    Some(c) if r.color != st.color => color_class(c, colors),
+                    _ => None,
+                };
+                if !css.is_empty() || cls.is_some() {
+                    let class = cls.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
+                    let style = if css.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" style=\"{}\"", css.join(";"))
+                    };
+                    s = format!("<span{class}{style}>{s}</span>");
+                }
                 html.push_str(&s);
             }
         }
     }
+    // The paragraph's own style: font, size, weight and colour; alignment and margins on a block around it.
+    let mut css = Vec::new();
+    if let Some(f) = &st.font {
+        css.push(format!("font-family:{}", font_stack(f)));
+    }
+    if let Some(z) = st.size {
+        css.push(format!("font-size:{}pt", pt(z)));
+    }
+    if st.bold && heading.is_none() {
+        css.push("font-weight:bold".to_string());
+    }
+    if st.italic && heading.is_none() {
+        css.push("font-style:italic".to_string());
+    }
+    if st.underline {
+        css.push("text-decoration:underline".to_string());
+    }
+    let cls = st.color.as_deref().and_then(|c| color_class(c, colors));
+    let class = cls.map(|c| format!(" class=\"{c}\"")).unwrap_or_default();
+    let mut block = Vec::new();
+    match p.align.as_deref().or(st.align.as_deref()) {
+        Some(a) if a != "left" => block.push(format!("text-align:{a}")),
+        _ => {}
+    }
+    if p.margin_left > 0.0 {
+        block.push(format!("padding-left:{}pt", pt(p.margin_left)));
+    }
+    if p.text_indent.abs() > 0.0 {
+        block.push(format!("text-indent:{}pt", pt(p.text_indent)));
+    }
     Some(match heading {
-        Some(n) => format!("'<h{n}>{html}</h{n}>"),
+        Some(n) => {
+            let style = join_style(&css, &block);
+            format!("'<h{n}{class}{style}>{html}</h{n}>")
+        }
         None => {
-            if p.style == "List" {
-                format!("'&bull; {}", html)
+            let inner = if p.style == "List" {
+                format!("&bull; {}", html)
             } else {
-                format!("'{}", html)
+                html
+            };
+            if class.is_empty() && css.is_empty() && block.is_empty() && !inner.starts_with('<') {
+                format!("'{inner}")
+            } else {
+                // An HTML line gets no paragraph of its own from the engine, so it is one here.
+                let style = join_style(&css, &block);
+                format!("'<p{class}{style}>{inner}</p>")
             }
         }
     })
+}
+
+fn join_style(a: &[String], b: &[String]) -> String {
+    let all: Vec<&str> = a.iter().chain(b.iter()).map(String::as_str).collect();
+    if all.is_empty() {
+        String::new()
+    } else {
+        format!(" style=\"{}\"", all.join(";"))
+    }
 }
 
 /// Translates a sheet. See the crate documentation.
 /// A name the file labels as a unit in one place and defines as a variable in another (a matrix
 /// `N` next to forces in `N`): the engine would read every `N` as the variable, so the variable is
 /// renamed `N_v` everywhere and the unit keeps its name.
-fn rename_unit_clashes(sheet: &mut Sheet) {
+fn rename_unit_clashes(sheet: &mut Sheet) -> HashMap<String, String> {
     let mut units: HashSet<String> = HashSet::new();
     let mut vars: HashSet<String> = HashSet::new();
     let mut scan = |stmt: &mut Stmt| {
@@ -2490,6 +3833,15 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
         stmt.for_each_name_mut(&mut |n: &mut Name| {
             if n.unit && n.sub.is_none() && tables::map_unit(&n.base).is_some() {
                 units.insert(n.base.clone());
+            }
+            // A unit the engine spells differently (`sec` is `s`) takes that spelling from any
+            // variable of the same name, labelled or not.
+            if n.sub.is_none() {
+                if let Some(m) = tables::map_unit(&n.base) {
+                    if m != n.base {
+                        units.insert(m);
+                    }
+                }
             }
         });
         if let Stmt::Define { target, .. } = stmt {
@@ -2515,8 +3867,9 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
         }
     }
     let clash: HashSet<String> = units.intersection(&vars).cloned().collect();
+    let renamed: HashMap<String, String> = clash.iter().map(|c| (format!("{c}_v"), c.clone())).collect();
     if clash.is_empty() {
-        return;
+        return renamed;
     }
     for r in sheet.regions.iter_mut() {
         if let RegionKind::Math(m) = &mut r.kind {
@@ -2527,12 +3880,13 @@ fn rename_unit_clashes(sheet: &mut Sheet) {
             });
         }
     }
+    renamed
 }
 
 pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportReport, Vec<Asset>) {
-    rename_unit_clashes(&mut sheet);
-    reading_order(&mut sheet.regions);
-    let has_references = sheet.regions.iter().any(|r| matches!(r.kind, RegionKind::Reference));
+    let renamed = rename_unit_clashes(&mut sheet);
+    let rows = reading_rows(std::mem::take(&mut sheet.regions));
+    let has_references = rows.iter().flatten().any(|r| matches!(r.kind, RegionKind::Reference));
     let mut tr = Tr {
         origin: sheet.origin,
         defined: HashSet::new(),
@@ -2549,13 +3903,23 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
         zero_started: HashSet::new(),
+        zero_units: HashMap::new(),
+        elem_built: HashMap::new(),
         prog_n: 0,
+        text_styles: std::mem::take(&mut sheet.text_styles),
+        colors: Default::default(),
         hoisted: Vec::new(),
         loop_stack: Vec::new(),
         cond_depth: 0,
         ret: None,
         readable: false,
         readable_bad: false,
+        display: false,
+        maths_shown: false,
+        display_renamed: false,
+        renamed,
+        default_precision: sheet.default_precision,
+        fmt_cur: None,
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),
@@ -2569,10 +3933,10 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         used_paths: HashSet::new(),
         asset_total: 0,
         has_references,
+        uses_val_ml: false,
+        pending_ml: None,
     };
-    for r in &sheet.regions {
-        tr.region(r);
-    }
+    tr.layout_rows(&rows);
     let mut out = String::new();
     out.push_str(&format!(
         "'<!-- Imported from a foreign worksheet: {} of {} regions need attention. Lines that start with {} mark what did not convert. -->\n",
@@ -2580,6 +3944,24 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         tr.report.regions_total(),
         GAP_MARKER
     ));
+    // The definitions are the author's; a name used only by a region shown as a picture or by an
+    // unconverted one is not an editor finding.
+    if tr.maths_shown {
+        out.push_str("'<!--{\"LintIgnore\": [\"CPD-3312\"]}-->\n");
+    }
+    if let Some(block) = style_block(&tr.colors, tr.maths_shown) {
+        out.push_str(&block);
+        out.push('\n');
+    }
+    // Results are shown as the source shows them: the expression and its value, no substituted step.
+    if tr.maths_shown {
+        // Equations shown for reading carry the numbers as written (see `format_line`); results are
+        // shown under a number format set where they are.
+        out.push_str("#nosub\n#round 12\n");
+        if tr.uses_val_ml {
+            out.push_str("#settings {\"valMathml\": true}\n");
+        }
+    }
     if tr.uses_trig {
         out.push_str("#rad\n");
         tr.report.issues.insert(

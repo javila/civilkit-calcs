@@ -4,6 +4,9 @@
 
 use calcpad_import::{import_xmcd, Code, ImportResult};
 
+mod common;
+use common::legacy;
+
 // ---- builders (the same shapes as the plain-XML worksheet) ---------------------------------------
 
 fn sheet(regions: &str, origin: i64) -> String {
@@ -61,6 +64,15 @@ pub fn convert(inners: &[String]) -> ImportResult {
     import_xmcd(&sheet_of(inners, 1))
 }
 
+/// The same worksheet with the typeset-Calcpad display (`#noc` blocks) instead of MathML.
+pub fn convert_noc(inners: &[String]) -> ImportResult {
+    let opts = calcpad_import::ImportOptions {
+        mathml: false,
+        ..Default::default()
+    };
+    calcpad_import::import_xmcd_opts(&sheet_of(inners, 1), &opts)
+}
+
 pub fn convert_origin(inners: &[String], origin: i64) -> ImportResult {
     import_xmcd(&sheet_of(inners, origin))
 }
@@ -68,7 +80,7 @@ pub fn convert_origin(inners: &[String], origin: i64) -> ImportResult {
 /// The engine's printed results, one string per line that printed something (tags removed).
 pub fn engine_lines(code: &str) -> Vec<String> {
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&format!("#round 10\n{code}"), true);
+    parser.parse(&format!("#round 10\n{}", legacy(code)), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "engine error in:\n{code}\n---\n{html}");
     html.replace("<p>", "\n<p>")
@@ -294,7 +306,10 @@ fn range_with_element_assignment_origin_one_and_units() {
 #[test]
 fn a_range_variable_used_anywhere_else_is_reported() {
     let res = convert_origin(
-        &[define("i", &range("0", "4")), eval(&app("mult", &[n("i"), r("2")]))],
+        &[
+            define("i", &range("0", "4")),
+            define("z", &app("mult", &[n("i"), r("2")])),
+        ],
         0,
     );
     let g = res.report.gaps().find(|i| i.code == Code::RangeVariable).expect("gap");
@@ -344,8 +359,11 @@ fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
         .find(|i| i.code == Code::ElementAssignment)
         .expect("gap");
     assert!(g.detail.as_deref().unwrap_or("").contains("reads the array"), "{g:?}");
-    // A literal index is not a loop.
-    let res = convert(&[set_element("x", &r("2"), &r("5"))]);
+    // A literal index into an array that already has a value is not a loop.
+    let res = convert(&[
+        define("x", &app("mult", &[r("2"), r("3")])),
+        set_element("x", &r("2"), &r("5")),
+    ]);
     let g = res
         .report
         .gaps()
@@ -437,7 +455,11 @@ fn straight_line_program_is_the_expression_with_its_locals_substituted() {
         eval(&call("f", &[r("3")])),
     ]);
     assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
-    assert!(!res.calcpad.contains("#"), "no statements are needed: {}", res.calcpad);
+    assert!(
+        !legacy(&res.calcpad).contains('#'),
+        "no statements are needed: {}",
+        res.calcpad
+    );
     assert_close(last(&res.calcpad), 42.0);
 }
 
@@ -709,7 +731,7 @@ fn gap_line<'a>(res: &'a ImportResult, id: &str) -> &'a str {
 
 #[test]
 fn an_unconverted_region_is_shown_with_its_real_names() {
-    let res = convert(&[
+    let res = convert_noc(&[
         define("y", &call("vendor_fn", &[n("a"), r("2")])),
         define("z", &app("plus", &[n("y"), r("1")])),
         define("s", "<ml:str>abc</ml:str>"),
@@ -723,8 +745,8 @@ fn an_unconverted_region_is_shown_with_its_real_names() {
     );
     assert!(res.calcpad.contains("#noc\nz = y + 1\n#end noc"), "{}", res.calcpad);
     assert!(res.calcpad.contains("n_rows(Input_N)*kN\n#end noc"), "{}", res.calcpad);
-    // A string is not Calcpad maths: it is code text, not an equation.
-    assert!(res.calcpad.contains("<code>s = \"\"abc\"\"</code>"), "{}", res.calcpad);
+    // A string is not maths, and source is never shown as code text: the reader sees the note only.
+    assert!(!res.calcpad.contains("<code>"), "{}", res.calcpad);
     // The marker and the codes are in an HTML comment, with a small muted note.
     assert!(
         gap_line(&res, "1").starts_with("'<!-- [import-gap R1 "),
@@ -751,13 +773,13 @@ fn an_unconverted_region_is_shown_with_its_real_names() {
 /// The page's HTML for some Calcpad text, to look at what is rendered, not only the text.
 fn html_of(code: &str) -> String {
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(code, true);
+    parser.parse(&legacy(code), true);
     parser.html_result.clone()
 }
 
 #[test]
 fn gap_regions_render_as_equations_without_errors() {
-    let res = convert(&[
+    let res = convert_noc(&[
         define(
             "N",
             &app(
@@ -1068,7 +1090,7 @@ fn function_bodies_with_conditions_and_returns_become_one_expression() {
         eval(&call("f", &[r("30")])),
     ]);
     assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
-    assert!(!res.calcpad.contains('#'), "{}", res.calcpad);
+    assert!(!legacy(&res.calcpad).contains('#'), "{}", res.calcpad);
     let nums = numbers(&res.calcpad);
     assert_close(nums[nums.len() - 2], 6.0);
     assert_close(nums[nums.len() - 1], 20.0);
@@ -1131,7 +1153,7 @@ fn function_bodies_with_conditions_and_returns_become_one_expression() {
 
 #[test]
 fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
-    let res = convert(&[function(
+    let res = convert_noc(&[function(
         "h",
         &["x"],
         &program(&[
@@ -1146,14 +1168,8 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
         d.contains("$While") && d.contains("loop statement usable inside a block"),
         "{d}"
     );
-    // And the readable line still shows the function.
-    assert!(res.calcpad.contains("<code>h(x) = program:</code>"), "{}", res.calcpad);
-    assert!(res.calcpad.contains("#noc\nt = 0\n#end noc"), "{}", res.calcpad);
-    assert!(
-        res.calcpad.contains("'&emsp;<code>for k = 1 to x:</code>"),
-        "{}",
-        res.calcpad
-    );
+    // A program is source, not an equation: no code text is shown for it.
+    assert!(!res.calcpad.contains("<code>"), "{}", res.calcpad);
 }
 
 // ---- constraint equations ---------------------------------------------------------------------------------------
@@ -1162,7 +1178,7 @@ fn a_function_with_a_run_time_loop_names_the_missing_engine_feature() {
 fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
     // f_B = c*L + d with c and d unknown (a solve block would find them).
     let eq = app("equal", &[n("fB"), plus(&times(&n("c"), &n("L")), &n("d"))]);
-    let res = convert(&[
+    let res = convert_noc(&[
         define("L", &times(&r("6"), &n("m"))),
         eq,
         eval(&app("mult", &[r("2"), r("3")])),
@@ -1176,7 +1192,7 @@ fn an_equation_on_its_own_is_a_constraint_not_undefined_names() {
     let nums = numbers(&res.calcpad);
     assert_close(*nums.last().unwrap(), 6.0);
     // Any other bare expression is still a bare expression.
-    let res = convert(&[eval(&n("zz"))]);
+    let res = convert_noc(&[eval(&n("zz"))]);
     assert!(!res.report.gaps().any(|i| i.code == Code::ConstraintEquation));
 }
 
@@ -1193,4 +1209,595 @@ fn nth_root_with_an_empty_degree_is_the_square_root() {
         "<ml:apply><ml:nthRoot/><ml:real>3</ml:real><ml:real>8</ml:real></ml:apply>",
     )]);
     assert!(res.report.gaps().any(|i| i.code == Code::UnknownElement));
+}
+
+#[test]
+fn a_transposed_row_is_a_vector_the_engine_can_count() {
+    // v := (4 7 9)^T ; len(v) = 3 ; max(v) = 9 ; w := (v^T)^T keeps working as a vector.
+    let tr = |x: &str| format!("<ml:apply><ml:transpose/>{x}</ml:apply>");
+    let res = convert(&[
+        define("v", &tr(&mat(1, 3, &["4", "7", "9"]))),
+        define("w", &tr(&tr(&n("v")))),
+        eval(&call("length", &[n("w")])),
+        eval(&call("max", &[n("v")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(!res.calcpad.contains("transp("), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 3.0);
+    assert_close(nums[nums.len() - 1], 9.0);
+}
+
+// ---- sums, products, range tables, vectors made element by element ----------------------------------
+
+fn series(op: &str, var: &str, body: &str, bounds: Option<(&str, &str)>) -> String {
+    let b = bounds
+        .map(|(lo, hi)| format!("<ml:bounds>{lo}{hi}</ml:bounds>"))
+        .unwrap_or_default();
+    format!(
+        "<ml:apply><ml:{op}/><ml:lambda><ml:boundVars>{}</ml:boundVars>{body}</ml:lambda>{b}</ml:apply>",
+        n(var)
+    )
+}
+
+#[test]
+fn sum_and_product_with_bounds() {
+    // sum k^2 for k = 1..4 is 30; product of k for k = 1..4 is 24.
+    let sq = app("pow", &[n("k"), r("2")]);
+    let res = convert(&[
+        eval(&series("summation", "k", &sq, Some((&r("1"), &r("4"))))),
+        eval(&series("product", "k", &n("k"), Some((&r("1"), &r("4"))))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("$Sum{k^2 @ k = 1 : 4}"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("$Product{k @ k = 1 : 4}"), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 30.0);
+    assert_close(nums[nums.len() - 1], 24.0);
+}
+
+#[test]
+fn sum_over_a_range_variable_uses_its_bounds_and_the_array_origin() {
+    // Origin 0: i = 0..2, v[i = 10 (i + 1) gives 10, 20, 30; the sum over i of v[i is 60.
+    let res = convert_origin(
+        &[
+            define("i", &range("0", "2")),
+            set_element("v", &n("i"), &app("mult", &[r("10"), app("plus", &[n("i"), r("1")])])),
+            eval(&series("summation", "i", &index1("v", &n("i")), None)),
+        ],
+        0,
+    );
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("$Sum{v.(i + 1) @ i = 0 : 2}"), "{}", res.calcpad);
+    assert_close(last(&res.calcpad), 60.0);
+    // A bare sum over a name that is not a range variable is a gap with the reason.
+    let res = convert(&[eval(&series("summation", "q", &n("q"), None))]);
+    assert!(res.report.gaps().any(|i| i.code == Code::SummationOperator));
+}
+
+#[test]
+fn an_expression_of_a_range_variable_is_shown_as_a_table() {
+    // i = 1..3; 2 i shown for every step: the table is an array of 2, 4, 6.
+    let res = convert(&[
+        define("i", &range("1", "3")),
+        eval(&app("mult", &[r("2"), n("i")])),
+        define("t", &app("plus", &[r("1"), r("1")])),
+        eval(&n("t")),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(
+        res.calcpad.contains("#for i_k1 = 0 : abs(i_z1 - i_a1)"),
+        "{}",
+        res.calcpad
+    );
+    let out = engine_lines(&res.calcpad).join("\n");
+    let table = out.lines().find(|l| l.contains("tbl")).expect("the table is shown");
+    let shown: String = table
+        .rsplit('=')
+        .next()
+        .unwrap_or("")
+        .chars()
+        .filter(|c| c.is_ascii_digit())
+        .collect();
+    assert_eq!(shown, "246", "{out}");
+    assert_close(last(&res.calcpad), 2.0);
+}
+
+#[test]
+fn one_element_creates_the_array_and_a_later_fill_replaces_it() {
+    // v[1] := 5, shown; then i = 1..3, v[i] := i * 2 replaces the vector: v[3] = 6.
+    let res = convert(&[
+        set_element("v", &r("1"), &r("5")),
+        eval(&index1("v", &r("1"))),
+        define("i", &range("1", "3")),
+        set_element("v", &n("i"), &app("mult", &[n("i"), r("2")])),
+        eval(&index1("v", &r("3"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 5.0);
+    assert_close(nums[nums.len() - 1], 6.0);
+    // Element 2 first: the array is zeros up to it.
+    let res = convert(&[set_element("w", &r("2"), &r("5")), eval(&index1("w", &r("1")))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 0.0);
+}
+
+#[test]
+fn vector_sum_and_vectorize() {
+    let v = "<ml:matrix rows=\"3\" cols=\"1\"><ml:real>1</ml:real><ml:real>2</ml:real><ml:real>3</ml:real></ml:matrix>";
+    let vec_op = |x: &str| format!("<ml:apply><ml:vectorize/>{x}</ml:apply>");
+    let res = convert(&[
+        define("v", v),
+        eval(&format!("<ml:apply><ml:vectorSum/>{}</ml:apply>", n("v"))),
+        define("u", &vec_op(&app("mult", &[n("v"), r("2")]))),
+        eval(&format!("<ml:apply><ml:vectorSum/>{}</ml:apply>", n("u"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 6.0);
+    assert_close(nums[nums.len() - 1], 12.0);
+    // Two arrays multiplied element by element have no operator: reported, not guessed.
+    let res = convert(&[define("v", v), define("u", &vec_op(&app("mult", &[n("v"), n("v")])))]);
+    assert!(res.report.gaps().any(|i| i.code == Code::VectorizeOperator));
+}
+
+#[test]
+fn the_si_unit_of_a_quantity_is_read_with_a_note() {
+    // 3 ft / SIUnitsOf(3 ft) is a number; the engine has no SI-unit function, so the note says how.
+    let res = convert(&[
+        define("x", &app("mult", &[r("3"), n("ft")])),
+        eval(&app("div", &[n("x"), call("SIUnitsOf", &[n("x")])])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.report.notes().any(|i| i.code == Code::SiUnitScale));
+    assert_close(last(&res.calcpad), 3.0);
+}
+
+#[test]
+fn a_variable_named_like_a_unit_the_engine_spells_differently_is_renamed() {
+    // s := 4 ft and a time written `sec`: the variable must not hide the unit `s`.
+    let res = convert(&[
+        define("s", &app("mult", &[r("4"), n("ft")])),
+        define("t", &app("mult", &[r("2"), n("sec")])),
+        eval_in(&n("t"), "sec"),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("s_v = 4*ft"), "{}", res.calcpad);
+    assert_close(last(&res.calcpad), 2.0);
+}
+
+#[test]
+fn primes_in_a_name_are_the_engine_primes() {
+    let res = convert(&[define("T'", &r("3")), eval(&app("plus", &[n("T'"), r("1")]))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 4.0);
+}
+
+#[test]
+fn a_matrix_of_names_takes_its_values_item_by_item() {
+    // [p; q] := [3; 4] defines p = 3 and q = 4.
+    let names = format!(r#"<ml:matrix rows="2" cols="1">{}{}</ml:matrix>"#, n("pp"), n("qq"));
+    let res = convert(&[
+        define("unused", &r("0")),
+        format!("<ml:define>{names}{}</ml:define>", mat(2, 1, &["3", "4"])),
+        eval(&app("plus", &[n("pp"), n("qq")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 7.0);
+}
+
+#[test]
+fn last_is_the_index_of_the_final_element() {
+    let v = || define("v", &mat(3, 1, &["1", "2", "3"]));
+    let res = convert_origin(&[v(), eval(&call("last", &[n("v")]))], 0);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert_close(last(&res.calcpad), 2.0);
+    let res = convert(&[v(), eval(&call("last", &[n("v")]))]);
+    assert_close(last(&res.calcpad), 3.0);
+}
+
+// ---- 4. loop blocks print nothing of their own, and an error inside one is still reported --------------
+
+/// Runs `code` as the app does for the editor (`debug` on) and returns the printed page and the
+/// errors the engine recorded, hidden or not.
+fn run_with_errors(code: &str) -> (String, Vec<String>) {
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.debug = true;
+    parser.parse(code, true);
+    let errors = parser.errors_list.iter().map(|e| e.message.clone()).collect();
+    (parser.html_result.clone(), errors)
+}
+
+fn fill_loop_sheet() -> ImportResult {
+    // i = 1..3, h[i] = i * 2 m, then h shown.
+    convert_noc(&[
+        define("i", &range("1", "3")),
+        set_element("h", &n("i"), &app("mult", &[n("i"), app("mult", &[r("2"), n("m")])])),
+        eval(&n("h")),
+    ])
+}
+
+#[test]
+fn a_fill_loop_is_hidden_so_its_raw_values_are_not_printed() {
+    let res = fill_loop_sheet();
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let code = &res.calcpad;
+    assert!(code.contains("#hide\n"), "{code}");
+    assert!(code.contains("#end hide"), "{code}");
+    assert!(!code.contains("#val"), "{code}");
+    let (html, errors) = run_with_errors(code);
+    assert!(errors.is_empty(), "{errors:?}\n{code}");
+    assert!(!html.contains("class=\"err\""), "{html}");
+    // No bare text from the loop: the raw vector, zero-filled before the loop ran, would show as [0, 0, 0].
+    assert!(!html.contains("[0, 0, 0]"), "{html}");
+    // The result of the sheet is still shown, with the right numbers.
+    let lines = engine_lines(code);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains('2') && l.contains('4') && l.contains('6')),
+        "{lines:?}"
+    );
+}
+
+#[test]
+fn an_error_inside_a_hidden_fill_loop_is_still_reported() {
+    let res = fill_loop_sheet();
+    // The importer never writes a name the sheet lacks, so break the loop body by hand.
+    let broken = res.calcpad.replace("h.(i) = ", "h.(i) = missing_name + ");
+    assert_ne!(broken, res.calcpad);
+    let (_, errors) = run_with_errors(&broken);
+    assert!(
+        errors.iter().any(|e| e.contains("missing_name")),
+        "the engine did not report the error inside the loop: {errors:?}\n{broken}"
+    );
+}
+
+#[test]
+fn a_program_block_is_hidden_and_its_errors_are_still_reported() {
+    let prog = format!(
+        "<ml:define>{}<ml:program><ml:localDefine>{}{}</ml:localDefine><ml:for>{}<ml:range>{}{}</ml:range><ml:program><ml:localDefine>{}{}</ml:localDefine></ml:program></ml:for>{}</ml:program></ml:define>",
+        n("y"),
+        n("s"),
+        r("0"),
+        n("k"),
+        r("1"),
+        r("4"),
+        n("s"),
+        app("plus", &[n("s"), n("k")]),
+        n("s")
+    );
+    let res = convert_noc(&[prog, eval(&n("y"))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let code = &res.calcpad;
+    assert!(code.contains("#hide\n") && code.contains("#end hide"), "{code}");
+    assert!(!code.contains("#val"), "{code}");
+    let (html, errors) = run_with_errors(code);
+    assert!(
+        errors.is_empty() && !html.contains("class=\"err\""),
+        "{errors:?}\n{code}"
+    );
+    assert_close(last_number(engine_lines(code).last().unwrap()), 10.0);
+    let broken = code.replace("s_p1 = s_p1 + k_p1", "s_p1 = s_p1 + missing_name");
+    assert_ne!(&broken, code, "{code}");
+    let (_, errors) = run_with_errors(&broken);
+    assert!(
+        errors.iter().any(|e| e.contains("missing_name")),
+        "{errors:?}\n{broken}"
+    );
+}
+
+// ---- 5. an array started from 0 and then added to takes the units of what is added -------------------------------
+
+fn zero_filled_then_accumulated(addend: &str, extra: &[String]) -> ImportResult {
+    // A[i, j] <- 0 over i, j = 1..2, then for e = 1..3: A[1, 1] <- A[1, 1] + addend.
+    let mut stmts = vec![for_in(
+        "i",
+        &r("1"),
+        &r("2"),
+        &[for_in(
+            "j",
+            &r("1"),
+            &r("2"),
+            &[local_el2("A", &n("i"), &n("j"), &r("0"))],
+        )],
+    )];
+    stmts.extend(extra.iter().cloned());
+    stmts.push(for_in(
+        "e",
+        &r("1"),
+        &r("3"),
+        &[local_el2(
+            "A",
+            &r("1"),
+            &r("1"),
+            &plus(&index_n("A", &[r("1"), r("1")]), addend),
+        )],
+    ));
+    stmts.push(n("A"));
+    convert(&[
+        define("L", &app("mult", &[r("2"), n("m")])),
+        func(
+            "g",
+            &["a"],
+            &times(&n("a"), &times(&mat(2, 2, &["1", "2", "3", "4"]), &n("L"))),
+        ),
+        define("Q", &program(&stmts)),
+        eval(&index2("Q", &r("1"), &r("1"))),
+        eval(&index2("Q", &r("2"), &r("2"))),
+    ])
+}
+
+#[test]
+fn a_zero_filled_array_that_is_added_to_takes_the_units_of_the_first_value_added() {
+    // Q[1,1] = L + L + L = 6 m; the entries nothing was added to stay 0 (a zero in metres).
+    let res = zero_filled_then_accumulated(&n("L"), &[]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("0*getunits(L)"), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 6.0);
+    assert_close(nums[nums.len() - 1], 0.0);
+}
+
+#[test]
+fn the_units_are_read_from_the_first_term_with_the_loop_variable_at_its_first_value() {
+    // The term is an element of a call result that depends on the loop variable e: g(e)[1, 1] = e L,
+    // so Q[1,1] = (1 + 2 + 3) * 2 m = 12 m.
+    let term = format!(
+        "<ml:apply><ml:indexer/>{}<ml:sequence>{}{}</ml:sequence></ml:apply>",
+        call("g", &[n("e")]),
+        r("1"),
+        r("1")
+    );
+    let res = zero_filled_then_accumulated(&term, &[]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("0*getunits("), "{}", res.calcpad);
+    assert!(
+        !res.calcpad.contains("0*getunits(ix_") || res.calcpad.contains("= g(1)"),
+        "{}",
+        res.calcpad
+    );
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 12.0);
+}
+
+#[test]
+fn units_that_depend_on_something_the_program_sets_are_a_reported_gap() {
+    // t is set by the program, so the units of the first term are not known before the loops run.
+    let res = zero_filled_then_accumulated(&n("t"), &[local("t", &n("L"))]);
+    let g = res.report.gaps().find(|i| i.code == Code::ProgramBlock).expect("gap");
+    let d = g.detail.clone().unwrap_or_default();
+    assert!(d.contains("not known before the loops run") && d.contains('t'), "{d}");
+}
+
+// ---- 5. regions are shown as the author's equation; the computing stays out of sight ----------------------------
+
+/// The page the engine prints for `code` exactly as the app would show it (no stripping of the
+/// display), with the errors it recorded, hidden or not.
+fn shown(code: &str) -> (String, Vec<String>) {
+    run_with_errors(code)
+}
+
+fn text_of(html: &str) -> String {
+    let mut o = String::new();
+    let mut tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => tag = true,
+            '>' => tag = false,
+            c if !tag => o.push(c),
+            _ => {}
+        }
+    }
+    o.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn a_definition_shows_only_the_authors_equation_and_still_defines_the_name() {
+    // s := (16 12 13.5)^T * ft, then a := 2 * 3 and a * 2 shown.
+    let tr = |x: &str| format!("<ml:apply><ml:transpose/>{x}</ml:apply>");
+    let res = convert_noc(&[
+        define("s", &app("mult", &[tr(&mat(1, 3, &["16", "12", "13.5"])), n("ft")])),
+        define("a", &app("mult", &[r("2"), r("3")])),
+        eval(&app("mult", &[n("a"), r("2")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    // The computation is hidden; the shown equation keeps the author's matrix orientation and the transpose.
+    assert!(
+        res.calcpad
+            .contains("#hide\ns = [16; 12; 13.5]*ft\n#end hide\n#noc\ns = [16; 12; 13.5]^(T)*ft\n#end noc"),
+        "{}",
+        res.calcpad
+    );
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}\n{}", res.calcpad);
+    let text = text_of(&html);
+    // Only the equation: no value after it (the definition shows no result in the source).
+    assert!(text.contains("a = 2 · 3 a · 2 = 12"), "{text}");
+    assert!(!text.contains("2 · 3 = 6"), "{text}");
+    assert!(!text.contains("16 ft"), "{text}");
+    // The name is defined all the same: the evaluation used it.
+    assert!(text.contains("= 12"), "{text}");
+}
+
+#[test]
+fn the_page_carries_the_styling_that_hides_the_engines_array_marks() {
+    let res = convert(&[define("a", &r("2"))]);
+    assert!(res.calcpad.contains(".vec{display:none}"), "{}", res.calcpad);
+    assert!(
+        res.calcpad.contains("sup>small.nth:first-child{display:none}"),
+        "{}",
+        res.calcpad
+    );
+    assert!(res.calcpad.contains("\n#nosub\n"), "{}", res.calcpad);
+}
+
+#[test]
+fn an_evaluation_shows_the_expression_and_its_result_without_the_substituted_step() {
+    let res = convert_noc(&[define("a", &r("2")), eval(&app("plus", &[n("a"), r("1")]))]);
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}");
+    let text = text_of(&html);
+    assert!(text.ends_with("a + 1 = 3"), "{text}");
+    assert!(!text.contains("2 + 1"), "{text}");
+}
+
+#[test]
+fn a_renamed_variable_is_shown_under_the_authors_name() {
+    // N is a vector and also the newton: the engine variable is N_v, the page says N.
+    let regions = [
+        define_labelled("N", "VARIABLE", &mat(2, 1, &["1", "2"])),
+        define(
+            "F",
+            &app("mult", &[r("3"), "<ml:id labels=\"UNIT\">N</ml:id>".to_string()]),
+        ),
+        eval(&n("N")),
+    ];
+    let res = convert_noc(&regions);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(
+        res.calcpad
+            .contains("#hide\nN_v = [1; 2]\n#end hide\n#noc\nN = [1 | 2]\n#end noc"),
+        "{}",
+        res.calcpad
+    );
+    // The evaluation of the vector: the author's expression typeset first, then the engine's result line.
+    assert!(
+        res.calcpad
+            .contains("#noc\nN\n#end noc\n#format 0.###\n'<div class=\"imp-scroll\">\nN_v"),
+        "{}",
+        res.calcpad
+    );
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}\n{}", res.calcpad);
+    assert!(html.contains("<var>N</var> = "), "{html}");
+}
+
+fn define_labelled(name: &str, label: &str, value: &str) -> String {
+    format!("<ml:define><ml:id labels=\"{label}\">{name}</ml:id>{value}</ml:define>")
+}
+
+#[test]
+fn an_error_in_the_hidden_computation_is_still_reported() {
+    // The length of a number is an error in the engine, whatever the page shows of the definition.
+    let res = convert(&[define("x", &call("length", &[r("5")]))]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("#hide\nx = len(5)\n#end hide"), "{}", res.calcpad);
+    let (html, errors) = shown(&res.calcpad);
+    assert!(
+        errors.iter().any(|e| e.contains("must be vector")),
+        "the hidden error must be in the error list: {errors:?}\n{html}"
+    );
+}
+
+#[test]
+fn elements_defined_over_a_range_show_the_authors_equation() {
+    // i := 1..3 ; h[i] := 2 i  is shown as h_i = 2 i, and h is filled.
+    let res = convert_noc(&[
+        define("i", &range("1", "3")),
+        set_element("h", &n("i"), &app("mult", &[r("2"), n("i")])),
+        eval(&index1("h", &r("3"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.calcpad.contains("#noc\nh.(i) = 2*i\n#end noc"), "{}", res.calcpad);
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}\n{}", res.calcpad);
+    assert!(text_of(&html).ends_with("= 6"), "{}", text_of(&html));
+}
+
+#[test]
+fn a_matrix_result_scrolls_instead_of_wrapping() {
+    let res = convert_noc(&[define("v", &mat(3, 1, &["1", "2", "3"])), eval(&n("v"))]);
+    assert!(
+        res.calcpad.contains("'<div class=\"imp-scroll\">\nv\n'</div>"),
+        "{}",
+        res.calcpad
+    );
+    let res = convert_noc(&[define("a", &r("2")), eval(&n("a"))]);
+    assert!(!res.calcpad.contains("imp-scroll\">"), "{}", res.calcpad);
+}
+
+// ---- 6. results are shown to the precision the file used, and computed in full ----------------------------------
+
+fn import_noc(xml: &str) -> ImportResult {
+    let opts = calcpad_import::ImportOptions {
+        mathml: false,
+        ..Default::default()
+    };
+    calcpad_import::import_xmcd_opts(xml, &opts)
+}
+
+/// A sheet whose settings give `default` decimals and whose math regions are (inner, own decimals).
+fn precision_sheet(default: Option<i32>, regions: &[(String, Option<i32>)]) -> String {
+    let pres = default
+        .map(|p| {
+            format!(
+                r#"<presentation><mathRendering><results><general precision="{p}" show-trailing-zeros="false"/></results></mathRendering></presentation>"#
+            )
+        })
+        .unwrap_or_default();
+    let body: String = regions
+        .iter()
+        .enumerate()
+        .map(|(i, (inner, p))| {
+            let top = i as f64 * 20.0;
+            let fmt = p
+                .map(|p| format!(r#"<resultFormat><general precision="{p}"/></resultFormat>"#))
+                .unwrap_or_default();
+            format!(
+                r#"<region region-id="{}" left="0" top="{top}" width="10" height="10" align-y="{}"><math>{inner}{fmt}</math></region>"#,
+                i + 1,
+                top + 10.0
+            )
+        })
+        .collect();
+    format!(
+        r#"<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="1"/></calculation>{pres}</settings><regions>{body}</regions></worksheet>"#
+    )
+}
+
+#[test]
+fn results_use_the_files_precision_and_the_engine_computes_in_full() {
+    let third = define("x", &app("div", &[r("2"), r("3")]));
+    let res = import_noc(&precision_sheet(
+        None,
+        &[
+            (third, None),
+            (eval(&n("x")), Some(3)),
+            (eval(&app("mult", &[n("x"), r("1500")])), Some(3)),
+            (eval(&n("x")), Some(1)),
+            (eval(&n("x")), Some(1)),
+        ],
+    ));
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    // The number format is written when the precision changes, not before every result.
+    assert_eq!(res.calcpad.matches("#format").count(), 2, "{}", res.calcpad);
+    assert!(res.calcpad.contains("#format 0.###\nx\n"), "{}", res.calcpad);
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}");
+    let text = text_of(&html);
+    assert!(text.contains("x = 0.667"), "{text}");
+    // Rounding is for display: 1500 * 2/3 is 1000, not 1000.5.
+    assert!(text.contains("x · 1500 = 1000"), "{text}");
+    assert!(!text.contains("1000.5"), "{text}");
+    assert!(text.contains("x = 0.7 x = 0.7"), "{text}");
+}
+
+#[test]
+fn the_documents_default_precision_applies_where_a_region_says_nothing() {
+    let res = import_noc(&precision_sheet(
+        Some(4),
+        &[
+            (define("x", &app("div", &[r("2"), r("3")])), None),
+            (eval(&n("x")), None),
+            (eval(&n("x")), Some(2)),
+        ],
+    ));
+    assert!(res.calcpad.contains("#format 0.####\n"), "{}", res.calcpad);
+    assert!(res.calcpad.contains("#format 0.##\n"), "{}", res.calcpad);
+    let (html, errors) = shown(&res.calcpad);
+    assert!(errors.is_empty(), "{errors:?}");
+    let text = text_of(&html);
+    assert!(text.contains("x = 0.6667 x = 0.67"), "{text}");
 }

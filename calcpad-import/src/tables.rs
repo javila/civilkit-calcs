@@ -3,7 +3,10 @@
 
 /// Normalises look-alike characters in a name: the micro sign (U+00B5) becomes Greek mu (U+03BC).
 pub fn normalise_name(s: &str) -> String {
+    // The engine spells a prime with the prime characters, not the apostrophe.
     s.replace('\u{00B5}', "\u{03BC}")
+        .replace("''", "\u{2033}")
+        .replace('\'', "\u{2032}")
 }
 
 /// Units whose source spelling is also the Calcpad spelling.
@@ -175,6 +178,7 @@ pub const FUNCTIONS: &[(&str, FnRule, usize, usize)] = &[
     ("rows", FnRule::Direct("n_rows"), 1, 1),
     ("cols", FnRule::Direct("n_cols"), 1, 1),
     ("length", FnRule::Direct("len"), 1, 1),
+    ("vectorSum", FnRule::Direct("sum"), 1, 1),
     ("identity", FnRule::Direct("identity"), 1, 1),
     ("matrix", FnRule::Direct("matrix"), 2, 2),
     ("det", FnRule::Direct("det"), 1, 1),

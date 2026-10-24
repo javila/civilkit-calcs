@@ -6,6 +6,7 @@ pub mod css;
 pub mod fonts;
 pub mod html;
 pub mod image;
+pub mod mathml;
 pub mod package;
 pub mod writer;
 pub mod xlsx;
@@ -19,7 +20,8 @@ pub use image::ImageResolver;
 /// `OpenXmlWriter.Convert`: the worksheet's HTML (a whole page or its body) and the equations
 /// captured with it, as a .docx file. `resolver` supplies images that are not data: URLs.
 pub fn html_to_docx(html: &str, expressions: &[String], resolver: Option<&ImageResolver>) -> Vec<u8> {
-    let doc = html::parse(html);
+    let html = mathml::convert_page(html);
+    let doc = html::parse(&html);
     let mut w = writer::Writer::new(expressions, resolver);
     let body = w.body(&doc);
     let ordered = std::mem::take(&mut w.package.ordered_lists);

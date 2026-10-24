@@ -1247,7 +1247,8 @@ pub fn html_to_xlsx(
     plots: &[CapturedChart],
     resolver: Option<&ImageResolver>,
 ) -> Result<Vec<u8>, String> {
-    let doc = html::parse(html);
+    let html = crate::mathml::convert_page(html);
+    let doc = html::parse(&html);
     let body = doc.find("body").unwrap_or(&doc);
     let sheet_of: HashMap<String, String> = sheets
         .iter()

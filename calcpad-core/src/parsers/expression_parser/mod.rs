@@ -2024,6 +2024,7 @@ impl ExpressionParser {
                 self.math_settings.borrow_mut().zero_small_matrix_elements = *b
             }
             ("showhiddenoutput", JsonValue::Bool(b)) => self.math_settings.borrow_mut().show_hidden_output = *b,
+            ("valmathml", JsonValue::Bool(b)) => self.math_settings.borrow_mut().val_mathml = *b,
             ("maxoutputcount", JsonValue::Num(d)) => self.math_settings.borrow_mut().set_max_output_count(*d as i32),
             ("isus", JsonValue::Bool(b)) => {
                 self.is_us = *b;

@@ -168,7 +168,7 @@ ${mregion(4, 160, 4, '<ml:eval><ml:apply><ml:mult/><ml:id>count</ml:id><ml:real>
 
 // ---- the page -----------------------------------------------------------------------------------------------
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
+const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true, colorScheme: arg('--theme', 'light').toLowerCase() === 'dark' ? 'dark' : 'light' });
 const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', e => errors.push(String(e)));
@@ -214,6 +214,10 @@ if (realFile) {
     const fr = await previewFrame('');
     if (fr) await fr.evaluate(() => { const im = [...document.images].find(i => i.src.startsWith('data:image/svg')) || document.images[0]; im?.scrollIntoView({ block: 'center' }); });
     await page.waitForTimeout(1000);
+    for (const f of page.frames().slice(1)) { try { console.log('FRAME TEXT:', JSON.stringify(await f.evaluate(() => document.body.innerText.slice(0, 600)))); } catch { /* detached */ } }
+    for (const f of page.frames()) {
+        try { console.log('frame', JSON.stringify(await f.evaluate(() => { const e = document.querySelector('.imp-c-008080'); return e ? [document.body.className, getComputedStyle(document.body).backgroundColor, getComputedStyle(e).color] : null; }))); } catch { /* detached */ }
+    }
     await page.screenshot({ path: join(shotsDir, `import-sheet-${t}.png`) });
     await browser.close();
     server.close();
@@ -248,8 +252,8 @@ check(['/imported/synth/R5.svg', '/imported/synth/R6.png', '/imported/synth/R4.p
 const fr = await previewFrame();
 check(!!fr, 'the preview renders');
 if (fr) {
-    const body = await fr.evaluate(() => document.body.innerText);
-    check(/x\s*=\s*2/.test(body) && /=\s*5\b/.test(body), 'the live maths calculates (x = 2, x + 3 = 5)');
+    const body = (await fr.evaluate(() => document.body.innerText)).normalize('NFKC');
+    check(/x\s*:=\s*2/.test(body) && /x\s*\+\s*3\s*=\s*5\b/.test(body), 'the live maths calculates (x := 2, x + 3 = 5)');
     await page.waitForTimeout(500);
     const imgs = await fr.evaluate(() => [...document.images].map(i => ({ w: i.naturalWidth, h: i.naturalHeight, src: i.src.slice(0, 24), style: i.getAttribute('style') })));
     check(imgs.length === 3 && imgs.every(i => i.w > 0), `all three pictures display (${JSON.stringify(imgs.map(i => [i.w, i.h, i.src.slice(5, 20)]))})`);
@@ -355,8 +359,8 @@ check(/package\.cpd/.test(String(mtitle)), `mcdx: a new tab named after the file
 const mfr = await previewFrame('Package test sheet');
 check(!!mfr, 'mcdx: the preview renders');
 if (mfr) {
-    const body = await mfr.evaluate(() => document.body.innerText);
-    check(/x\s*=\s*2/.test(body) && /=\s*5\b/.test(body), 'mcdx: the live maths calculates (x = 2, x + 3 = 5)');
+    const body = (await mfr.evaluate(() => document.body.innerText)).normalize('NFKC');
+    check(/x\s*:=\s*2/.test(body) && /x\s*\+\s*3\s*=\s*5\b/.test(body), 'mcdx: the live maths calculates (x := 2, x + 3 = 5)');
 }
 const mdropped = await page.evaluate(async (b64) => {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
@@ -383,6 +387,50 @@ const ftext = await editorText();
 check(/count = 2/.test(ftext) && /frozen, not live/.test(ftext), 'the frozen definition is in the sheet with its note');
 check(/import-gap R1 component/.test(ftext), 'the component itself is a marked gap');
 check(errors.length === 0, `no page errors after the frozen import (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- 9. a loop block prints nothing of its own; text styles and a picture beside text reach the preview ----------------------
+const loopSheet = `<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><presentation><textRendering><textStyles><textStyle name="Normal"><blockAttr text-align="left"/><inlineAttr font-family="Times New Roman" font-size="12" color="inherit"/></textStyle><textStyle name="Heading 1"><blockAttr text-align="left"/><inlineAttr font-family="Times New Roman" font-size="12" font-weight="bold" color="#800000"/></textStyle></textStyles></textRendering></presentation><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>
+<region region-id="9" left="0" top="0" width="200" height="14" align-y="10"><text><p style="Heading 1">Styled head</p></text></region>
+<region region-id="1" left="0" top="20" width="10" height="10" align-y="30"><math><ml:define><ml:id>i</ml:id><ml:range><ml:real>1</ml:real><ml:real>3</ml:real></ml:range></ml:define></math></region>
+<region region-id="2" left="0" top="40" width="10" height="10" align-y="50"><math><ml:define><ml:apply><ml:indexer/><ml:id>h</ml:id><ml:id>i</ml:id></ml:apply><ml:apply><ml:mult/><ml:id>i</ml:id><ml:apply><ml:mult/><ml:real>2</ml:real><ml:id>m</ml:id></ml:apply></ml:apply></ml:define></math></region>
+<region region-id="3" left="0" top="60" width="10" height="10" align-y="70"><math><ml:eval><ml:id>h</ml:id></ml:eval></math></region>
+</regions></worksheet>`;
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'loops.xmcd', loopSheet);
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'loops.xmcd' }).waitFor({ timeout: 60000 });
+await closeDialog();
+const lfr = await previewFrame('Styled head');
+check(!!lfr, 'loops: the preview renders');
+if (lfr) {
+    const body = (await lfr.evaluate(() => document.body.innerText)).normalize('NFKC').replace(/[\s\u2190]+/g, ' ').trim();
+    check(/h\s*=\s*\[\s*2\s+4\s+6\s*\]\s*m\b/.test(body), `loops: the vector is shown (${body})`);
+    check(!/\[0, 0|\b0, 0, 0\b/.test(body) && body.replace(/h\s*=\s*\[[^\]]*\]\s*m/, '').replace(/h\s*i\s*:=\s*i\s*[·⋅]\s*\(\s*2\s*[·⋅]\s*m\s*\)/, '').replace('Styled head', '').trim() === '', `loops: no stray values around the result (${body})`);
+    const st = await lfr.evaluate(() => { const h = document.querySelector('h1'); const cs = h && getComputedStyle(h); return cs ? [cs.color, cs.fontFamily, cs.fontSize] : null; });
+    check(st && st[0] === 'rgb(128, 0, 0)' && /Times New Roman/.test(st[1]) && st[2] === '16px', `text style: heading keeps the source colour, family and size (${JSON.stringify(st)})`);
+}
+check(errors.length === 0, `no page errors after the loop import (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- 10. a definition shows the author's equation only; no array arrow; results at the file's precision ------------------------
+const eqSheet = `<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>
+<region region-id="9" left="0" top="0" width="200" height="14" align-y="10"><text><p style="Normal">Shown equations</p></text></region>
+<region region-id="1" left="0" top="20" width="10" height="10" align-y="30"><math><ml:define><ml:id>w</ml:id><ml:apply><ml:mult/><ml:apply><ml:transpose/><ml:matrix rows="1" cols="3"><ml:real>16</ml:real><ml:real>12</ml:real><ml:real>13.5</ml:real></ml:matrix></ml:apply><ml:id>ft</ml:id></ml:apply></ml:define></math></region>
+<region region-id="2" left="0" top="40" width="10" height="10" align-y="50"><math><ml:define><ml:id>x</ml:id><ml:apply><ml:div/><ml:real>2</ml:real><ml:real>3</ml:real></ml:apply></ml:define></math></region>
+<region region-id="3" left="0" top="60" width="10" height="10" align-y="70"><math><ml:eval><ml:id>x</ml:id></ml:eval><resultFormat><general precision="3"/></resultFormat></math></region>
+</regions></worksheet>`;
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'eq.xmcd', eqSheet);
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'eq.xmcd' }).waitFor({ timeout: 60000 });
+await closeDialog();
+const efr = await previewFrame('Shown equations');
+check(!!efr, 'equations: the preview renders');
+if (efr) {
+    const body = (await efr.evaluate(() => document.body.innerText)).normalize('NFKC').replace(/\s+/g, ' ').trim();
+    check(await efr.evaluate(() => document.querySelectorAll('math').length > 0 && document.querySelector('math mfrac, math msup') !== null), 'equations: the author\'s equations are typeset as MathML (fraction and transpose present)');
+    check(/w := \( \[ 16 12 13\.5 \] \) T ⋅ ft/.test(body), `equations: the definition reads as the author wrote it (${body})`);
+    check(!/16 ft/.test(body) && !/⃗/.test(body), 'equations: no result after a definition and no array arrow');
+    check(/x = 0\.667\b/.test(body) && !/0\.6667/.test(body), 'equations: the result has the three decimals the file used');
+}
+check(errors.length === 0, `no page errors after the equations import (${errors.slice(0, 2).join(' | ')})`);
 
 await browser.close();
 server.close();

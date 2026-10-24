@@ -195,10 +195,48 @@ pub fn read(xml: &str, limits: Limits) -> Result<Sheet, ReadError> {
             collect_region(&ctx, r, 0, &mut regions);
         }
     }
+    let mut text_styles = HashMap::new();
+    for n in root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "textStyle")
+    {
+        let Some(name) = n.attribute("name") else { continue };
+        let mut st = TextStyle::default();
+        for k in n.children().filter(|k| k.is_element()) {
+            match k.tag_name().name() {
+                "blockAttr" => {
+                    st.align = k.attribute("text-align").and_then(parse_align);
+                }
+                "inlineAttr" => {
+                    st.font = k
+                        .attribute("font-family")
+                        .map(|f| f.trim().to_string())
+                        .filter(|f| !f.is_empty());
+                    st.size = k
+                        .attribute("font-size")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .filter(|v| *v > 0.0);
+                    st.bold = k.attribute("font-weight") == Some("bold");
+                    st.italic = k.attribute("font-style") == Some("italic");
+                    st.underline = k.attribute("underline") == Some("true");
+                    st.color = k.attribute("color").and_then(parse_hex_color);
+                }
+                _ => {}
+            }
+        }
+        text_styles.insert(name.to_string(), st);
+    }
+    // The document default sits in the presentation settings: `results` holds a `general` element.
+    let default_precision = root
+        .descendants()
+        .filter(|n| n.is_element() && n.tag_name().name() == "results")
+        .find_map(general_precision);
     Ok(Sheet {
         origin,
         regions,
         component_names: Vec::new(),
+        text_styles,
+        default_precision,
     })
 }
 
@@ -229,6 +267,18 @@ impl Ctx<'_, '_> {
     fn item_of(&self, n: Node) -> Option<Vec<u8>> {
         self.item(n.attribute("item-idref")?)
     }
+}
+
+/// `#rrggbb` (any case) as lower-case `#rrggbb`; `inherit` and anything else is `None`.
+pub(crate) fn parse_hex_color(v: &str) -> Option<String> {
+    let v = v.trim();
+    let h = v.strip_prefix('#')?;
+    (h.len() == 6 && h.chars().all(|c| c.is_ascii_hexdigit())).then(|| format!("#{}", h.to_ascii_lowercase()))
+}
+
+pub(crate) fn parse_align(v: &str) -> Option<String> {
+    let v = v.trim().to_ascii_lowercase();
+    matches!(v.as_str(), "left" | "right" | "center" | "justify").then_some(v)
 }
 
 fn num_attr(n: Node, name: &str) -> Option<f64> {
@@ -283,9 +333,13 @@ fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
             for p in c.children().filter(|x| is_ws(*x, "p")) {
                 let mut pieces = Vec::new();
                 walk_inline(p, &Run::default(), &mut pieces, &mut nested, depth, lim);
+                let pt = |name: &str| num_attr(p, name).unwrap_or(0.0);
                 paras.push(Paragraph {
                     style: p.attribute("style").unwrap_or("Normal").to_string(),
                     pieces,
+                    align: p.attribute("text-align").and_then(parse_align),
+                    margin_left: pt("margin-left"),
+                    text_indent: pt("text-indent"),
                 });
             }
             // The text region precedes the regions nested in it.
@@ -299,6 +353,18 @@ fn collect_region(ctx: &Ctx, r: Node, depth: usize, out: &mut Vec<Region>) {
         "picture" => {
             let mut pic = Picture::default();
             for k in c.children().filter(|k| k.is_element()) {
+                match local(k) {
+                    "metafile" if pic.metafile.is_none() => pic.metafile = ctx.item_of(k),
+                    "png" if pic.png.is_none() => pic.png = ctx.item_of(k).filter(|b| picture::is_png(b)),
+                    _ => {}
+                }
+            }
+            out.push(mk(RegionKind::Picture(pic), rendering));
+        }
+        // A picture written straight into the region (no `picture` wrapper).
+        "png" | "metafile" => {
+            let mut pic = Picture::default();
+            for k in r.children().filter(|k| k.is_element() && ns_kind(*k) == "worksheet") {
                 match local(k) {
                     "metafile" if pic.metafile.is_none() => pic.metafile = ctx.item_of(k),
                     "png" if pic.png.is_none() => pic.png = ctx.item_of(k).filter(|b| picture::is_png(b)),
@@ -332,7 +398,10 @@ fn walk_inline<'a, 'i>(
     for c in n.children() {
         if c.is_text() {
             let t = c.text().unwrap_or("");
-            if !t.is_empty() {
+            // Indentation between formatting elements (a line break and tabs only) is not text:
+            // `<b>e</b>` newline `<b>xternal</b>` is one word.
+            let indentation = t.contains('\n') && t.trim().is_empty();
+            if !t.is_empty() && !indentation {
                 push_text(pieces, t, fmt);
             }
         } else if c.is_element() && ns_kind(c) == "worksheet" {
@@ -395,7 +464,28 @@ fn walk_inline<'a, 'i>(
                     depth + 1,
                     lim,
                 ),
-                // f (font), c (colour), inlineAttr and unknown wrappers: keep their text.
+                "f" => {
+                    let mut f = fmt.clone();
+                    if let Some(v) = c.attribute("family").map(str::trim).filter(|v| !v.is_empty()) {
+                        f.font = Some(v.to_string());
+                    }
+                    if let Some(v) = c
+                        .attribute("size")
+                        .and_then(|v| v.trim().parse::<f64>().ok())
+                        .filter(|v| *v > 0.0)
+                    {
+                        f.size = Some(v);
+                    }
+                    walk_inline(c, &f, pieces, nested, depth + 1, lim)
+                }
+                "c" => {
+                    let mut f = fmt.clone();
+                    if let Some(v) = c.attribute("val").and_then(parse_hex_color) {
+                        f.color = Some(v);
+                    }
+                    walk_inline(c, &f, pieces, nested, depth + 1, lim)
+                }
+                // inlineAttr and unknown wrappers: keep their text.
                 _ => walk_inline(c, fmt, pieces, nested, depth + 1, lim),
             }
         }
@@ -448,7 +538,20 @@ pub(crate) fn read_math(m: Node, lim: &Limits) -> MathRegion {
         saved_result,
         saved_expr,
         frozen: false,
+        precision: m
+            .children()
+            .find(|c| c.is_element() && c.tag_name().name() == "resultFormat")
+            .and_then(general_precision),
     }
+}
+
+/// The `precision` attribute of the `general` element under `n`.
+pub(crate) fn general_precision(n: Node) -> Option<i32> {
+    n.children()
+        .find(|c| c.is_element() && c.tag_name().name() == "general")
+        .and_then(|g| g.attribute("precision"))
+        .and_then(|v| v.trim().parse::<i32>().ok())
+        .filter(|v| (0..=15).contains(v))
 }
 
 /// The stored result as an expression, only when it is complete and exact: a number, or a matrix of
@@ -596,7 +699,7 @@ fn unsupported_code(tag: &str) -> Option<Code> {
         "derivative" | "integral" | "nthDerivative" | "partialDerivative" => Code::CalculusOperator,
         "sum" | "product" | "limit" | "iteratedSum" | "iteratedProduct" | "summation" => Code::SummationOperator,
         "vectorize" => Code::VectorizeOperator,
-        "matcol" | "matrow" | "vectorSum" | "magnitude" | "dot" | "cross" => Code::MatrixOperator,
+        "matcol" | "matrow" | "magnitude" | "dot" | "cross" => Code::MatrixOperator,
         _ => return None,
     })
 }
@@ -704,6 +807,7 @@ fn read_name(n: Node) -> Name {
         base: base.trim().to_string(),
         sub,
         unit: n.attribute("labels") == Some("UNIT"),
+        var: n.attribute("labels") == Some("VARIABLE"),
     }
 }
 
@@ -906,6 +1010,48 @@ fn read_calculus(tag: &str, args: &[Node], lim: &Limits, depth: usize) -> Option
     }
 }
 
+/// A sum or product: a lambda over one bound name and, when the operator has them, its bounds.
+/// Without bounds the operator runs over the range variable of that name.
+fn read_series(product: bool, args: &[Node], lim: &Limits, depth: usize) -> Option<Expr> {
+    let lambda = args
+        .first()
+        .copied()
+        .map(unwrap_provenance)
+        .filter(|l| local(*l) == "lambda")?;
+    let parts = ml_kids(lambda);
+    let [bound, body] = parts.as_slice() else { return None };
+    if local(*bound) != "boundVars" {
+        return None;
+    }
+    let vars = ml_kids(*bound);
+    let [v] = vars.as_slice() else { return None };
+    let v = unwrap_provenance(*v);
+    if local(v) != "id" {
+        return None;
+    }
+    let bounds = match args {
+        [_] => None,
+        [_, b] if local(*b) == "bounds" => {
+            let ends = ml_kids(*b);
+            let [lo, hi] = ends.as_slice() else { return None };
+            if local(*lo) == "placeholder" || local(*hi) == "placeholder" {
+                return None;
+            }
+            Some((
+                Box::new(read_expr(*lo, lim, depth + 1)),
+                Box::new(read_expr(*hi, lim, depth + 1)),
+            ))
+        }
+        _ => return None,
+    };
+    Some(Expr::Series {
+        product,
+        var: read_name(v),
+        body: Box::new(read_expr(*body, lim, depth + 1)),
+        bounds,
+    })
+}
+
 /// The statements of a `program` element.
 fn read_program(n: Node, lim: &Limits, depth: usize) -> Vec<PStmt> {
     if depth > lim.max_depth {
@@ -1106,6 +1252,14 @@ fn read_apply(n: Node, lim: &Limits, depth: usize) -> Expr {
         "nthRoot" if args.len() == 2 && local(args[0]) == "placeholder" => un(UnOp::Sqrt, &args[1..]),
         "factorial" => un(UnOp::Factorial, &args),
         "transpose" => un(UnOp::Transpose, &args),
+        "vectorize" => un(UnOp::Vectorize, &args),
+        "vectorSum" => Expr::Call(Name::new("vectorSum"), args.iter().map(&rd).collect()),
+        "summation" | "product" => {
+            read_series(tag == "product", &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
+                code: Code::SummationOperator,
+                detail: Some(tag.to_string()),
+            })
+        }
         "integral" | "derivative" => read_calculus(tag, &args, lim, depth).unwrap_or_else(|| Expr::Unsupported {
             code: Code::CalculusOperator,
             detail: Some(tag.to_string()),

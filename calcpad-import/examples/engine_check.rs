@@ -26,7 +26,11 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
-    let opts = calcpad_import::ImportOptions::default();
+    let opts = calcpad_import::ImportOptions {
+        // NO_MATHML=1 checks the typeset-Calcpad display instead of the MathML one.
+        mathml: std::env::var_os("NO_MATHML").is_none(),
+        ..Default::default()
+    };
     let mut pairs = String::new();
     let r = if bytes.starts_with(b"PK") {
         match calcpad_import::mcdx::read(&bytes, opts.limits) {
@@ -40,14 +44,28 @@ fn main() -> ExitCode {
     } else {
         calcpad_import::import_bytes(&bytes, &opts)
     };
-    let mut code = format!("#round 12\n{}", r.calcpad);
+    // What the page shows (author's equations, `#nosub`, precisions) is checked for engine errors as
+    // it stands; the numbers are read from the computed form (no display wrappers, 12 decimals).
+    let shown_errors = {
+        let mut p = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+        p.debug = true;
+        p.parse(&r.calcpad, true);
+        p.errors_list.len() + p.html_result.matches("class=\"err\"").count()
+    };
+    let mut code = format!("#round 12\n{}", computed_view(&r.calcpad));
     let _ = std::fs::write(format!("{}.pairs", args[2]), &pairs);
     if let Some(p) = args.get(3) {
         code.push_str(&std::fs::read_to_string(p).unwrap_or_default());
     }
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.debug = true;
     parser.parse(&code, true);
     let _ = std::fs::write(format!("{}.cpd", args[2]), &code);
+    parser.debug = true;
+    eprintln!(
+        "engine errors: shown form {shown_errors}, computed form {}",
+        parser.errors_list.len() + parser.html_result.matches("class=\"err\"").count()
+    );
     let _ = std::fs::write(format!("{}.html", args[2]), &parser.html_result);
     ExitCode::SUCCESS
 }
@@ -108,6 +126,7 @@ fn marker(r: &Region, text: String) -> Region {
         kind: RegionKind::Text(vec![Paragraph {
             style: "Normal".into(),
             pieces: vec![Piece::Run(Run { text, ..Run::default() })],
+            ..Paragraph::default()
         }]),
         rendering: None,
         ..r.clone()
@@ -173,6 +192,7 @@ fn with_probes(regions: Vec<Region>, pairs: &mut String) -> Vec<Region> {
                         saved_result: None,
                         saved_expr: None,
                         frozen: false,
+                        precision: None,
                     }),
                     ..r.clone()
                 };
@@ -184,4 +204,35 @@ fn with_probes(regions: Vec<Region>, pairs: &mut String) -> Vec<Region> {
         }
     }
     out
+}
+
+/// The computed form of the converted text: the `#round` and `#nosub` lines and the author's
+/// equation blocks (a hidden computation followed by a `#noc` block) are removed so that every
+/// definition prints its value, to 12 decimals, as the number checks expect.
+fn computed_view(code: &str) -> String {
+    let lines: Vec<&str> = code.lines().collect();
+    let mut skip = vec![false; lines.len()];
+    for i in 0..lines.len() {
+        let t = lines[i].trim();
+        if t == "#nosub" || t.starts_with("#round") || t.starts_with("#format") {
+            skip[i] = true;
+        } else if t == "#end hide" && lines.get(i + 1).map(|l| l.trim()) == Some("#noc") {
+            let close = (i + 2..lines.len())
+                .find(|&k| lines[k].trim() == "#end noc")
+                .unwrap_or(i + 1);
+            for s in &mut skip[i + 1..=close] {
+                *s = true;
+            }
+            if i >= 2 && lines[i - 2].trim() == "#hide" {
+                skip[i - 2] = true;
+                skip[i] = true;
+            }
+        }
+    }
+    lines
+        .iter()
+        .zip(&skip)
+        .filter(|(_, s)| !**s)
+        .map(|(l, _)| format!("{l}\n"))
+        .collect()
 }

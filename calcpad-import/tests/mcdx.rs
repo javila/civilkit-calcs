@@ -6,6 +6,9 @@ use calcpad_import::{
     import_bytes, import_mcdx, import_xmcd, Code, ImportOptions, ImportResult, Limits, Severity, GAP_MARKER,
 };
 
+mod common;
+use common::legacy;
+
 // ---- a minimal zip writer ------------------------------------------------------------------------
 
 fn crc32(data: &[u8]) -> u32 {
@@ -231,7 +234,10 @@ fn lines(res: &ImportResult) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut in_noc = false;
     let mut in_gap = false;
-    for l in res.calcpad.lines().filter(|l| !l.starts_with("'<!-- Imported")) {
+    let code = legacy(&res.calcpad);
+    for l in code.lines().filter(|l| {
+        !l.starts_with("'<!-- Imported") && !l.starts_with("'<style>") && !l.starts_with("'<!--{\"LintIgnore")
+    }) {
         if let Some(rest) = l.strip_prefix("'<!-- [import-gap") {
             let head = rest.split(" --><small>").next().unwrap_or(rest);
             out.push(format!("'[import-gap{}", head.replacen(" -->", "", 1)));
@@ -362,7 +368,7 @@ fn program_with_try_catch_is_a_reported_gap_in_both_paths() {
 fn range_variable_used_outside_a_fill_loop_is_a_reported_gap_in_both_paths() {
     let res = both(&[
         r#"<ml:define><ml:id>k</ml:id><ml:range><ml:real>1</ml:real><ml:real>10</ml:real></ml:range></ml:define>"#,
-        r#"<ml:eval><ml:apply><ml:mult/><ml:id>k</ml:id><ml:real>2</ml:real></ml:apply></ml:eval>"#,
+        r#"<ml:define><ml:id>z</ml:id><ml:apply><ml:mult/><ml:id>k</ml:id><ml:real>2</ml:real></ml:apply></ml:define>"#,
     ]);
     assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
     assert!(res.report.notes().any(|i| i.code == Code::RangeLoop));
@@ -436,6 +442,39 @@ fn text_region(id: u32, top: f64, rel: &str, nested: &str) -> String {
 }
 
 #[test]
+fn text_in_the_symbol_font_is_greek() {
+    let xaml = xaml_package(
+        r#"<Paragraph><Run>Since </Run><Run FontFamily="Symbol">S </Run><Run>F</Run><Run FontFamily="Symbol">a</Run></Paragraph>"#,
+    );
+    let res = Pkg::new(&text_region(1, 0.0, "Rt1", ""))
+        .rel("Rt1", "flowDocument", "/ws/xaml/FlowDocument1.XamlPackage")
+        .part(part("ws/xaml/FlowDocument1.XamlPackage", xaml))
+        .import();
+    let l = res.calcpad.lines().find(|x| x.contains("Since")).expect("line");
+    assert!(l.contains("\u{3A3}") && l.contains("\u{3B1}"), "{l}");
+    assert!(!l.contains("Symbol"), "{l}");
+}
+
+#[test]
+fn text_region_reads_font_size_colour_and_alignment() {
+    // 16 px is 12 pt; the colour is #AARRGGBB.
+    let xaml = xaml_package(
+        r##"<Paragraph TextAlignment="Center"><Run FontFamily="Arial" FontSize="16" Foreground="#FF0000FF">blue text</Run></Paragraph>"##,
+    );
+    let res = Pkg::new(&text_region(1, 0.0, "Rt1", ""))
+        .rel("Rt1", "flowDocument", "/ws/xaml/FlowDocument1.XamlPackage")
+        .part(part("ws/xaml/FlowDocument1.XamlPackage", xaml))
+        .import();
+    let l = res.calcpad.lines().find(|x| x.contains("blue text")).expect("line");
+    assert!(l.contains("text-align:center"), "{l}");
+    assert!(
+        l.contains("font-family:Arial,Helvetica") && l.contains("font-size:12pt"),
+        "{l}"
+    );
+    assert!(l.contains("imp-c-0000ff"), "{l}");
+}
+
+#[test]
 fn text_region_reads_the_flow_document() {
     let xaml = xaml_package(
         r#"<Paragraph><Run FontWeight="Bold">Beam </Run><Run>check</Run><Run FontStyle="Italic"> (draft)</Run><LineBreak /><Run TextDecorations="Underline">second line</Run></Paragraph><Paragraph><Run>   </Run></Paragraph>"#,
@@ -446,7 +485,7 @@ fn text_region_reads_the_flow_document() {
         .import();
     assert_eq!(
         lines(&res),
-        vec!["'<b>Beam </b>check<i> (draft)</i><br/><u>second line</u>"]
+        vec!["'<p><b>Beam </b>check<i> (draft)</i><br/><u>second line</u></p>"]
     );
     assert_eq!(res.report.regions_total(), 1);
     assert_eq!(res.report.regions_needing_attention(), 0);
@@ -457,7 +496,10 @@ fn inline_flow_document_is_read_like_the_package_form() {
     // Older files hold the flow document inside the text element; no relationship, no part.
     let region = r#"<region region-id="1" top="0" left="0" width="400"><text is-text-block="true"><FlowDocument xmlns="http://example.invalid/presentation"><Paragraph Margin="0,0,0,0"><Run FontWeight="Bold">Beam </Run><Run>check</Run><Run><Run.TextDecorations><TextDecorationCollection><TextDecoration Location="Underline" /></TextDecorationCollection></Run.TextDecorations> underlined</Run></Paragraph><List MarkerStyle="Decimal"><ListItem><Paragraph><Run>one</Run></Paragraph></ListItem></List></FlowDocument></text></region>"#;
     let res = Pkg::new(region).import();
-    assert_eq!(lines(&res), vec!["'<b>Beam </b>check<u> underlined</u>", "'1. one"]);
+    assert_eq!(
+        lines(&res),
+        vec!["'<p><b>Beam </b>check<u> underlined</u></p>", "'1. one"]
+    );
     assert_eq!(res.report.regions_needing_attention(), 0);
     assert!(!res.report.issues.iter().any(|i| i.code == Code::TextUnreadable));
 }
@@ -834,7 +876,7 @@ fn converted_package_runs_in_the_engine() {
     ]);
     assert_eq!(res.report.regions_needing_attention(), 0);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     assert!(
         !parser.html_result.contains("class=\"err\""),
         "engine error in:\n{}\n---\n{}",
@@ -897,7 +939,7 @@ fn a_definition_read_from_an_input_component_takes_the_saved_value() {
     // Only the component itself needs attention; everything that read the input converted.
     assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {
@@ -976,7 +1018,7 @@ fn a_variable_named_like_a_unit_is_renamed_so_the_unit_keeps_its_name() {
     assert!(res.calcpad.contains("N_v = [1; 2]"), "{}", res.calcpad);
     assert!(res.calcpad.contains("F = 3*N"), "{}", res.calcpad);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {
@@ -1140,7 +1182,7 @@ fn the_numbers_of_a_components_workbook_define_the_name_and_downstream_regions_c
     // Only the component needs attention; the regions that read the name converted.
     assert_eq!(res.report.regions_needing_attention(), 1, "{:?}", res.report.issues);
     let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
-    parser.parse(&res.calcpad, true);
+    parser.parse(&legacy(&res.calcpad), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "{html}");
     let text: String = {

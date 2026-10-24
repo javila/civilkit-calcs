@@ -2,7 +2,7 @@
 //! imports a worksheet, and the engine module is unchanged.
 //!
 //! `import_worksheet(bytes, options_json)` returns an [`ImportOut`]: the Calcpad text, the report as JSON
-//! and the picture files. Options (all optional): `pictures`, `savedResults`, `assetPrefix`,
+//! and the picture files. Options (all optional): `pictures`, `mathml`, `savedResults`, `assetPrefix`,
 //! `convertMetafiles`. There are no threads in the browser and no unwinding (`panic = "abort"`), so
 //! a worker that sees this module trap restarts it and retries with `convertMetafiles: false`.
 use calcpad_import::{import_bytes, Code, ImportOptions, ImportReport, Severity};
@@ -63,6 +63,9 @@ pub fn import_worksheet(bytes: &[u8], options_json: &str) -> ImportOut {
 pub fn parse_options(json: &str) -> ImportOptions {
     let mut o = ImportOptions::default();
     let v: Value = serde_json::from_str(json).unwrap_or(Value::Null);
+    if let Some(b) = v.get("mathml").and_then(Value::as_bool) {
+        o.mathml = b;
+    }
     if let Some(b) = v.get("pictures").and_then(Value::as_bool) {
         o.pictures = b;
     }
