@@ -369,7 +369,7 @@ impl Tr {
     fn unit_only(&mut self, n: &Name) -> String {
         if n.sub.is_none() {
             if let Some(u) = tables::map_unit(&n.base) {
-                return u.to_string();
+                return u;
             }
             if tables::is_unmapped_unit(&n.base) {
                 self.issue(Code::UnmappedUnit, Some(n.base.clone()));

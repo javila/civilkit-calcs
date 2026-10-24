@@ -88,7 +88,19 @@ pub const UNMAPPED_UNITS: &[&str] = &[
 ];
 
 /// The Calcpad spelling of a unit name, if the table has one.
-pub fn map_unit(name: &str) -> Option<&'static str> {
+///
+/// A product written with a middle dot (`kN·m`, `N·m`) is a unit when every factor is; it is
+/// spelled `(kN*m)` so that it stays one operand next to `/` and `^`.
+pub fn map_unit(name: &str) -> Option<String> {
+    if name.contains(['\u{00B7}', '\u{22C5}']) {
+        let parts: Option<Vec<&'static str>> = name.split(['\u{00B7}', '\u{22C5}']).map(map_single_unit).collect();
+        let parts = parts?;
+        return (parts.len() > 1).then(|| format!("({})", parts.join("*")));
+    }
+    map_single_unit(name).map(str::to_string)
+}
+
+fn map_single_unit(name: &str) -> Option<&'static str> {
     let n = normalise_name(name);
     if let Some(u) = SAME_UNITS.iter().find(|u| **u == n) {
         return Some(u);
@@ -434,14 +446,14 @@ mod tests {
 
     #[test]
     fn micro_sign_is_normalised() {
-        assert_eq!(map_unit("\u{00B5}Pa"), Some("μPa"));
+        assert_eq!(map_unit("\u{00B5}Pa").as_deref(), Some("μPa"));
     }
 
     #[test]
     fn same_and_renamed_units_resolve() {
-        assert_eq!(map_unit("kg"), Some("kg"));
-        assert_eq!(map_unit("hr"), Some("h"));
-        assert_eq!(map_unit("gm"), Some("g"));
+        assert_eq!(map_unit("kg").as_deref(), Some("kg"));
+        assert_eq!(map_unit("hr").as_deref(), Some("h"));
+        assert_eq!(map_unit("gm").as_deref(), Some("g"));
         assert_eq!(map_unit("nonsense"), None);
     }
 
