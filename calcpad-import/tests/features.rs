@@ -1194,3 +1194,20 @@ fn nth_root_with_an_empty_degree_is_the_square_root() {
     )]);
     assert!(res.report.gaps().any(|i| i.code == Code::UnknownElement));
 }
+
+#[test]
+fn a_transposed_row_is_a_vector_the_engine_can_count() {
+    // v := (4 7 9)^T ; len(v) = 3 ; max(v) = 9 ; w := (v^T)^T keeps working as a vector.
+    let tr = |x: &str| format!("<ml:apply><ml:transpose/>{x}</ml:apply>");
+    let res = convert(&[
+        define("v", &tr(&mat(1, 3, &["4", "7", "9"]))),
+        define("w", &tr(&tr(&n("v")))),
+        eval(&call("length", &[n("w")])),
+        eval(&call("max", &[n("v")])),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(!res.calcpad.contains("transp("), "{}", res.calcpad);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 3.0);
+    assert_close(nums[nums.len() - 1], 9.0);
+}

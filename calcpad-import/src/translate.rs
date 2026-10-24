@@ -652,6 +652,17 @@ impl Tr {
                 atom(format!("{}!", inner))
             }
             UnOp::Transpose => {
+                // The engine keeps vectors and matrices apart (`len`, `max`, indexing with one
+                // index and `vector(..)` want a vector), so a transposed row literal is the
+                // column vector itself and a double transpose is the operand.
+                if let Expr::Un(UnOp::Transpose, y) = x {
+                    return self.expr(y);
+                }
+                if let Expr::Matrix { rows: 1, cols, items } = x {
+                    if *cols > 1 {
+                        return self.matrix(*cols, 1, items);
+                    }
+                }
                 let inner = self.expr(x).s;
                 atom(format!("transp({})", inner))
             }
