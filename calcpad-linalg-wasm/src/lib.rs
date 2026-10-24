@@ -191,7 +191,11 @@ fn symmetric(a: &[Vec<f64>], lower: bool) -> R<Matrix> {
 fn triangular(a: &[Vec<f64>], lower: bool, trans: bool) -> R<Matrix> {
     let n = square(a)?;
     let as_lower = lower != trans;
-    let m = eng(if as_lower { lower_triangular_matrix::new_checked(n) } else { upper_triangular_matrix::new_checked(n) })?;
+    let m = eng(if as_lower {
+        lower_triangular_matrix::new_checked(n)
+    } else {
+        upper_triangular_matrix::new_checked(n)
+    })?;
     for i in 0..n {
         for j in 0..n {
             let keep = if as_lower { j <= i } else { j >= i };
@@ -205,11 +209,15 @@ fn triangular(a: &[Vec<f64>], lower: bool, trans: bool) -> R<Matrix> {
 }
 
 fn vec_of(rows: &[Vec<f64>], col: usize) -> R<Vector> {
-    eng(Vector::from_values(rows.iter().map(|r| RealValue::num(r[col])).collect()))
+    eng(Vector::from_values(
+        rows.iter().map(|r| RealValue::num(r[col])).collect(),
+    ))
 }
 
 fn grid(m: &Matrix) -> Vec<Vec<f64>> {
-    (0..m.row_count()).map(|i| (0..m.col_count()).map(|j| m.get(i, j).d).collect()).collect()
+    (0..m.row_count())
+        .map(|i| (0..m.col_count()).map(|j| m.get(i, j).d).collect())
+        .collect()
 }
 
 fn mat_json(rows: &[Vec<f64>]) -> Value {
@@ -270,13 +278,19 @@ fn run(req: &Value) -> R<Value> {
         "tri_solve" => {
             let (b, is_vec) = rhs_of(&req["b"])?;
             let trans = req["trans"].as_bool().unwrap_or(false);
-            Ok(json!([answer(solve_rows(&triangular(&a, lower, trans)?, &b, is_vec)?, is_vec)]))
+            Ok(json!([answer(
+                solve_rows(&triangular(&a, lower, trans)?, &b, is_vec)?,
+                is_vec
+            )]))
         }
         "cho_solve" => {
             // a is the Cholesky factor c: A = c c^T (lower) or A = c^T c (upper). Two triangular solves.
             let (b, is_vec) = rhs_of(&req["b"])?;
             let y = solve_rows(&triangular(&a, lower, !lower)?, &b, is_vec)?;
-            Ok(json!([answer(solve_rows(&triangular(&a, lower, lower)?, &y, is_vec)?, is_vec)]))
+            Ok(json!([answer(
+                solve_rows(&triangular(&a, lower, lower)?, &y, is_vec)?,
+                is_vec
+            )]))
         }
         "matmul" => {
             // a (m by k) times b (k by n, or a vector of k): the engine's matrix product.
@@ -284,7 +298,10 @@ fn run(req: &Value) -> R<Value> {
             if a.first().map_or(0, |r| r.len()) != b.len() {
                 return Err(MISMATCH.to_string());
             }
-            Ok(json!([answer(grid(&eng(Matrix::mul(&full(&a)?, &full(&b)?))?), is_vec)]))
+            Ok(json!([answer(
+                grid(&eng(Matrix::mul(&full(&a)?, &full(&b)?))?),
+                is_vec
+            )]))
         }
         "inv" => {
             square(&a)?;
@@ -325,7 +342,11 @@ fn run(req: &Value) -> R<Value> {
             // The engine's last block holds V^T (its rows are the right singular vectors), so for tall input
             // a = u diag(s) v. A wide input was decomposed as its transpose: a = (v^T)^T diag(s) u^T.
             if wide {
-                Ok(json!([mat_json(&transposed(&v)), vec_json(&s), mat_json(&transposed(&u))]))
+                Ok(json!([
+                    mat_json(&transposed(&v)),
+                    vec_json(&s),
+                    mat_json(&transposed(&u))
+                ]))
             } else {
                 Ok(json!([mat_json(&u), vec_json(&s), mat_json(&v)]))
             }
@@ -353,7 +374,12 @@ mod tests {
     }
 
     fn plain(t: &Value) -> Value {
-        let shape: Vec<usize> = t["shape"].as_array().unwrap().iter().map(|x| x.as_u64().unwrap() as usize).collect();
+        let shape: Vec<usize> = t["shape"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_u64().unwrap() as usize)
+            .collect();
         let data = unhex(t["hex"].as_str().unwrap()).unwrap();
         match shape.len() {
             0 => json!(data[0]),
@@ -400,8 +426,14 @@ mod tests {
         let a = json!([[4, 12, -16], [12, 37, -43], [-16, -43, 98]]);
         let r = call(json!({"op":"cholesky","a":a,"lower":true}));
         let l = &r["out"][0];
-        assert!(close(&l[0][0], 2.0) && close(&l[1][0], 6.0) && close(&l[1][1], 1.0) && close(&l[2][0], -8.0), "{r}");
-        assert!(close(&l[2][1], 5.0) && close(&l[2][2], 3.0) && close(&l[0][1], 0.0), "{r}");
+        assert!(
+            close(&l[0][0], 2.0) && close(&l[1][0], 6.0) && close(&l[1][1], 1.0) && close(&l[2][0], -8.0),
+            "{r}"
+        );
+        assert!(
+            close(&l[2][1], 5.0) && close(&l[2][2], 3.0) && close(&l[0][1], 0.0),
+            "{r}"
+        );
         let u = call(json!({"op":"cholesky","a":a,"lower":false}));
         assert!(close(&u["out"][0][0][1], 6.0) && close(&u["out"][0][1][0], 0.0), "{u}");
         let bad = call(json!({"op":"cholesky","a":[[1,2],[2,1]]}));
@@ -439,20 +471,28 @@ mod tests {
         for k in 0..2 {
             let w = r["out"][0][k].as_f64().unwrap();
             let (v0, v1) = (v[0][k].as_f64().unwrap(), v[1][k].as_f64().unwrap());
-            assert!((2.0 * v0 + v1 - w * v0).abs() < 1e-9 && (v0 + 2.0 * v1 - w * v1).abs() < 1e-9, "{r}");
+            assert!(
+                (2.0 * v0 + v1 - w * v0).abs() < 1e-9 && (v0 + 2.0 * v1 - w * v1).abs() < 1e-9,
+                "{r}"
+            );
         }
     }
 
     #[test]
     fn svd_reconstructs_tall_and_wide() {
-        for a in [json!([[3.0, 1.0], [1.0, 2.0], [0.5, -1.0]]), json!([[3.0, 1.0, 0.5], [1.0, 2.0, -1.0]])] {
+        for a in [
+            json!([[3.0, 1.0], [1.0, 2.0], [0.5, -1.0]]),
+            json!([[3.0, 1.0, 0.5], [1.0, 2.0, -1.0]]),
+        ] {
             let r = call(json!({"op":"svd","a":a}));
             assert_eq!(r["ok"], true, "{r}");
             let (u, s, vt) = (&r["out"][0], &r["out"][1], &r["out"][2]);
             let k = s.as_array().unwrap().len();
             for (i, row) in a.as_array().unwrap().iter().enumerate() {
                 for (j, want) in row.as_array().unwrap().iter().enumerate() {
-                    let got: f64 = (0..k).map(|t| u[i][t].as_f64().unwrap() * s[t].as_f64().unwrap() * vt[t][j].as_f64().unwrap()).sum();
+                    let got: f64 = (0..k)
+                        .map(|t| u[i][t].as_f64().unwrap() * s[t].as_f64().unwrap() * vt[t][j].as_f64().unwrap())
+                        .sum();
                     assert!((got - want.as_f64().unwrap()).abs() < 1e-9, "{a} {r}");
                 }
             }
@@ -479,7 +519,11 @@ mod tests {
     #[test]
     fn matmul_of_a_matrix_with_a_matrix_and_a_vector() {
         let r = call(json!({"op":"matmul","a":[[1,2],[3,4],[5,6]],"b":[[1,0,2],[0,1,3]]}));
-        assert_eq!(r["out"][0], json!([[1.0, 2.0, 8.0], [3.0, 4.0, 18.0], [5.0, 6.0, 28.0]]), "{r}");
+        assert_eq!(
+            r["out"][0],
+            json!([[1.0, 2.0, 8.0], [3.0, 4.0, 18.0], [5.0, 6.0, 28.0]]),
+            "{r}"
+        );
         let v = call(json!({"op":"matmul","a":[[1,2],[3,4]],"b":[1,1]}));
         assert_eq!(v["out"][0], json!([3.0, 7.0]), "{v}");
         assert_eq!(call(json!({"op":"matmul","a":[[1,2]],"b":[1,2,3]}))["ok"], false);
