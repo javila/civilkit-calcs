@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,294,244 bytes raw, 527,274 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features, the workbook reader and the equation display added about 100 KB.
+Size of the module: 1,316,704 bytes raw, 534,343 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features, the workbook reader and the equation display added about 100 KB.
 
 ## Use
 
@@ -91,14 +91,24 @@ By default the author's equation is written as MathML (`<math>` inside `<div cla
 tree by `calcpad-import/src/mathml.rs`: stacked fractions, `munderover` sums and products with bounds, integrals,
 subscripts (`C_(v,i)`, `V_1`), a vector arrow over the whole product, a transpose superscript, bracketed matrices,
 `:=` for a definition (`≡` for a global one) and `=` for an evaluation, original names (`SIUnitsOf`, a variable renamed
-for the engine shows under its own name), units upright and variables italic. Colours are the page's (`currentColor`), so
-the dark theme needs nothing extra. The computation is the unchanged hidden code.
+for the engine shows under its own name). One rule sets names: the tool's own functions (`sin`, `if`, `SIUnitsOf`) are upright;
+every other name is an italic variable, a function the page defines included, so `V_AB(x) := ...` and a later call
+`V_AB(L_AB)` look the same. A one-letter name the file does not label as a unit is a variable. Units are bold, blue
+italic (a number before its unit has no dot, `100 ft`), and the keywords `if` and `otherwise` and the `=` of a check are
+bold; these use a text face because the math face has no bold weight. The vector arrow is drawn by the stylesheet as a line
+and a head across the whole operand (the `mo` stays for the Office Math export). Text colours follow the theme: units
+have a light and a dark blue, everything else is `currentColor`. The computation is the unchanged hidden code.
+
+An expression of a range variable (`s_i / ft =`) is typeset the same way: the author's left side, then the collected
+column of values as a bracketed table in the file's decimal places. A quotient of units in a result is a stacked
+fraction and a fractional power is a small fraction (`ft^(3/4)`).
 
 An evaluation is `<math>` with the left side typeset, then the engine's value through `#val`: the page switches on
 `#settings {"valMathml": true}`, an opt-in engine setting under which `#val` writes the value as MathML (bracketed table,
 unit once after it, the file's decimal places through `#round`). Nothing in the engine changes unless the setting is on.
 A region whose equation has a node without a MathML spelling (a program body, for example) keeps the typeset-Calcpad
-display below. `ImportOptions::mathml = false` (the wasm option `mathml`) uses it everywhere.
+display below. The editor accepts `valMathml` as a known setting, and the sheet carries a `LintIgnore` comment for the
+unused-name hint (a name used only by a picture or an unconverted region is not a finding). `ImportOptions::mathml = false` (the wasm option `mathml`) uses it everywhere.
 
 Exports: the Word export converts each `<math>` to Office Math (fractions, sub and superscripts, sums, brackets,
 matrices, accents) and the Excel export writes a linear text form with the matrix cells apart. Print and PDF use the
@@ -216,6 +226,11 @@ is unchanged (left to right within a row).
   is one `<table class="imported-grid">`, one `<tr>` per row, one `<td>` per region.
 * Any other row with two or more regions is a wrapping flex row, `<div class="imported-row">`, one
   `<div>` per region. A region that only wrote a comment (a range line) takes no part.
+* Regions of a row sit where the file puts them: each block after the first is moved right by the gap the file leaves
+  between the regions (when it gives widths), and the blocks of a row share their last baseline, so a value written
+  beside a label that wraps lines up with the label's last line. A value to the right of a text region whose baseline
+  falls inside the text's height is on the text's row even when the baselines differ.
+* An equation on its own is indented by its distance from the page margin (the smallest `left` of the sheet), in points.
 * A region that starts inside the previous one (math nested in a text region) is stacked, not placed beside it.
 
 The Calcpad lines of a region are inside the cell, so equations are typeset by the engine in the cell.

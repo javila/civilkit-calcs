@@ -3600,6 +3600,7 @@ fn style_block(colors: &std::collections::BTreeSet<String>, maths: bool) -> Opti
 .imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-family:STIX Two Text,Times New Roman,Times,serif}\
 .imp-m .kw,.imp-m .dot,.imp-m .beq,.imp-m .ru{font-weight:bold}.imp-m .ru{font-style:italic}\
 .imp-m .ru{color:rgb(28,61,153)}.dark-theme .imp-m .ru{color:rgb(143,176,255)}\
+.imp-m munderover>:nth-child(2),.imp-m munder>:nth-child(2){margin-top:-.12em}.imp-m munderover>:nth-child(3){margin-bottom:-.12em}\
 .imp-m mover.va>mo{visibility:hidden}.imp-m mover.va{background:linear-gradient(currentColor,currentColor) 0 .2em/100% 1.3px no-repeat,\
 linear-gradient(to top right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .08em/.22em .12em no-repeat,\
 linear-gradient(to bottom right,transparent calc(50% - .65px),currentColor calc(50% - .65px) calc(50% + .65px),transparent calc(50% + .65px)) right .2em/.22em .12em no-repeat}",
