@@ -323,11 +323,13 @@ fn program_with_if_and_for_is_a_reported_gap_in_both_paths() {
 }
 
 #[test]
-fn range_variable_is_a_reported_gap_in_both_paths() {
+fn range_variable_used_outside_a_fill_loop_is_a_reported_gap_in_both_paths() {
     let res = both(&[
         r#"<ml:define><ml:id>k</ml:id><ml:range><ml:real>1</ml:real><ml:real>10</ml:real></ml:range></ml:define>"#,
+        r#"<ml:eval><ml:apply><ml:mult/><ml:id>k</ml:id><ml:real>2</ml:real></ml:apply></ml:eval>"#,
     ]);
     assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
+    assert!(res.report.notes().any(|i| i.code == Code::RangeLoop));
 }
 
 #[test]

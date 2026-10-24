@@ -44,6 +44,7 @@ pub enum Code {
     TooDeep,
     // ---- notes: the region converted, with a caveat ----
     GlobalDefinition,
+    RangeLoop,
     AngleMode,
     ArrayOrigin,
     OriginAssigned,
@@ -108,6 +109,7 @@ impl Code {
         Code::BadStructure,
         Code::TooDeep,
         Code::GlobalDefinition,
+        Code::RangeLoop,
         Code::AngleMode,
         Code::ArrayOrigin,
         Code::OriginAssigned,
@@ -161,6 +163,7 @@ impl Code {
             BadStructure => "bad-structure",
             TooDeep => "too-deep",
             GlobalDefinition => "global-definition",
+            RangeLoop => "range-loop",
             AngleMode => "angle-mode",
             ArrayOrigin => "array-origin",
             OriginAssigned => "origin-assigned",
@@ -181,8 +184,8 @@ impl Code {
     pub fn severity(self) -> Severity {
         use Code::*;
         match self {
-            GlobalDefinition | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits | AbsOfArray
-            | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
+            GlobalDefinition | RangeLoop | AngleMode | ArrayOrigin | OriginAssigned | LogBase | RoundDigits
+            | AbsOfArray | CallAsMultiplication | UnitOverride | StaticPicture | SvgFallback => Severity::Note,
             XmlError | NotAWorksheet | InputTooLarge | UnsupportedContainer => Severity::Fatal,
             _ => Severity::Gap,
         }
@@ -227,6 +230,7 @@ impl Code {
             ArityMismatch => "function called with the wrong number of arguments",
             BadStructure => "expression tree with an unexpected shape",
             TooDeep => "expression nested too deeply",
+            RangeLoop => "range variable read as the loop bounds of the element assignments that use it; any other use is reported",
             GlobalDefinition => "global definition converted as an ordinary definition at its reading-order position",
             AngleMode => "trigonometric functions: the output switches the sheet to radians (#rad), the source default",
             ArrayOrigin => "array origin differs from 1: indexes were shifted",

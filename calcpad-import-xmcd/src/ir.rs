@@ -115,8 +115,11 @@ pub enum Stmt {
 pub enum Target {
     Var(Name),
     Func(Name, Vec<Name>),
-    /// `v[i] := ...`, with the array's name when the target is a plain indexed name.
-    Element(Option<Name>),
+    /// `v[i] := ...`: the array's name when the target is a plain indexed name, and the indexes.
+    Element {
+        base: Option<Name>,
+        index: Vec<Expr>,
+    },
     /// `[a, b] := ...`: several names defined at once by a matrix of names.
     Multi(Vec<Name>),
 }

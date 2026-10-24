@@ -214,6 +214,8 @@ struct Tr {
     /// Defined names known to hold an array.
     arrays: HashSet<String>,
     params: Vec<String>,
+    /// Range variables with literal integer bounds, usable as loop bounds of element assignments.
+    ranges: HashMap<String, (i64, i64)>,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -466,6 +468,15 @@ impl Tr {
 
     fn name_ref(&mut self, n: &Name) -> R {
         let flat = tables::normalise_name(&n.flat());
+        if self.ranges.contains_key(&flat) && !self.params.contains(&flat) {
+            self.issue(
+                Code::RangeVariable,
+                Some(format!(
+                    "{flat} is a range variable; it is only read as the loop of an element assignment"
+                )),
+            );
+            return atom("?range?");
+        }
         if self.params.contains(&flat) || self.defined.contains(&flat) || self.funcs.contains_key(&flat) {
             if !valid_ident(&flat) {
                 self.issue(Code::InvalidName, Some(flat));
@@ -908,6 +919,7 @@ impl Tr {
                                                                            // Names a gap redefines without our knowing their value (they must not read as stale).
         let mut poison: Vec<String> = Vec::new();
         let mut origin_assign: Option<i64> = None;
+        let mut range_def: Option<(String, (i64, i64))> = None;
         let shape: &str;
 
         match &m.stmt {
@@ -930,10 +942,36 @@ impl Tr {
                                 }
                             }
                         }
-                        let rhs = self.expr(value);
+                        if let (
+                            Expr::Range {
+                                first,
+                                second: None,
+                                last,
+                            },
+                            true,
+                        ) = (value, valid_ident(&flat))
+                        {
+                            if let (Expr::Num(a), Expr::Num(z)) = (&**first, &**last) {
+                                if let (Some(a), Some(z)) = (is_int_literal(a), is_int_literal(z)) {
+                                    if a <= z {
+                                        range_def = Some((flat.clone(), (a, z)));
+                                    }
+                                }
+                            }
+                        }
+                        let rhs = if range_def.is_some() {
+                            atom("")
+                        } else {
+                            self.expr(value)
+                        };
                         let is_array = matches!(value, Expr::Matrix { .. })
                             || matches!(value, Expr::Call(f, _) if matches!(f.base.as_str(), "identity" | "matrix" | "augment" | "stack"));
-                        if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                        if let Some((_, (a, z))) = &range_def {
+                            self.issue(Code::RangeLoop, Some(format!("{flat} = {a} .. {z}")));
+                            emitted = Some(format!(
+                                "'<!-- range {flat} = {a} .. {z}: used as the loop of the element assignments that follow -->"
+                            ));
+                        } else if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                             emitted = Some(format!("{} = {}", flat, rhs.s));
                         } else {
                             attempt = Some(format!("{} = {}", flat, rhs.s));
@@ -982,15 +1020,64 @@ impl Tr {
                                 .filter(|f| valid_ident(f)),
                         );
                     }
-                    Target::Element(base) => {
-                        self.issue(Code::ElementAssignment, None);
+                    Target::Element { base, index } => {
+                        let flat = base
+                            .as_ref()
+                            .map(|b| tables::normalise_name(&b.flat()))
+                            .filter(|f| valid_ident(f));
                         // The array is no longer what an earlier definition said: later uses of its
                         // name must not read the stale value (or, for a name such as `L`, a unit).
-                        if let Some(b) = base {
-                            let flat = tables::normalise_name(&b.flat());
-                            if valid_ident(&flat) {
-                                define_name = Some((flat, None, true));
+                        if let Some(f) = &flat {
+                            define_name = Some((f.clone(), None, true));
+                        }
+                        // `v[i] := expr(i)` with a range variable `i` that has literal bounds, for an
+                        // array that has no value yet, is a loop that fills a zero vector. Anything
+                        // else about an element assignment is reported.
+                        let range = match index.as_slice() {
+                            [Expr::Name(i)] => {
+                                let f = tables::normalise_name(&i.flat());
+                                self.ranges.get(&f).map(|b| (f, *b))
                             }
+                            _ => None,
+                        };
+                        let why = match (&flat, &range) {
+                            (None, _) => Some("the target is not a plain indexed name"),
+                            (Some(_), None) => Some("the index is not a range variable with literal bounds"),
+                            (Some(f), Some(_))
+                                if self.defined.contains(f)
+                                    || self.funcs.contains_key(f)
+                                    || self.gap_names.contains_key(f) =>
+                            {
+                                Some("the array already has a value, so growing or overwriting it element by element is not read")
+                            }
+                            (Some(f), Some(_)) if mentions(value, f) => {
+                                Some("the value reads the array it is filling")
+                            }
+                            _ => None,
+                        };
+                        match (why, flat, range) {
+                            (None, Some(f), Some((iv, (a, z)))) if self.origin <= a => {
+                                self.params.push(iv.clone());
+                                let rhs = self.expr(value);
+                                let idx = self.index_expr(&Expr::Name(Name::new(&iv)));
+                                self.params.pop();
+                                if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
+                                    let size = z - self.origin + 1;
+                                    emitted = Some(format!(
+                                        "#hide\n{f} = vector({size})\n#for {iv} = {a} : {z}\n    {f}.({idx}) = {}\n#loop\n#show",
+                                        rhs.s
+                                    ));
+                                } else {
+                                    attempt = Some(format!("{f}.({idx}) = {}  (for {iv} = {a} .. {z})", rhs.s));
+                                }
+                            }
+                            (None, ..) => {
+                                self.issue(
+                                    Code::ElementAssignment,
+                                    Some("the range starts below the array origin".into()),
+                                );
+                            }
+                            (Some(w), ..) => self.issue(Code::ElementAssignment, Some(w.to_string())),
                         }
                     }
                 }
@@ -1042,7 +1129,14 @@ impl Tr {
             } else if let Some(line) = emitted.take() {
                 self.lines.push(line);
             }
-            if let Some((name, arity, is_array)) = define_name {
+            if let Some((name, bounds)) = &range_def {
+                self.defined.remove(name);
+                self.funcs.remove(name);
+                self.arrays.remove(name);
+                self.gap_names.remove(name);
+                self.ranges.insert(name.clone(), *bounds);
+            } else if let Some((name, arity, is_array)) = define_name {
+                self.ranges.remove(&name);
                 self.gap_names.remove(&name);
                 match arity {
                     Some(a) => {
@@ -1078,6 +1172,7 @@ impl Tr {
                 self.gap_names.insert(p, root);
             }
             if let Some((name, arity, _)) = define_name {
+                self.ranges.remove(&name);
                 self.defined.remove(&name);
                 self.funcs.remove(&name);
                 self.arrays.remove(&name);
@@ -1231,6 +1326,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         gap_names: HashMap::new(),
         arrays: HashSet::new(),
         params: Vec::new(),
+        ranges: HashMap::new(),
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),

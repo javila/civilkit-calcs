@@ -6,13 +6,13 @@ use calcpad_import_xmcd::{import_xmcd, Code, ImportResult};
 
 // ---- builders (the same shapes as the plain-XML worksheet) ---------------------------------------
 
-fn sheet(regions: &str) -> String {
+fn sheet(regions: &str, origin: i64) -> String {
     format!(
-        r#"<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="1"/></calculation></settings><regions>{regions}</regions></worksheet>"#
+        r#"<worksheet xmlns="http://example.invalid/worksheet30" xmlns:ml="http://example.invalid/math30" xmlns:u="http://example.invalid/units10"><settings><calculation><builtInVariables array-origin="{origin}"/></calculation></settings><regions>{regions}</regions></worksheet>"#
     )
 }
 
-fn sheet_of(inners: &[String]) -> String {
+fn sheet_of(inners: &[String], origin: i64) -> String {
     let regions: String = inners
         .iter()
         .enumerate()
@@ -25,7 +25,7 @@ fn sheet_of(inners: &[String]) -> String {
             )
         })
         .collect();
-    sheet(&regions)
+    sheet(&regions, origin)
 }
 
 pub fn n(name: &str) -> String {
@@ -58,7 +58,11 @@ pub fn eval_in(expr: &str, unit: &str) -> String {
 }
 
 pub fn convert(inners: &[String]) -> ImportResult {
-    import_xmcd(&sheet_of(inners))
+    import_xmcd(&sheet_of(inners, 1))
+}
+
+pub fn convert_origin(inners: &[String], origin: i64) -> ImportResult {
+    import_xmcd(&sheet_of(inners, origin))
 }
 
 /// The engine's printed results, one string per line that printed something (tags removed).
@@ -228,4 +232,132 @@ fn calculus_that_cannot_be_read_faithfully_is_a_precise_gap() {
     let second = "<ml:apply><ml:derivative/><ml:lambda><ml:boundVars><ml:id>x</ml:id></ml:boundVars><ml:id>x</ml:id></ml:lambda><ml:degree><ml:real>2</ml:real></ml:degree></ml:apply>";
     let res = convert(&[define("x", &r("2")), eval(second)]);
     assert!(res.report.gaps().any(|i| i.code == Code::CalculusOperator));
+}
+
+// ---- 3. range variables and element assignment ---------------------------------------------------------
+
+fn range(first: &str, last: &str) -> String {
+    format!("<ml:range>{}{}</ml:range>", r(first), r(last))
+}
+fn index1(base: &str, idx: &str) -> String {
+    format!("<ml:apply><ml:indexer/>{}{}</ml:apply>", n(base), idx)
+}
+fn set_element(base: &str, idx: &str, value: &str) -> String {
+    format!("<ml:define>{}{}</ml:define>", index1(base, idx), value)
+}
+fn numbers(code: &str) -> Vec<f64> {
+    engine_lines(code)
+        .iter()
+        .filter(|l| l.contains('='))
+        .map(|l| last_number(l))
+        .collect()
+}
+
+#[test]
+fn range_with_element_assignment_fills_a_vector_origin_zero() {
+    // i = 0..4, x[i] = i^2 + 1, so x[3] = 10 and x[0] = 1.
+    let res = convert_origin(
+        &[
+            define("i", &range("0", "4")),
+            set_element("x", &n("i"), &app("plus", &[app("pow", &[n("i"), r("2")]), r("1")])),
+            eval(&index1("x", &r("3"))),
+            eval(&index1("x", &r("0"))),
+        ],
+        0,
+    );
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    assert!(res.report.notes().any(|i| i.code == Code::RangeLoop));
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 10.0);
+    assert_close(nums[nums.len() - 1], 1.0);
+}
+
+#[test]
+fn range_with_element_assignment_origin_one_and_units() {
+    // i = 1..4, y[i] = i * L with L = 2 m: y[3] = 6 m.
+    let res = convert(&[
+        define("L", &app("mult", &[r("2"), n("m")])),
+        define("i", &range("1", "4")),
+        set_element("y", &n("i"), &app("mult", &[n("i"), n("L")])),
+        eval(&index1("y", &r("3"))),
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0, "{:?}", res.report.issues);
+    let nums = numbers(&res.calcpad);
+    assert_close(*nums.last().unwrap(), 6.0);
+}
+
+#[test]
+fn a_range_variable_used_anywhere_else_is_reported() {
+    let res = convert_origin(
+        &[define("i", &range("0", "4")), eval(&app("mult", &[n("i"), r("2")]))],
+        0,
+    );
+    let g = res.report.gaps().find(|i| i.code == Code::RangeVariable).expect("gap");
+    assert!(
+        g.detail.as_deref().unwrap_or("").contains("only read as the loop"),
+        "{g:?}"
+    );
+    // The range definition itself converted (with a note).
+    assert!(res.report.notes().any(|i| i.code == Code::RangeLoop));
+}
+
+#[test]
+fn element_assignments_that_cannot_be_a_fill_loop_say_why() {
+    // The array already has a value.
+    let res = convert_origin(
+        &[
+            define("i", &range("0", "2")),
+            define("x", &app("mult", &[r("2"), r("3")])),
+            set_element("x", &n("i"), &n("i")),
+        ],
+        0,
+    );
+    let g = res
+        .report
+        .gaps()
+        .find(|i| i.code == Code::ElementAssignment)
+        .expect("gap");
+    assert!(
+        g.detail.as_deref().unwrap_or("").contains("already has a value"),
+        "{g:?}"
+    );
+    // The value reads the array it fills.
+    let res = convert_origin(
+        &[
+            define("i", &range("1", "3")),
+            set_element(
+                "x",
+                &n("i"),
+                &app("plus", &[index1("x", &app("minus", &[n("i"), r("1")])), r("1")]),
+            ),
+        ],
+        0,
+    );
+    let g = res
+        .report
+        .gaps()
+        .find(|i| i.code == Code::ElementAssignment)
+        .expect("gap");
+    assert!(g.detail.as_deref().unwrap_or("").contains("reads the array"), "{g:?}");
+    // A literal index is not a loop.
+    let res = convert(&[set_element("x", &r("2"), &r("5"))]);
+    let g = res
+        .report
+        .gaps()
+        .find(|i| i.code == Code::ElementAssignment)
+        .expect("gap");
+    assert!(
+        g.detail.as_deref().unwrap_or("").contains("not a range variable"),
+        "{g:?}"
+    );
+    // A range with a step, or with a bound that is not a literal, stays a range-variable gap.
+    let stepped =
+        "<ml:range><ml:sequence><ml:real>0</ml:real><ml:real>2</ml:real></ml:sequence><ml:real>10</ml:real></ml:range>";
+    let res = convert(&[define("j", stepped)]);
+    assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
+    let res = convert(&[
+        define("m1", &r("5")),
+        define("k", &format!("<ml:range>{}{}</ml:range>", r("1"), n("m1"))),
+    ]);
+    assert!(res.report.gaps().any(|i| i.code == Code::RangeVariable));
 }

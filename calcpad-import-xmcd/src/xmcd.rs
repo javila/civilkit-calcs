@@ -656,17 +656,18 @@ fn read_target(n: Node, lim: &Limits) -> Option<Target> {
             (!names.is_empty() && names.len() == ml_kids(n).len()).then_some(Target::Multi(names))
         }
         "apply" => {
-            let _ = lim;
             let kids = ml_kids(n);
-            let base = match kids.as_slice() {
+            let (base, index) = match kids.as_slice() {
                 [op, first, ..]
                     if local(unwrap_provenance(*op)) == "indexer" && local(unwrap_provenance(*first)) == "id" =>
                 {
-                    Some(read_name(unwrap_provenance(*first)))
+                    let args = operands(&kids);
+                    let index = args.iter().skip(1).map(|a| read_expr(*a, lim, 1)).collect();
+                    (Some(read_name(unwrap_provenance(*first))), index)
                 }
-                _ => None,
+                _ => (None, Vec::new()),
             };
-            Some(Target::Element(base))
+            Some(Target::Element { base, index })
         }
         _ => None,
     }

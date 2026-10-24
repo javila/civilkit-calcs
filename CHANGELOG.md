@@ -11,7 +11,7 @@ under "Crates" at the end, on plain 0.x semver, and are tagged `<crate-name>-v<v
 
 ## [Unreleased]
 ### Added
-- Import worksheet: units written with a middle dot (`kN·m`) are read as units; integrals become `$Integral` and first derivatives `$Slope`, with units and bounds checked against the engine.
+- Import worksheet: units written with a middle dot (`kN·m`) are read as units; integrals become `$Integral` and first derivatives `$Slope`, with units and bounds checked against the engine; a range variable with literal bounds and the element assignments that fill an array from it become a `#for` loop over a zero vector.
 - Import worksheet reads `.mcdx` files (the zipped container of the same worksheet language): File > Open, the Import button and drag and drop accept them. Text comes from the package's flow documents, maths goes through the same translator as `.xmcd`, and embedded objects, spreadsheet and chart components, worksheet references, page headers and footers and tables or pictures inside text are listed as skipped with a reason and a placeholder line. The importer module grows by about 21 KB (1.15 MB, 0.47 MB gzipped). Details in docs/worksheet-import.md.
 - Installable and offline: a web app manifest, icons and a service worker that caches the whole build (about 19 MB, 417 files). "Add to home screen" or "Install" works on phones and desktops, and the app opens and calculates without a network. Plotly charts need the CDN script to have been loaded once while online. `web/e2e/pwa-check.mjs` checks it.
 - `#python` blocks and sheet python fences are coloured with the Python grammar.
