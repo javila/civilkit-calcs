@@ -415,6 +415,16 @@ fn text_region_reads_the_flow_document() {
 }
 
 #[test]
+fn inline_flow_document_is_read_like_the_package_form() {
+    // Older files hold the flow document inside the text element; no relationship, no part.
+    let region = r#"<region region-id="1" top="0" left="0" width="400"><text is-text-block="true"><FlowDocument xmlns="http://example.invalid/presentation"><Paragraph Margin="0,0,0,0"><Run FontWeight="Bold">Beam </Run><Run>check</Run><Run><Run.TextDecorations><TextDecorationCollection><TextDecoration Location="Underline" /></TextDecorationCollection></Run.TextDecorations> underlined</Run></Paragraph><List MarkerStyle="Decimal"><ListItem><Paragraph><Run>one</Run></Paragraph></ListItem></List></FlowDocument></text></region>"#;
+    let res = Pkg::new(region).import();
+    assert_eq!(lines(&res), vec!["'<b>Beam </b>check<u> underlined</u>", "'1. one"]);
+    assert_eq!(res.report.regions_needing_attention(), 0);
+    assert!(!res.report.issues.iter().any(|i| i.code == Code::TextUnreadable));
+}
+
+#[test]
 fn lists_hyperlinks_and_spans() {
     let xaml = xaml_package(
         r#"<List MarkerStyle="Decimal"><ListItem><Paragraph><Run>first</Run></Paragraph></ListItem><ListItem><Paragraph><Run>second</Run></Paragraph></ListItem></List><List MarkerStyle="Disc"><ListItem><Paragraph><Span FontWeight="Bold"><Run>point</Run></Span></Paragraph></ListItem></List><Paragraph><Hyperlink NavigateUri="other.mcdx"><Run>see also</Run></Hyperlink></Paragraph>"#,

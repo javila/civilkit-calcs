@@ -312,7 +312,15 @@ impl Ctx<'_, '_> {
                 let mut paras = Vec::new();
                 let mut skipped = Vec::new();
                 let mut readable = false;
-                if let Some(bytes) = c.attribute("item-idref").and_then(|i| self.part(i)) {
+                // Older files carry the flow document inline, as a child of the text element.
+                let inline_doc = c.children().find(|k| {
+                    k.is_element() && k.tag_name().name() == "FlowDocument" && k.children().any(|g| g.is_element())
+                });
+                if let Some(fd) = inline_doc {
+                    let mut st = BlockState::default();
+                    blocks(fd, &Run::default(), &mut st, &mut paras, &mut skipped, 0, lim);
+                    readable = true;
+                } else if let Some(bytes) = c.attribute("item-idref").and_then(|i| self.part(i)) {
                     if let Some(xaml) = self.xaml_text(&bytes) {
                         if let Ok(doc) = parse(&xaml, lim) {
                             let mut st = BlockState::default();
@@ -440,6 +448,18 @@ fn format_of(n: Node, base: &Run) -> Run {
             f.sup = flag(v, &["Superscript"]);
         }
     }
+    // The long form of an attribute: `<Run.TextDecorations><TextDecorationCollection>...`.
+    for prop in n
+        .children()
+        .filter(|k| k.is_element() && k.tag_name().name().ends_with(".TextDecorations"))
+    {
+        f.underline = prop.descendants().any(|d| {
+            d.is_element()
+                && d.tag_name().name() == "TextDecoration"
+                && d.attribute("Location")
+                    .is_none_or(|l| l.eq_ignore_ascii_case("Underline"))
+        });
+    }
     match n.tag_name().name() {
         "Bold" => f.bold = true,
         "Italic" => f.italic = true,
@@ -500,6 +520,8 @@ fn blocks(
                 blocks(c, &fmt, &mut inner, paras, skipped, depth + 1, lim);
             }
             "Section" | "ListItem" | "FlowDocument" => blocks(c, &fmt, st, paras, skipped, depth + 1, lim),
+            // A property element (`Paragraph.Margin` and the like) is formatting, not content.
+            other if other.contains('.') => {}
             other => skipped.push(other.chars().filter(|ch| ch.is_ascii_alphanumeric()).take(24).collect()),
         }
     }
@@ -527,6 +549,7 @@ fn inline(n: Node, fmt: &Run, pieces: &mut Vec<Piece>, skipped: &mut Vec<String>
                     let sf = format_of(c, fmt);
                     inline(c, &sf, pieces, skipped, depth + 1, lim);
                 }
+                other if other.contains('.') => {}
                 other => skipped.push(other.chars().filter(|ch| ch.is_ascii_alphanumeric()).take(24).collect()),
             }
         }
