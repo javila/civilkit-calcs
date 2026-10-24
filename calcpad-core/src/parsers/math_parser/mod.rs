@@ -762,6 +762,9 @@ impl MathParser {
 
     /// `ResultAsVal`
     pub fn result_as_val(&self) -> String {
+        if self.settings.borrow().val_mathml {
+            return self.result_as_mathml();
+        }
         let r = self.result.borrow().clone();
         let decimals = self.settings.borrow().decimals();
         let convert = |d: f64| netfmt::double_to_string(netfmt::round_even_digits(d, decimals));
@@ -818,6 +821,68 @@ impl MathParser {
         }
         sb.push(']');
         sb
+    }
+
+    /// The `#val` result as MathML (opt-in, see `MathSettings::val_mathml`): the number, or a bracketed
+    /// table of numbers, then the unit once. Numbers are rounded as `ResultAsVal` rounds them.
+    fn result_as_mathml(&self) -> String {
+        let r = self.result.borrow().clone();
+        let decimals = self.settings.borrow().decimals();
+        let num = |d: f64| -> String {
+            let t = netfmt::double_to_string(netfmt::round_even_digits(d, decimals));
+            match t.strip_prefix('-') {
+                Some(rest) => format!("<mo>\u{2212}</mo><mn>{rest}</mn>"),
+                None => format!("<mn>{t}</mn>"),
+            }
+        };
+        let item = |value: &Value| -> String {
+            let c = value.complex();
+            if c.is_real() {
+                num(c.re())
+            } else if c.is_imaginary() {
+                format!("{}<mi>i</mi>", num(c.im()))
+            } else if c.im() < 0.0 {
+                format!("{}<mo>\u{2212}</mo>{}<mi>i</mi>", num(c.re()), num(-c.im()))
+            } else {
+                format!("{}<mo>+</mo>{}<mi>i</mi>", num(c.re()), num(c.im()))
+            }
+        };
+        let table = |rows: Vec<Vec<String>>| -> String {
+            let mut s = String::from("<mo>[</mo><mtable>");
+            for row in rows {
+                s.push_str("<mtr>");
+                for cell in row {
+                    s.push_str(&format!("<mtd>{cell}</mtd>"));
+                }
+                s.push_str("</mtr>");
+            }
+            s.push_str("</mtable><mo>]</mo>");
+            s
+        };
+        let (body, units) = match &r {
+            Value::Vector(v) => (
+                table((0..v.len()).map(|i| vec![item(&Value::Real(v.get(i)))]).collect()),
+                if v.len() > 0 { v.get(0).units.clone() } else { None },
+            ),
+            Value::Matrix(m) => (
+                table(
+                    (0..m.row_count())
+                        .map(|i| (0..m.col_count()).map(|j| item(&Value::Real(m.get(i, j)))).collect())
+                        .collect(),
+                ),
+                if m.row_count() > 0 && m.col_count() > 0 {
+                    m.get(0, 0).units.clone()
+                } else {
+                    None
+                },
+            ),
+            v if v.is_scalar() => (item(v), v.units().clone()),
+            _ => return String::new(),
+        };
+        match units {
+            Some(u) => format!("{body}<mspace width=\"0.25em\"></mspace>{}", units_to_mathml(&u.text())),
+            None => body,
+        }
     }
 
     pub fn to_text(&self) -> CResult<String> {
@@ -899,4 +964,72 @@ impl Variable {
             self.reset_initialized();
         }
     }
+}
+
+/// A unit's text (`kip·ft`, `m/s^2`, `m²`) as upright MathML identifiers with the powers as superscripts.
+fn units_to_mathml(text: &str) -> String {
+    fn flush(name: &mut String, out: &mut String) {
+        if !name.is_empty() {
+            out.push_str(&format!("<mi mathvariant=\"normal\">{}</mi>", escape_ml(name)));
+            name.clear();
+        }
+    }
+    fn escape_ml(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('\'', "&#8242;")
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut name = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let sup = match c {
+            '\u{00B2}' => Some("2".to_string()),
+            '\u{00B3}' => Some("3".to_string()),
+            '\u{2074}'..='\u{2079}' => Some(((c as u32 - 0x2074) as u8 + b'4').to_string()),
+            _ => None,
+        };
+        if c == '^' {
+            let mut j = i + 1;
+            let mut p = String::new();
+            while j < chars.len() && (chars[j].is_ascii_digit() || chars[j] == '-' || chars[j] == '.') {
+                p.push(chars[j]);
+                j += 1;
+            }
+            if !p.is_empty() && !name.is_empty() {
+                let base = std::mem::take(&mut name);
+                out.push_str(&format!(
+                    "<msup><mi mathvariant=\"normal\">{}</mi><mn>{}</mn></msup>",
+                    escape_ml(&base),
+                    escape_ml(&p)
+                ));
+                i = j;
+                continue;
+            }
+            name.push(c);
+        } else if let Some(p) = sup.filter(|_| !name.is_empty()) {
+            let base = std::mem::take(&mut name);
+            out.push_str(&format!(
+                "<msup><mi mathvariant=\"normal\">{}</mi><mn>{}</mn></msup>",
+                escape_ml(&base),
+                p
+            ));
+        } else if c == '\u{00B7}' || c == '\u{22C5}' || c == '*' {
+            flush(&mut name, &mut out);
+            out.push_str("<mo>\u{22C5}</mo>");
+        } else if c == '/' || c == '\u{2215}' || c == '(' || c == ')' {
+            flush(&mut name, &mut out);
+            out.push_str(&format!("<mo>{}</mo>", if c == '\u{2215}' { '/' } else { c }));
+        } else if c.is_whitespace() {
+            flush(&mut name, &mut out);
+        } else {
+            name.push(c);
+        }
+        i += 1;
+    }
+    flush(&mut name, &mut out);
+    out
 }

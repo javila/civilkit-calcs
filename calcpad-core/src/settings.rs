@@ -9,6 +9,9 @@ pub struct MathSettings {
     pub format_equations: bool,
     pub zero_small_matrix_elements: bool,
     pub show_hidden_output: bool,
+    /// Opt-in (`#settings {"valMathml": true}`): `#val` writes a result as MathML with its unit once
+    /// after the brackets, for the worksheet importer's typeset results. Off by default.
+    pub val_mathml: bool,
     max_output_count: i32,
     pub format_string: Option<String>,
     pub precision: f64,
@@ -25,6 +28,7 @@ impl Default for MathSettings {
             format_equations: true,
             zero_small_matrix_elements: true,
             show_hidden_output: false,
+            val_mathml: false,
             max_output_count: 20,
             format_string: None,
             precision: 1e-14,
