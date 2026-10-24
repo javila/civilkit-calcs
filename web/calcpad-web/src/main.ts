@@ -399,9 +399,9 @@ async function bootstrap(): Promise<void> {
     // Also hands the result to App.vue, which themes the loading overlay with it.
     function resolvePreviewTheme(): 'light' | 'dark' {
         const stored = editorBridge.getExtraSetting('previewTheme') ?? 'system';
-        const resolved = stored === 'light' || stored === 'dark'
-            ? stored
-            : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        // "System" follows the app, which itself follows the OS only while its own theme is "System":
+        // choosing Light in the ribbon must not leave the preview and report dark.
+        const resolved = stored === 'light' || stored === 'dark' ? stored : getResolvedAppTheme();
         appInstance.setPreviewTheme(resolved);
         return resolved;
     }

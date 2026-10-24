@@ -394,7 +394,7 @@
               v-model="previewTheme"
               @change="updatePreviewTheme"
             >
-              <option value="system">System</option>
+              <option value="system">Same as app</option>
               <option value="light">Light</option>
               <option value="dark">Dark</option>
             </select>
