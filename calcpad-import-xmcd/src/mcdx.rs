@@ -271,11 +271,12 @@ impl Ctx<'_, '_> {
     fn collect_region(&self, r: Node, depth: usize, parent: Option<(f64, f64)>, out: &mut Vec<Region>) {
         let lim = self.lim;
         let id = r.attribute("region-id").unwrap_or("?").to_string();
-        // Regions nested in a text region carry no position; they sit where the text does and
-        // follow it (the reading order is stable for equal positions).
+        // A nested region is placed relative to its container. One nested in a text region
+        // carries no position at all: it sits where the text does and follows it (the reading
+        // order is stable for equal positions).
         let (pl, pt) = parent.unwrap_or((0.0, 0.0));
-        let left = num_attr(r, &["left"]).unwrap_or(pl);
-        let top = num_attr(r, &["top"]).unwrap_or(pt);
+        let left = pl + num_attr(r, &["left"]).unwrap_or(0.0);
+        let top = pt + num_attr(r, &["top"]).unwrap_or(0.0);
         let width = num_attr(r, &["width", "actualWidth"]).unwrap_or(0.0).max(0.0);
         let height = num_attr(r, &["height", "actualHeight"]).unwrap_or(0.0).max(0.0);
         let mk = |kind: RegionKind| Region {
@@ -356,6 +357,16 @@ impl Ctx<'_, '_> {
                     }
                 }
                 out.push(mk(RegionKind::Picture(pic)));
+            }
+            // A collapsible area only groups regions: they are read as if they stood on the page.
+            "Area" => {
+                if let Some(nested) = c.children().find(|k| is_ws(*k, "regions")) {
+                    for n in nested.children().filter(|k| is_ws(*k, "region")) {
+                        if depth < lim.max_depth {
+                            self.collect_region(n, depth + 1, Some((left, top)), out);
+                        }
+                    }
+                }
             }
             "plot" => out.push(mk(RegionKind::Plot)),
             "oleObject" | "ole" => out.push(mk(RegionKind::Ole)),

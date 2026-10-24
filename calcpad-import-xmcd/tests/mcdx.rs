@@ -536,6 +536,16 @@ fn objects_components_references_plots_and_page_furniture_are_reported() {
     assert_eq!(res.report.regions_needing_attention(), 7);
 }
 
+#[test]
+fn a_collapsible_area_is_read_through() {
+    let regions = r#"<region region-id="1" top="100" left="0" width="600" height="1"><Area IsCollapsed="true"><regions><region region-id="2" top="30" left="10"><math resultRef="2"><ml:define><ml:id>b</ml:id><ml:real>2</ml:real></ml:define></math></region><region region-id="3" top="10" left="10"><math resultRef="3"><ml:define><ml:id>a</ml:id><ml:real>1</ml:real></ml:define></math></region></regions></Area></region>
+        <region region-id="4" top="50" left="0"><math resultRef="4"><ml:define><ml:id>c</ml:id><ml:real>0</ml:real></ml:define></math></region>"#;
+    let res = Pkg::new(regions).import();
+    // Positions inside the area are relative to it, so its children come after the region at 50.
+    assert_eq!(lines(&res), vec!["c = 0", "a = 1", "b = 2"]);
+    assert_eq!(res.report.regions_needing_attention(), 0);
+}
+
 // ---- pictures and saved results ---------------------------------------------------------------------
 
 fn tiny_png() -> Vec<u8> {
@@ -760,4 +770,25 @@ fn hostile_text_in_names_and_prose_only_reaches_the_output_escaped() {
         .import();
     assert!(!res.calcpad.contains("<script"), "{}", res.calcpad);
     assert!(res.report.gaps().any(|i| i.code == Code::InvalidName));
+}
+
+#[test]
+fn converted_package_runs_in_the_engine() {
+    let res = mcdx_of(&[
+        r#"<ml:define><ml:id>L</ml:id><ml:apply><ml:scale/><ml:real>4</ml:real><ml:id labels="UNIT">m</ml:id></ml:apply></ml:define>"#,
+        r#"<ml:define><ml:id>F</ml:id><ml:apply><ml:scale/><ml:real>10</ml:real><ml:id labels="UNIT">kN</ml:id></ml:apply></ml:define>"#,
+        r#"<ml:define><ml:id>M</ml:id><ml:apply><ml:mult/><ml:id>F</ml:id><ml:id>L</ml:id></ml:apply></ml:define>"#,
+        r#"<ml:define><ml:function><ml:id>f</ml:id><ml:boundVars><ml:id>a</ml:id></ml:boundVars></ml:function><ml:apply><ml:pow/><ml:id>a</ml:id><ml:real>2</ml:real></ml:apply></ml:define>"#,
+        r#"<ml:eval><ml:apply><ml:id>f</ml:id><ml:real>3</ml:real></ml:apply></ml:eval>"#,
+        r#"<ml:define><ml:id>A</ml:id><ml:matrix rows="2" cols="2"><ml:real>1</ml:real><ml:real>2</ml:real><ml:real>3</ml:real><ml:real>4</ml:real></ml:matrix></ml:define>"#,
+    ]);
+    assert_eq!(res.report.regions_needing_attention(), 0);
+    let mut parser = calcpad_core::parsers::expression_parser::ExpressionParser::new();
+    parser.parse(&res.calcpad, true);
+    assert!(
+        !parser.html_result.contains("class=\"err\""),
+        "engine error in:\n{}\n---\n{}",
+        res.calcpad,
+        parser.html_result
+    );
 }
