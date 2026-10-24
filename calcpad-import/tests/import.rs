@@ -157,7 +157,7 @@ fn roots_abs_factorial_and_comparison() {
     let res = one(&eval(&app("lessThan", &[r("1"), r("2")])));
     assert_eq!(lines(&res), vec!["1 < 2"]);
     let res = one(&eval(&app("equal", &[r("1"), r("2")])));
-    assert_eq!(lines(&res), vec!["1 == 2"]);
+    assert_eq!(lines(&res), vec!["1 ≡ 2"]);
 }
 
 #[test]
@@ -369,7 +369,7 @@ fn element_assignment_poisons_the_array_name() {
         .filter_map(|i| i.region_id.clone())
         .collect();
     assert_eq!(dep, vec!["3", "5"], "{:?}", res.report.issues);
-    assert!(!res.calcpad.contains("L\n") && !lines(&res).iter().any(|l| l == "v" || l == "L"));
+    assert!(!lines(&res).iter().any(|l| l == "v" || l == "L"));
 }
 
 #[test]

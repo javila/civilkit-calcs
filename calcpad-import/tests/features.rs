@@ -71,7 +71,8 @@ pub fn engine_lines(code: &str) -> Vec<String> {
     parser.parse(&format!("#round 10\n{code}"), true);
     let html = parser.html_result.clone();
     assert!(!html.contains("class=\"err\""), "engine error in:\n{code}\n---\n{html}");
-    html.lines()
+    html.replace("<p>", "\n<p>")
+        .lines()
         .map(|l| {
             let mut out = String::new();
             let mut in_tag = false;
@@ -709,4 +710,54 @@ fn submatrix_indexes_follow_the_array_origin() {
     let nums = numbers(&res.calcpad);
     assert_close(nums[nums.len() - 2], 5.0);
     assert_close(nums[nums.len() - 1], 8.0);
+}
+
+// ---- gap lines show the original maths ----------------------------------------------------------------
+
+fn gap_line<'a>(res: &'a ImportResult, id: &str) -> &'a str {
+    res.calcpad
+        .lines()
+        .find(|l| l.contains(&format!("R{id} ")))
+        .unwrap_or_else(|| panic!("no gap line for R{id} in\n{}", res.calcpad))
+}
+
+#[test]
+fn an_unconverted_region_is_shown_with_its_real_names() {
+    let res = convert(&[
+        define("y", &call("vendor_fn", &[n("a"), r("2")])),
+        define("z", &app("plus", &[n("y"), r("1")])),
+        define("s", "<ml:str>abc</ml:str>"),
+        eval(&app("mult", &[call("rows", &[n("Input_N")]), n("kN")])),
+    ]);
+    let l1 = gap_line(&res, "1");
+    assert!(l1.contains("| y = vendor_fn(a; 2)"), "{l1}");
+    assert!(gap_line(&res, "2").contains("| z = y + 1"), "{}", gap_line(&res, "2"));
+    assert!(
+        gap_line(&res, "3").contains("| s = ") && gap_line(&res, "3").contains("abc"),
+        "{}",
+        gap_line(&res, "3")
+    );
+    assert!(
+        gap_line(&res, "4").contains("rows(Input_N)*kN"),
+        "{}",
+        gap_line(&res, "4")
+    );
+    for l in res.calcpad.lines().filter(|l| l.contains("import-gap")) {
+        let shown = l.rsplit(" | ").next().unwrap();
+        assert!(!shown.contains('?'), "stand-in left in {l}");
+    }
+    // The marker and the code are still there for tools.
+    assert!(l1.contains("[import-gap R1 "), "{l1}");
+}
+
+#[test]
+fn equality_is_written_the_way_the_engine_reads_it() {
+    // 2 = 2 is true (1), 2 = 3 is false (0).
+    let res = convert(&[
+        eval(&app("equal", &[r("2"), r("2")])),
+        eval(&app("equal", &[r("2"), r("3")])),
+    ]);
+    let nums = numbers(&res.calcpad);
+    assert_close(nums[nums.len() - 2], 1.0);
+    assert_close(nums[nums.len() - 1], 0.0);
 }

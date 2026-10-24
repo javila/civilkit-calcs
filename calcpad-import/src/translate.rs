@@ -310,6 +310,9 @@ struct Tr {
     /// Output names of locals known to hold an array created in the program.
     local_arrays: HashSet<String>,
     prog_n: usize,
+    /// Rendering a gap region for the reader: pieces that cannot be converted keep their real
+    /// names instead of a `?stand-in?`, and no issue is recorded.
+    readable: bool,
     cur: Vec<Pending>,
     uses_trig: bool,
     lines: Vec<String>,
@@ -360,9 +363,13 @@ impl Tr {
     fn expr_inner(&mut self, e: &Expr) -> R {
         match e {
             Expr::Num(s) => self.number(s),
-            Expr::Str(_) => {
+            Expr::Str(s) => {
                 self.issue(Code::StringValue, None);
-                atom("?string?")
+                if self.readable {
+                    atom(format!("\"{}\"", s.chars().take(60).collect::<String>()))
+                } else {
+                    atom("?string?")
+                }
             }
             Expr::Name(n) => self.name_ref(n),
             Expr::Un(op, x) => self.unary(*op, x),
@@ -382,6 +389,10 @@ impl Tr {
                 lower,
                 upper,
             } => self.integral(var, body, lower, upper),
+            Expr::Program(stmts) if self.readable => {
+                let t = self.program_outline(stmts);
+                atom(format!("program {{ {t} }}"))
+            }
             Expr::Program(_) => {
                 self.issue(
                     Code::ProgramBlock,
@@ -409,8 +420,26 @@ impl Tr {
             }
             Expr::Unsupported { code, detail } => {
                 self.issue(*code, detail.clone());
+                if self.readable {
+                    // The element's own name is the best a reader gets (`imag` is the imaginary unit).
+                    return match detail.as_deref() {
+                        Some("imag") => atom("i"),
+                        Some(d) => atom(d.to_string()),
+                        None => atom(format!("?{}?", code.as_str())),
+                    };
+                }
                 atom(format!("?{}?", code.as_str()))
             }
+        }
+    }
+
+    /// The text for something that cannot be converted: its real name or call when rendering a
+    /// gap for the reader, else the `?stand-in?`.
+    fn stand_in(&self, readable: &str, placeholder: &str) -> R {
+        if self.readable {
+            atom(readable.to_string())
+        } else {
+            atom(placeholder.to_string())
         }
     }
 
@@ -477,7 +506,7 @@ impl Tr {
             BinOp::Mul => ("*", P_MUL, P_MUL, P_MUL, false),
             BinOp::Div => ("/", P_MUL, P_NEG, P_MUL, false),
             BinOp::Pow => ("^", P_ATOM, P_ATOM, P_POW, false),
-            BinOp::Eq => (" == ", P_ADD, P_ADD, P_CMP, false),
+            BinOp::Eq => (" ≡ ", P_ADD, P_ADD, P_CMP, false),
             BinOp::Ne => (" ≠ ", P_ADD, P_ADD, P_CMP, false),
             BinOp::Lt => (" < ", P_ADD, P_ADD, P_CMP, false),
             BinOp::Gt => (" > ", P_ADD, P_ADD, P_CMP, false),
@@ -504,6 +533,107 @@ impl Tr {
 
     fn render_args(&mut self, args: &[Expr]) -> Vec<String> {
         args.iter().map(|a| self.expr(a).s).collect()
+    }
+
+    /// The statement of an unconverted region as the reader should see it: Calcpad-style maths
+    /// with the real names. Nothing here is recorded in the report.
+    fn readable_stmt(&mut self, stmt: &Stmt) -> Option<String> {
+        let saved_cur = std::mem::take(&mut self.cur);
+        let saved_params = std::mem::take(&mut self.params);
+        self.readable = true;
+        let text = match stmt {
+            Stmt::Define { target, value, .. } => {
+                let head = match target {
+                    Target::Var(n) => tables::normalise_name(&n.flat()),
+                    Target::Func(n, ps) => {
+                        let plist: Vec<String> = ps.iter().map(|p| tables::normalise_name(&p.flat())).collect();
+                        self.params = plist.clone();
+                        format!("{}({})", tables::normalise_name(&n.flat()), plist.join("; "))
+                    }
+                    Target::Element { base, index } => {
+                        let b = base
+                            .as_ref()
+                            .map(|b| tables::normalise_name(&b.flat()))
+                            .unwrap_or_default();
+                        let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                        format!("{}.({})", b, idx.join("; "))
+                    }
+                    Target::Multi(names) => {
+                        let l: Vec<String> = names.iter().map(|n| tables::normalise_name(&n.flat())).collect();
+                        format!("[{}]", l.join("; "))
+                    }
+                };
+                Some(format!("{} = {}", head, self.expr(value).s))
+            }
+            Stmt::Eval { expr, unit } => {
+                let mut t = self.expr(expr).s;
+                if let Some(u) = unit {
+                    t = format!("{}|{}", t, self.expr(u).s);
+                }
+                Some(t)
+            }
+            Stmt::Bare(e) => Some(self.expr(e).s),
+            Stmt::Unsupported { .. } => None,
+        };
+        self.readable = false;
+        self.params = saved_params;
+        self.cur = saved_cur;
+        text
+    }
+
+    /// A compact one-line outline of a program, for the reader of an unconverted region.
+    fn program_outline(&mut self, stmts: &[PStmt]) -> String {
+        let mut parts = Vec::new();
+        for st in stmts {
+            parts.push(match st {
+                PStmt::Local(PTarget::Var(n), e) => {
+                    format!("{} = {}", tables::normalise_name(&n.flat()), self.expr(e).s)
+                }
+                PStmt::Local(PTarget::Element { base, index }, e) => {
+                    let idx: Vec<String> = index.iter().map(|i| self.expr(i).s).collect();
+                    format!(
+                        "{}.({}) = {}",
+                        tables::normalise_name(&base.flat()),
+                        idx.join("; "),
+                        self.expr(e).s
+                    )
+                }
+                PStmt::For { var, range, body } => {
+                    let v = tables::normalise_name(&var.flat());
+                    let r = self.expr(range).s;
+                    self.params.push(v.clone());
+                    let b = self.program_outline(body);
+                    self.params.pop();
+                    format!("for {v} in {r} {{ {b} }}")
+                }
+                PStmt::While { cond, body } => {
+                    let c = self.expr(cond).s;
+                    format!("while {c} {{ {} }}", self.program_outline(body))
+                }
+                PStmt::If { branches, otherwise } => {
+                    let mut t = String::new();
+                    for (i, (c, b)) in branches.iter().enumerate() {
+                        let cs = self.expr(c).s;
+                        t.push_str(&format!(
+                            "{}{} {{ {} }}",
+                            if i == 0 { "if " } else { " else if " },
+                            cs,
+                            self.program_outline(b)
+                        ));
+                    }
+                    if let Some(o) = otherwise {
+                        t.push_str(&format!(" else {{ {} }}", self.program_outline(o)));
+                    }
+                    t
+                }
+                PStmt::Return(e) => format!("return {}", self.expr(e).s),
+                PStmt::Break => "break".to_string(),
+                PStmt::Continue => "continue".to_string(),
+                PStmt::Expr(e) => self.expr(e).s,
+                PStmt::Unsupported(w) => format!("{w}"),
+            });
+        }
+        parts.join("; ")
     }
 
     /// Lowers a program that is the value of `name := program` to Calcpad statements and the
@@ -533,7 +663,7 @@ impl Tr {
                 if lines.is_empty() {
                     Ok((def, is_array))
                 } else {
-                    Ok((format!("#hide\n{}\n#show\n{}", lines.join("\n"), def), is_array))
+                    Ok((format!("#val\n{}\n#end val\n{}", lines.join("\n"), def), is_array))
                 }
             }
             Err(e) => Err(e),
@@ -693,7 +823,9 @@ impl Tr {
                 Code::CalculusOperator,
                 Some("a bound uses the integration variable's name".into()),
             );
-            return atom("?calculus?");
+            if !self.readable {
+                return atom("?calculus?");
+            }
         }
         let mut lo = self.expr(lower).s;
         let mut hi = self.expr(upper).s;
@@ -724,7 +856,9 @@ impl Tr {
                 Code::CalculusOperator,
                 Some("derivative at a variable that has no value to evaluate it at".into()),
             );
-            return atom("?calculus?");
+            if !self.readable {
+                return atom("?calculus?");
+            }
         }
         let b = self.expr(body).s;
         atom(format!("$Slope{{{b} @ {v} = {v}}}"))
@@ -756,27 +890,27 @@ impl Tr {
                     "{flat} is a range variable; it is only read as the loop of an element assignment"
                 )),
             );
-            return atom("?range?");
+            return self.stand_in(&flat, "?range?");
         }
         if self.params.contains(&flat) || self.defined.contains(&flat) || self.funcs.contains_key(&flat) {
             if !valid_ident(&flat) {
-                self.issue(Code::InvalidName, Some(flat));
-                return atom("?name?");
+                self.issue(Code::InvalidName, Some(flat.clone()));
+                return self.stand_in(&flat, "?name?");
             }
             return atom(flat);
         }
         if let Some(root) = self.gap_names.get(&flat).copied() {
             self.cur.push(Pending {
                 code: Code::DependsOnGap,
-                detail: Some(flat),
+                detail: Some(flat.clone()),
                 root: Some(root),
             });
-            return atom("?gap?");
+            return self.stand_in(&flat, "?gap?");
         }
         if n.sub.is_none() {
             if tables::is_solve_name(&n.base) {
                 self.issue(Code::SolveBlock, Some(n.base.clone()));
-                return atom("?solve?");
+                return self.stand_in(&n.base, "?solve?");
             }
             if let Some(c) = tables::lookup_constant(&n.base) {
                 return match c {
@@ -797,11 +931,11 @@ impl Tr {
             }
             if tables::is_unmapped_unit(&n.base) {
                 self.issue(Code::UnmappedUnit, Some(n.base.clone()));
-                return atom(format!("?{}?", n.base));
+                return self.stand_in(&n.base, &format!("?{}?", n.base));
             }
         }
-        self.issue(Code::UndefinedVariable, Some(flat));
-        atom("?name?")
+        self.issue(Code::UndefinedVariable, Some(flat.clone()));
+        self.stand_in(&flat, "?name?")
     }
 
     fn call(&mut self, n: &Name, args: &[Expr]) -> R {
@@ -817,9 +951,11 @@ impl Tr {
                 };
             }
             self.issue(Code::BadStructure, Some("variable applied to several arguments".into()));
-            return atom("?call?");
+            let shown = self.render_args(args);
+            return self.stand_in(&format!("{}({})", flat, shown.join("; ")), "?call?");
         }
         let rendered = self.render_args(args);
+        let shown_call = format!("{}({})", flat, rendered.join("; "));
         if let Some(&arity) = self.funcs.get(&flat) {
             if arity != args.len() {
                 self.issue(Code::ArityMismatch, Some(flat.clone()));
@@ -832,17 +968,17 @@ impl Tr {
                 detail: Some(flat),
                 root: Some(root),
             });
-            return atom("?gap?");
+            return self.stand_in(&shown_call, "?gap?");
         }
         if tables::is_solve_name(&flat) {
             self.issue(Code::SolveBlock, Some(flat));
-            return atom("?solve?");
+            return self.stand_in(&shown_call, "?solve?");
         }
         if n.sub.is_none() {
             if let Some((rule, lo, hi)) = tables::lookup_function(&flat) {
                 if args.len() < lo || args.len() > hi {
                     self.issue(Code::ArityMismatch, Some(flat));
-                    return atom("?call?");
+                    return self.stand_in(&shown_call, "?call?");
                 }
                 if rule == FnRule::Submatrix {
                     let mut parts = vec![rendered[0].clone()];
@@ -861,7 +997,7 @@ impl Tr {
         } else {
             self.issue(Code::AddinFunction, Some(flat));
         }
-        atom("?call?")
+        self.stand_in(&shown_call, "?call?")
     }
 
     fn apply_rule(&mut self, rule: FnRule, a: &[String]) -> R {
@@ -1008,7 +1144,7 @@ impl Tr {
             escape_text(codes[0].reason())
         );
         if let Some(a) = attempt {
-            let a: String = a.chars().take(160).collect();
+            let a: String = a.chars().take(600).collect();
             line.push_str(" | ");
             line.push_str(&escape_text(&a));
         }
@@ -1408,7 +1544,7 @@ impl Tr {
                                 if self.cur.iter().all(|p| p.code.severity() != Severity::Gap) {
                                     let size = z - self.origin + 1;
                                     emitted = Some(format!(
-                                        "#hide\n{f} = vector({size})\n#for {iv} = {a} : {z}\n    {f}.({idx}) = {}\n#loop\n#show",
+                                        "#val\n{f} = vector({size})\n#for {iv} = {a} : {z}\n    {f}.({idx}) = {}\n#loop\n#end val",
                                         rhs.s
                                     ));
                                 } else {
@@ -1523,7 +1659,8 @@ impl Tr {
                 let _ = arity;
                 self.gap_names.insert(name, root);
             }
-            pictured = self.show_gap(r, &gap_codes, attempt.as_deref(), m.saved_result.as_ref());
+            let shown = self.readable_stmt(&m.stmt).or(attempt);
+            pictured = self.show_gap(r, &gap_codes, shown.as_deref(), m.saved_result.as_ref());
         }
         self.flush_issues(&r.id, r.line, None);
         Self::bump_p(&mut self.report.kinds, "math", converted, has_notes, pictured);
@@ -1674,6 +1811,7 @@ pub fn translate(mut sheet: Sheet, opts: &ImportOptions) -> (String, ImportRepor
         locals: HashMap::new(),
         local_arrays: HashSet::new(),
         prog_n: 0,
+        readable: false,
         cur: Vec::new(),
         uses_trig: false,
         lines: Vec::new(),

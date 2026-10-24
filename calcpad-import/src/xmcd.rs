@@ -662,7 +662,13 @@ fn read_target(n: Node, lim: &Limits) -> Option<Target> {
                     if local(unwrap_provenance(*op)) == "indexer" && local(unwrap_provenance(*first)) == "id" =>
                 {
                     let args = operands(&kids);
-                    let index = args.iter().skip(1).map(|a| read_expr(*a, lim, 1)).collect();
+                    // The indexes are further operands or one `sequence`.
+                    let idx_nodes: Vec<Node> = if args.len() == 2 && local(args[1]) == "sequence" {
+                        ml_kids(args[1])
+                    } else {
+                        args.iter().skip(1).copied().collect()
+                    };
+                    let index = idx_nodes.iter().map(|a| read_expr(*a, lim, 1)).collect();
                     (Some(read_name(unwrap_provenance(*first))), index)
                 }
                 _ => (None, Vec::new()),
