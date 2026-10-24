@@ -42,7 +42,7 @@ and the raster picture used) plus the size caps below. If the module traps anywa
 retries once with vector pictures off, so raster pictures are used instead. Input over 64 MiB, XML nested deeper than
 256, a DTD, pictures over 16 MiB each or 192 MiB in all are refused or skipped as described under Security.
 
-Size of the module: 1,183,647 bytes raw, 487,022 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader and the translator features added about 52 KB.
+Size of the module: 1,233,543 bytes raw, 508,698 bytes gzipped (`tools/build_wasm.sh import`); the `.mcdx` reader, the translator features and the workbook reader added about 100 KB.
 
 ## Use
 

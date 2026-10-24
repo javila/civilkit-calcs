@@ -150,6 +150,22 @@ ${mregion(5, 190, '<ml:eval><ml:apply><ml:id>vendor_fn</ml:id><ml:real>1</ml:rea
     ]);
 }
 
+// A package with a component that defines a name and a definition that reads it, whose value the file saved.
+function syntheticMcdxFrozen() {
+    const mregion = (id, top, ref, inner) => `<region region-id="${id}" top="${top}" left="10" actualWidth="100" actualHeight="20"><math resultRef="${ref}">${inner}</math></region>`;
+    const ws = `<?xml version="1.0" encoding="utf-8"?><worksheet xmlns="http://example.invalid/worksheet50" xmlns:ml="http://example.invalid/math50"><regions>
+<region region-id="1" top="10" left="10" width="300" height="80"><excelComponent resultRef="1"><regions><region region-id="2" top="10" left="0"><math resultRef="0"><ml:define><ml:id>Inp</ml:id><ml:apply><ml:indexer/><ml:id>excel</ml:id><ml:str>Sheet1!A1:B2</ml:str></ml:apply></ml:define></math></region></regions></excelComponent></region>
+${mregion(3, 120, 3, '<ml:define><ml:id>count</ml:id><ml:apply><ml:id>rows</ml:id><ml:id>Inp</ml:id></ml:apply></ml:define>')}
+${mregion(4, 160, 4, '<ml:eval><ml:apply><ml:mult/><ml:id>count</ml:id><ml:real>3</ml:real></ml:apply></ml:eval>')}
+</regions></worksheet>`;
+    const result = `<?xml version="1.0" encoding="utf-8"?><resultsList xmlns:ml="http://example.invalid/math50" xmlns="http://example.invalid/result10"><resultData result-id="3"><ml:result><ml:real>2</ml:real></ml:result></resultData></resultsList>`;
+    return zipOf([
+        ['_rels/.rels', rels([['Rdoc', 'officeDocument', '/pkg/worksheet.xml']])],
+        ['pkg/worksheet.xml', ws],
+        ['pkg/result.xml', result],
+    ]);
+}
+
 // ---- the page -----------------------------------------------------------------------------------------------
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 }, acceptDownloads: true });
@@ -355,6 +371,18 @@ await page.locator('[data-cprs-import-summary]').filter({ hasText: 'dropped-pack
 check(true, 'mcdx: a dropped .mcdx is imported');
 await closeDialog();
 check(errors.length === 0, `no page errors after the mcdx imports (${errors.slice(0, 2).join(' | ')})`);
+
+// ---- 8. a value taken from the saved result of an input component is reported as frozen ----------------------------------
+await openFileMenu();
+await chooseFile(() => page.getByRole('menuitem', { name: /Import worksheet/ }).click(), 'frozen.mcdx', syntheticMcdxFrozen());
+await page.locator('[data-cprs-import-summary]').filter({ hasText: 'frozen.mcdx' }).waitFor({ timeout: 60000 });
+const fz = await page.locator('[data-cprs-import-frozen]').innerText();
+check(/1 value frozen from input components/.test(fz), `the dialog lists frozen values (${fz})`);
+await closeDialog();
+const ftext = await editorText();
+check(/count = 2/.test(ftext) && /frozen, not live/.test(ftext), 'the frozen definition is in the sheet with its note');
+check(/import-gap R1 component/.test(ftext), 'the component itself is a marked gap');
+check(errors.length === 0, `no page errors after the frozen import (${errors.slice(0, 2).join(' | ')})`);
 
 await browser.close();
 server.close();
