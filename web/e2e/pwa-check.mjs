@@ -30,7 +30,7 @@ await page.reload();
 await page.waitForFunction(() => window.calcpadActiveEditor != null, null, { timeout: 30000 }).then(() => check(true, 'app boots offline'), () => check(false, 'app boots offline'));
 await page.evaluate(() => window.calcpadActiveEditor.setValue('a = 3m\nb = 4m\nc = sqrt(a^2 + b^2)'));
 await page.waitForTimeout(3000);
-await page.screenshot({ path: process.env.PWA_SHOT || '/dev/null' });
+if (process.env.PWA_SHOT) await page.screenshot({ path: process.env.PWA_SHOT });
 const texts = await Promise.all(page.frames().map(f => f.evaluate(() => document.body.innerText).catch(() => '')));
 check(/=\s*5\s*m/.test(texts.join(' ')), 'calculates offline (wasm)');
 await b.close(); srv.close();
