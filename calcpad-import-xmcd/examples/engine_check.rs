@@ -83,7 +83,7 @@ fn unit_expr(u: &str) -> Option<Expr> {
         }
     };
     let product = |s: &str| -> Option<Expr> {
-        let mut it = s.split('*').map(|t| term(t));
+        let mut it = s.split('*').map(&term);
         let mut acc = it.next()??;
         for t in it {
             acc = Expr::Bin(BinOp::Mul, Box::new(acc), Box::new(t?));
