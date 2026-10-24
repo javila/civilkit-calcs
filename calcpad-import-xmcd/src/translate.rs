@@ -790,6 +790,13 @@ impl Tr {
             RegionKind::Ole => self.simple_gap("ole", r, Code::OleObject, None),
             RegionKind::Component => self.simple_gap("component", r, Code::Component, None),
             RegionKind::Reference => self.simple_gap("reference", r, Code::WorksheetReference, None),
+            RegionKind::Other(tag) if matches!(tag.as_str(), "header" | "footer") => {
+                self.simple_gap("other", r, Code::HeaderFooter, Some(tag.clone()))
+            }
+            RegionKind::Other(tag) if tag == "textUnreadable" => self.simple_gap("text", r, Code::TextUnreadable, None),
+            RegionKind::Other(tag) if tag.starts_with("xaml") => {
+                self.simple_gap("other", r, Code::RichTextElement, Some(tag[4..].to_string()))
+            }
             RegionKind::Other(tag) => {
                 let d = Some(
                     tag.chars()

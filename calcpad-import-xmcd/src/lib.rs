@@ -21,18 +21,21 @@
 //!
 //! # Front doors
 //!
-//! [`import_xmcd`] reads the plain-XML `.xmcd` file. The translator works on the format-neutral
-//! [`ir::Sheet`], so another container of the same worksheet language only needs a reader that
-//! produces a `Sheet` and then calls [`import_sheet`].
+//! [`import_xmcd`] reads the plain-XML `.xmcd` file. [`import_mcdx`] reads the zipped `.mcdx`
+//! package (see [`mcdx`]); [`import_xmcd_bytes`] looks at the first bytes and picks the right one.
+//! The translator works on the format-neutral [`ir::Sheet`], so another container of the same
+//! worksheet language only needs a reader that produces a `Sheet` and then calls [`import_sheet`].
 
 #![forbid(unsafe_code)]
 
 pub mod ir;
+pub mod mcdx;
 pub mod picture;
 pub mod report;
 pub mod tables;
 pub mod translate;
 pub mod xmcd;
+pub mod zip;
 
 pub use report::{Code, ImportReport, Issue, KindStats, RankedGap, Severity};
 pub use translate::GAP_MARKER;
@@ -120,29 +123,46 @@ pub fn import_xmcd(xml: &str) -> ImportResult {
     import_xmcd_opts(xml, &ImportOptions::default())
 }
 
-/// Imports the raw bytes of a file: refuses a zip container (the newer format) with a fatal
-/// `unsupported-container` report, and input that is not UTF-8 with `xml-error`; a UTF-8 byte order
-/// mark is skipped.
-pub fn import_xmcd_bytes(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
-    let fatal = |code: Code, detail: Option<String>| {
-        let mut report = ImportReport::default();
-        report.issues.push(Issue {
-            code,
-            severity: code.severity(),
-            detail,
-            region_id: None,
-            line: None,
-            reason: code.reason().to_string(),
-            root: None,
-        });
-        ImportResult {
-            calcpad: String::new(),
-            report,
-            assets: Vec::new(),
+fn fatal(code: Code, detail: Option<String>) -> ImportResult {
+    let mut report = ImportReport::default();
+    report.issues.push(Issue {
+        code,
+        severity: code.severity(),
+        detail,
+        region_id: None,
+        line: None,
+        reason: code.reason().to_string(),
+        root: None,
+    });
+    ImportResult {
+        calcpad: String::new(),
+        report,
+        assets: Vec::new(),
+    }
+}
+
+/// Imports an `.mcdx` package (a zip) with the given options.
+pub fn import_mcdx(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
+    match mcdx::read(bytes, opts.limits) {
+        Ok(sheet) => import_sheet_opts(sheet, opts),
+        Err(e) => {
+            let short = |m: String| Some(m.chars().take(120).collect::<String>());
+            match e {
+                mcdx::McdxError::TooLarge => fatal(Code::InputTooLarge, None),
+                mcdx::McdxError::Container(m) => fatal(Code::UnsupportedContainer, short(m)),
+                mcdx::McdxError::NotAWorksheet => fatal(Code::NotAWorksheet, None),
+                mcdx::McdxError::Xml(m) => fatal(Code::XmlError, short(m)),
+            }
         }
-    };
+    }
+}
+
+/// Imports the raw bytes of a file. A zip signature routes to the `.mcdx` reader ([`import_mcdx`]);
+/// anything else is read as the plain-XML `.xmcd` file, and input that is not UTF-8 is an
+/// `xml-error`; a UTF-8 byte order mark is skipped.
+pub fn import_xmcd_bytes(bytes: &[u8], opts: &ImportOptions) -> ImportResult {
     if bytes.starts_with(b"PK\x03\x04") || bytes.starts_with(b"PK\x05\x06") {
-        return fatal(Code::UnsupportedContainer, None);
+        return import_mcdx(bytes, opts);
     }
     if bytes.len() > opts.limits.max_bytes {
         return fatal(Code::InputTooLarge, None);
